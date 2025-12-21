@@ -1,0 +1,79 @@
+Root
+│
+├─ Users
+│   ├─ <userId1>
+│   │    ├─ userId: <firebase_key>
+│   │    ├─ username: "string"
+│   │    ├─ name: "string"
+│   │    ├─ password: "string"
+│   │    ├─ role: "student" | "teacher" | "parent"
+│   │    ├─ isActive: true | false
+│   │    └─ profileImage: "url"
+│   ├─ <userId2>
+│   └─ ...
+│
+├─ Students
+│   ├─ <studentKey1>
+│   │    ├─ userId: <userId1>
+│   │    ├─ academicYear: "2024_2025"
+│   │    ├─ grade: "string"
+│   │    ├─ section: "string"
+│   │    └─ status: "active" | "inactive"
+│   ├─ <studentKey2>
+│   └─ ...
+│
+├─ Teachers
+│   ├─ <teacherKey1>
+│   │    ├─ userId: <userId2>
+│   │    ├─ status: "active" | "inactive"
+│   │    └─ profileImage: "url"
+│   ├─ <teacherKey2>
+│   └─ ...
+│
+├─ Parents
+│   ├─ <parentKey1>
+│   │    ├─ userId: <userId3>
+│   │    └─ children: [<studentId1>, <studentId2>, ...]
+│   ├─ <parentKey2>
+│   └─ ...
+│
+├─ Courses
+│   ├─ course_<subject>_<grade><section>
+│   │    ├─ name: "string"
+│   │    ├─ subject: "string"
+│   │    ├─ grade: "string"
+│   │    └─ section: "string"
+│   └─ ...
+│
+├─ TeacherAssignments
+│   ├─ <assignmentKey1>
+│   │    ├─ teacherId: <teacherKey>
+│   │    └─ courseId: <courseId>
+│   ├─ <assignmentKey2>
+│   └─ ...
+│
+├─ ClassMarks
+│   ├─ <courseId1>
+│   │    ├─ <studentKey1>
+│   │    │    ├─ mark20: number
+│   │    │    ├─ mark30: number
+│   │    │    └─ mark50: number
+│   │    └─ <studentKey2>
+│   └─ ...
+│
+├─ Posts
+│   ├─ <postId1>
+│   │    ├─ adminId: <adminId>
+│   │    ├─ message: "string"
+│   │    ├─ postUrl: "url or null"
+│   │    ├─ time: timestamp
+│   │    ├─ likeCount: number
+│   │    └─ likes: { <userId>: true, ... }
+│   └─ ...
+│
+├─ School_Admins
+│   ├─ <adminId1>
+│   │    ├─ name: "string"
+│   │    └─ profileImage: "url"
+│   ├─ <adminId2>
+│   └─ ...
