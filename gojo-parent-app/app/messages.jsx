@@ -26,7 +26,7 @@ export default function Messages() {
   const [selectedFilter, setSelectedFilter] = useState("son");
   const [listData, setListData] = useState([]);
 
-  const parentUserId = "parent_user_id_here";
+  const parentUserId = "-Oh99WO6QCBh0K-hK0eh"; // logged-in parent ID
 
   useEffect(() => {
     const fetchData = async () => {
@@ -79,57 +79,91 @@ export default function Messages() {
   ]);
 
   const filterList = (filter) => {
-    const parent = Object.values(parents).find(
-      (p) => p.userId === parentUserId
-    );
-    const myChildrenIds = parent?.children || [];
-
     let list = [];
 
+    // SON LIST: only parent's children
     if (filter === "son") {
-      list = myChildrenIds
-        .map((id) => {
-          const student = students[id];
-          if (!student) return null;
-          const user = allUsers[student.userId];
-          return user ? { ...user, role: "student" } : null;
-        })
-        .filter(Boolean);
+      const parentNode = parents[parentUserId];
+      if (parentNode) {
+        const children = Object.values(parentNode);
+
+        list = children
+          .map((child) => {
+            const student = students[child.studentId];
+            if (!student) return null;
+
+            const user = allUsers[student.userId];
+            return user
+              ? {
+                  userId: child.studentId,
+                  name: user.name,
+                  profileImage:
+                    user.profileImage ||
+                    "https://cdn-icons-png.flaticon.com/512/847/847969.png",
+                  role: "student",
+                  grade: student.grade,
+                  section: student.section,
+                }
+              : null;
+          })
+          .filter(Boolean);
+      }
     }
 
+    // TEACHER LIST: teachers teaching parent's children
     if (filter === "teacher") {
-      const teacherSet = new Set();
-      myChildrenIds.forEach((childId) => {
-        const student = students[childId];
-        if (!student) return;
-        Object.entries(courses).forEach(([courseId, course]) => {
-          if (
-            course.grade === student.grade &&
-            course.section === student.section
-          ) {
-            Object.values(assignments).forEach((assignment) => {
-              if (assignment.courseId === courseId) {
-                teacherSet.add(assignment.teacherId);
-              }
-            });
-          }
-        });
-      });
+      const teacherMap = {};
 
-      list = Array.from(teacherSet)
-        .map((teacherId) => {
-          const teacher = teachers[teacherId];
-          if (!teacher) return null;
-          const user = allUsers[teacher.userId];
-          return user ? { ...user, role: "teacher" } : null;
-        })
-        .filter(Boolean);
+      const parentNode = parents[parentUserId];
+      if (parentNode) {
+        const children = Object.values(parentNode);
+
+        children.forEach((child) => {
+          const student = students[child.studentId];
+          if (!student) return;
+
+          Object.entries(courses).forEach(([courseId, course]) => {
+            if (course.grade === student.grade && course.section === student.section) {
+              Object.values(assignments).forEach((assignment) => {
+                if (assignment.courseId === courseId) {
+                  const teacher = teachers[assignment.teacherId];
+                  const user = allUsers[teacher?.userId];
+                  if (!teacher || !user) return;
+
+                  if (!teacherMap[assignment.teacherId]) {
+                    teacherMap[assignment.teacherId] = {
+                      userId: assignment.teacherId,
+                      name: user.name,
+                      profileImage:
+                        user.profileImage ||
+                        "https://cdn-icons-png.flaticon.com/512/847/847969.png",
+                      role: "teacher",
+                      sections: [],
+                    };
+                  }
+
+                  const sectionStr = `Grade ${course.grade} - Section ${course.section}`;
+                  if (!teacherMap[assignment.teacherId].sections.includes(sectionStr)) {
+                    teacherMap[assignment.teacherId].sections.push(sectionStr);
+                  }
+                }
+              });
+            }
+          });
+        });
+      }
+
+      list = Object.values(teacherMap).map((t) => ({
+        ...t,
+        sectionText: t.sections.join(", "),
+      }));
     }
 
+    // ADMIN LIST
     if (filter === "admin") {
       list = Object.values(schoolAdmins)
         .map((admin) => {
-          const user = allUsers[admin.userId]; // get profile from Users node
+          const user = allUsers[admin.userId];
           return {
             userId: admin.adminId,
             name: admin.name,
@@ -165,7 +199,14 @@ export default function Messages() {
       />
       <View>
         <Text style={styles.name}>{item.name}</Text>
-        <Text style={styles.role}>{item.role}</Text>
+        <Text style={styles.role}>
+          {item.role}{" "}
+          {item.role === "student"
+            ? `- Grade ${item.grade} Section ${item.section}`
+            : item.sectionText
+            ? `- ${item.sectionText}`
+            : ""}
+        </Text>
       </View>
     </TouchableOpacity>
   );
@@ -186,10 +227,7 @@ export default function Messages() {
         {["son", "teacher", "admin"].map((f) => (
           <TouchableOpacity
             key={f}
-            style={[
-              styles.filterBtn,
-              selectedFilter === f && styles.selectedFilter,
-            ]}
+            style={[styles.filterBtn, selectedFilter === f && styles.selectedFilter]}
             onPress={() => setSelectedFilter(f)}
           >
             <Text
@@ -220,83 +258,16 @@ export default function Messages() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: "#f0f2f5",
-    paddingHorizontal: 12,
-    paddingTop: 12,
-  },
-
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 12,
-    height: 70,
-  },
-
-  topBarTitle: {
-    flex: 1,
-    textAlign: "center",
-    fontSize: 20,
-    fontWeight: "bold",
-  },
-
-  filterRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-
-  filterBtn: {
-    flex: 1,
-    marginHorizontal: 4,
-    paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: "#e0e0e0",
-    alignItems: "center",
-  },
-
-  selectedFilter: {
-    backgroundColor: "#1e90ff",
-  },
-
-  filterText: {
-    fontWeight: "bold",
-    fontSize: 13,
-    color: "#000",
-  },
-
-  card: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#fff",
-    padding: 12,
-    borderRadius: 14,
-    marginBottom: 10,
-    width: "100%",
-  },
-
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: 12,
-  },
-
-  name: {
-    fontWeight: "bold",
-    fontSize: 16,
-  },
-
-  role: {
-    fontSize: 12,
-    color: "gray",
-    marginTop: 2,
-  },
-
-  emptyText: {
-    textAlign: "center",
-    marginTop: 40,
-    color: "gray",
-  },
+  safeArea: { flex: 1, backgroundColor: "#f0f2f5", paddingHorizontal: 12, paddingTop: 12 },
+  topBar: { flexDirection: "row", alignItems: "center", marginBottom: 12, height: 70 },
+  topBarTitle: { flex: 1, textAlign: "center", fontSize: 20, fontWeight: "bold" },
+  filterRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
+  filterBtn: { flex: 1, marginHorizontal: 4, paddingVertical: 10, borderRadius: 20, backgroundColor: "#e0e0e0", alignItems: "center" },
+  selectedFilter: { backgroundColor: "#1e90ff" },
+  filterText: { fontWeight: "bold", fontSize: 13, color: "#000" },
+  card: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", padding: 12, borderRadius: 14, marginBottom: 10, width: "100%" },
+  avatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
+  name: { fontWeight: "bold", fontSize: 16 },
+  role: { fontSize: 12, color: "gray", marginTop: 2 },
+  emptyText: { textAlign: "center", marginTop: 40, color: "gray" },
 });
