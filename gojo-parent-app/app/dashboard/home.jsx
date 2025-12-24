@@ -1,3 +1,4 @@
+// app/dashboard/home.jsx
 import { child, get, ref, update } from "firebase/database";
 import { useEffect, useState } from "react";
 import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
@@ -6,7 +7,7 @@ import { database } from "../../constants/firebaseConfig";
 export default function Home() {
   const [posts, setPosts] = useState([]);
 
-  // 🔴 Replace with logged-in parent userId
+  // Replace with logged-in parent userId
   const parentUserId = "parent_user_id_here";
 
   useEffect(() => {
@@ -19,33 +20,48 @@ export default function Home() {
         if (!postsSnap.exists()) return;
         const postsData = postsSnap.val();
 
-        // 2️⃣ Get all admins
+        // 2️⃣ Get all School Admins
         const adminsSnap = await get(child(dbRef, "School_Admins"));
         const adminsData = adminsSnap.exists() ? adminsSnap.val() : {};
 
-        // 3️⃣ Get all users
+        // 3️⃣ Get all Users
         const usersSnap = await get(child(dbRef, "Users"));
         const usersData = usersSnap.exists() ? usersSnap.val() : {};
 
         // 4️⃣ Map posts with admin info
-       const postsList = Object.keys(postsData).map((postId) => {
-  const post = postsData[postId];
-  const admin = adminsData[post.adminId] || {};
+        const postsList = Object.keys(postsData).map((postId) => {
+          const post = postsData[postId];
 
-  return {
-    id: postId,
-    message: post.message || "",
-    postUrl: post.postUrl || null,
-    time: post.time || "",
-    likes: post.likes || {},
-    likeCount: post.likeCount || 0,
-    adminName: admin.name || "School Admin",
-    adminImage:
-      admin.profileImage ||
-      "https://cdn-icons-png.flaticon.com/512/847/847969.png",
-  };
-});
+          let adminName = "School Admin";
+          let adminImage = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
+          // ✅ Fetch admin user info via School_Admins → Users
+          if (post.adminId && adminsData[post.adminId]) {
+            const adminNode = adminsData[post.adminId];
+            const adminUserId = adminNode.userId;
+
+            if (adminUserId && usersData[adminUserId]) {
+              const adminUser = usersData[adminUserId];
+              adminName = adminUser.name || adminUser.username || adminName;
+              adminImage = adminUser.profileImage || adminImage;
+            } else {
+              console.log(`User not found for adminId: ${post.adminId}`, adminUserId);
+            }
+          } else {
+            console.log(`Admin node not found for postId: ${postId}`, post.adminId);
+          }
+
+          return {
+            id: postId,
+            message: post.message || "",
+            postUrl: post.postUrl || null,
+            time: post.time || "",
+            likes: post.likes || {},
+            likeCount: post.likeCount || 0,
+            adminName,
+            adminImage,
+          };
+        });
 
         // 5️⃣ Sort newest first
         setPosts(postsList.reverse());

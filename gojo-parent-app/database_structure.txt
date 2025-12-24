@@ -30,19 +30,20 @@ Root
 │   ├─ <teacherKey2>
 │   └─ ...
 │
-├─ Parents
-│   ├─ <parentKey1>
-│   │    ├─ userId: <userId3>
-│   │    └─ children: [<studentId1>, <studentId2>, ...]
-│   ├─ <parentKey2>
-│   └─ ...
+Parents
+├── parentUserId_1      ← Parent’s Users.userId
+│    └── parentKey_1
+│         ├── userId       → Users.userId (Student account)
+│         ├── studentId    → Students.studentKey
+│         └── relationship → "Father"
+
 │
 ├─ Courses
 │   ├─ course_<subject>_<grade><section>
 │   │    ├─ name: "string"
 │   │    ├─ subject: "string"
 │   │    ├─ grade: "string"
-│   │    └─ section: "string"
+│   │    └─ secation: "string"
 │   └─ ...
 │
 ├─ TeacherAssignments
