@@ -1,9 +1,11 @@
 node -v
 npm -v
 
+
 // Install Expo CLI //
 npm install -g expo-cli
 expo --version
+
 
 // Create the Gojo Parent App project //
 npx create-expo-app gojo-parent-app
@@ -11,11 +13,29 @@ npx create-expo-app gojo-parent-app
 
 cd gojo-parent-app
 
+
 // open vs code//
 code .
 
 
+// Run in browser //
+
+
+
+// Run on phone//
+npm start
 
 
 
 
+// nstall Firebase JS SDK //
+npm install firebase
+
+
+
+//Install React Navigation packages//
+npm install @react-navigation/native
+npm install @react-navigation/bottom-tabs
+npm install react-native-screens react-native-safe-area-context
+
+npx expo install react-native-gesture-handler react-native-reanimated react-native-screens react-native-safe-area-context @react-native-community/masked-view
