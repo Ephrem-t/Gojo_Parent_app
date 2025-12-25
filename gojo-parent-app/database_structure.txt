@@ -12,15 +12,7 @@ Root
 │   ├─ <userId2>
 │   └─ ...
 │
-├─ Students
-│   ├─ <studentKey1>
-│   │    ├─ userId: <userId1>
-│   │    ├─ academicYear: "2024_2025"
-│   │    ├─ grade: "string"
-│   │    ├─ section: "string"
-│   │    └─ status: "active" | "inactive"
-│   ├─ <studentKey2>
-│   └─ ...
+ 
 │
 ├─ Teachers
 │   ├─ <teacherKey1>
@@ -30,12 +22,6 @@ Root
 │   ├─ <teacherKey2>
 │   └─ ...
 │
-Parents
-├── parentUserId_1      ← Parent’s Users.userId
-│    └── parentKey_1
-│         ├── userId       → Users.userId (Student account)
-│         ├── studentId    → Students.studentKey
-│         └── relationship → "Father"
 
 │
 ├─ Courses
@@ -78,3 +64,41 @@ Parents
 │   │    └─ profileImage: "url"
 │   ├─ <adminId2>
 │   └─ ...
+
+
+
+
+
+
+Parents
+├── parentId_1 //parentId
+│   ├── userId              // → Users.userId (parent userId)
+│   ├── children
+│   │   ├── linkKey_1
+│   │   │   ├── studentId   // → Students studentId
+│   │   │   ├── relationship
+│   │   │
+│   │   └── linkKey_n
+│   │
+│   ├── status
+│   ├── createdAt
+│
+└── parentId_n
+
+
+
+
+Students
+├── studentId_1
+│   ├── use           // → userId of student
+│   ├── academicYear
+│   ├── grade
+│   ├── section
+│   ├── status
+│   ├── parents
+│   │   ├── parentId_1 // parentId
+│   │   │   ├── relationship
+│   │   │
+│   │   
+│
+└── studentId_n

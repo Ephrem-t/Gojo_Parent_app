@@ -3,14 +3,15 @@ import { useRouter } from "expo-router";
 import { child, get, ref } from "firebase/database";
 import { useState } from "react";
 import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database } from "../constants/firebaseConfig";
 
 export default function Login() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const router = useRouter(); // Router for navigation
+  const router = useRouter();
 
-  // Cross-platform alert for mobile + web
+  // Cross-platform alert
   const showAlert = (title, message) => {
     if (typeof window !== "undefined" && window.alert) {
       window.alert(`${title}: ${message}`);
@@ -33,7 +34,7 @@ export default function Login() {
         const users = snapshot.val();
         let found = false;
 
-        Object.keys(users).forEach((key) => {
+        for (const key of Object.keys(users)) {
           const user = users[key];
           if (
             user.role === "parent" &&
@@ -41,16 +42,31 @@ export default function Login() {
             user.password === password
           ) {
             found = true;
-            if (user.isActive) {
-              showAlert("Success", `Login successful! Welcome ${user.username}`);
-              
-              // Navigate to dashboard/home after login
-              router.replace("/dashboard/home");
-            } else {
+            if (!user.isActive) {
               showAlert("Error", "Your account is inactive");
+              break;
             }
+
+            // ✅ Save userId to AsyncStorage
+            await AsyncStorage.setItem("userId", key);
+
+            // 🔹 Find parentId in Parents node
+            const parentsSnapshot = await get(ref(database, "Parents"));
+            if (parentsSnapshot.exists()) {
+              const parents = parentsSnapshot.val();
+              const parentId = Object.keys(parents).find(
+                (pKey) => parents[pKey].userId === key
+              );
+              if (parentId) {
+                await AsyncStorage.setItem("parentId", parentId);
+              }
+            }
+
+            showAlert("Success", `Login successful! Welcome ${user.username}`);
+            router.replace("/dashboard/home");
+            break;
           }
-        });
+        }
 
         if (!found) {
           showAlert("Error", "Invalid username or password");

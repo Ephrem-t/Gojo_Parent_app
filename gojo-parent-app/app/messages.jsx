@@ -26,7 +26,7 @@ export default function Messages() {
   const [selectedFilter, setSelectedFilter] = useState("son");
   const [listData, setListData] = useState([]);
 
-  const parentUserId = "-Oh99WO6QCBh0K-hK0eh"; // logged-in parent ID
+  const parentUserId = "-OhJQh1ljwUpfz1dSuTS"; // logged-in parent ID
 
   useEffect(() => {
     const fetchData = async () => {
@@ -81,77 +81,73 @@ export default function Messages() {
   const filterList = (filter) => {
     let list = [];
 
-    // SON LIST: only parent's children
+    const parentNode = parents[parentUserId];
+    const children = parentNode?.children ? Object.values(parentNode.children) : [];
+
+    // --- STUDENTS (children) ---
     if (filter === "son") {
-      const parentNode = parents[parentUserId];
-      if (parentNode) {
-        const children = Object.values(parentNode);
+      list = children
+        .map((child) => {
+          const student = students[child.studentId];
+          if (!student) return null;
 
-        list = children
-          .map((child) => {
-            const student = students[child.studentId];
-            if (!student) return null;
-
-            const user = allUsers[student.userId];
-            return user
-              ? {
-                  userId: child.studentId,
-                  name: user.name,
-                  profileImage:
-                    user.profileImage ||
-                    "https://cdn-icons-png.flaticon.com/512/847/847969.png",
-                  role: "student",
-                  grade: student.grade,
-                  section: student.section,
-                }
-              : null;
-          })
-          .filter(Boolean);
-      }
+          const user = allUsers[student.userId];
+          return user
+            ? {
+                userId: child.studentId,
+                name: user.name,
+                profileImage:
+                  user.profileImage ||
+                  "https://cdn-icons-png.flaticon.com/512/847/847969.png",
+                role: "student",
+                grade: student.grade,
+                section: student.section,
+              }
+            : null;
+        })
+        .filter(Boolean);
     }
 
-    // TEACHER LIST: teachers teaching parent's children
+    // --- TEACHERS ---
     if (filter === "teacher") {
       const teacherMap = {};
 
-      const parentNode = parents[parentUserId];
-      if (parentNode) {
-        const children = Object.values(parentNode);
+      children.forEach((child) => {
+        const student = students[child.studentId];
+        if (!student) return;
 
-        children.forEach((child) => {
-          const student = students[child.studentId];
-          if (!student) return;
+        Object.entries(courses).forEach(([courseId, course]) => {
+          if (course.grade === student.grade && course.section === student.section) {
+            Object.values(assignments).forEach((assignment) => {
+              if (assignment.courseId === courseId) {
+                const teacher = teachers[assignment.teacherId];
+                if (!teacher) return;
 
-          Object.entries(courses).forEach(([courseId, course]) => {
-            if (course.grade === student.grade && course.section === student.section) {
-              Object.values(assignments).forEach((assignment) => {
-                if (assignment.courseId === courseId) {
-                  const teacher = teachers[assignment.teacherId];
-                  const user = allUsers[teacher?.userId];
-                  if (!teacher || !user) return;
+                const user = allUsers[teacher.userId];
+                if (!user) return;
 
-                  if (!teacherMap[assignment.teacherId]) {
-                    teacherMap[assignment.teacherId] = {
-                      userId: assignment.teacherId,
-                      name: user.name,
-                      profileImage:
-                        user.profileImage ||
-                        "https://cdn-icons-png.flaticon.com/512/847/847969.png",
-                      role: "teacher",
-                      sections: [],
-                    };
-                  }
-
-                  const sectionStr = `Grade ${course.grade} - Section ${course.section}`;
-                  if (!teacherMap[assignment.teacherId].sections.includes(sectionStr)) {
-                    teacherMap[assignment.teacherId].sections.push(sectionStr);
-                  }
+                if (!teacherMap[assignment.teacherId]) {
+                  teacherMap[assignment.teacherId] = {
+                    userId: assignment.teacherId,
+                    name: user.name,
+                    profileImage:
+                      user.profileImage ||
+                      teacher.profileImage ||
+                      "https://cdn-icons-png.flaticon.com/512/847/847969.png",
+                    role: "teacher",
+                    sections: [],
+                  };
                 }
-              });
-            }
-          });
+
+                const sectionStr = `Grade ${course.grade} - Section ${course.section}`;
+                if (!teacherMap[assignment.teacherId].sections.includes(sectionStr)) {
+                  teacherMap[assignment.teacherId].sections.push(sectionStr);
+                }
+              }
+            });
+          }
         });
-      }
+      });
 
       list = Object.values(teacherMap).map((t) => ({
         ...t,
@@ -159,7 +155,7 @@ export default function Messages() {
       }));
     }
 
-    // ADMIN LIST
+    // --- SCHOOL ADMINS ---
     if (filter === "admin") {
       list = Object.values(schoolAdmins)
         .map((admin) => {
@@ -169,6 +165,7 @@ export default function Messages() {
             name: admin.name,
             profileImage:
               user?.profileImage ||
+              admin.profileImage ||
               "https://cdn-icons-png.flaticon.com/512/847/847969.png",
             role: "admin",
           };
@@ -231,10 +228,7 @@ export default function Messages() {
             onPress={() => setSelectedFilter(f)}
           >
             <Text
-              style={[
-                styles.filterText,
-                selectedFilter === f && { color: "#fff" },
-              ]}
+              style={[styles.filterText, selectedFilter === f && { color: "#fff" }]}
             >
               {f.toUpperCase()}
             </Text>
@@ -249,9 +243,7 @@ export default function Messages() {
         renderItem={renderItem}
         contentContainerStyle={{ paddingBottom: 20 }}
         showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No users found</Text>
-        }
+        ListEmptyComponent={<Text style={styles.emptyText}>No users found</Text>}
       />
     </SafeAreaView>
   );
@@ -262,10 +254,25 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", alignItems: "center", marginBottom: 12, height: 70 },
   topBarTitle: { flex: 1, textAlign: "center", fontSize: 20, fontWeight: "bold" },
   filterRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
-  filterBtn: { flex: 1, marginHorizontal: 4, paddingVertical: 10, borderRadius: 20, backgroundColor: "#e0e0e0", alignItems: "center" },
+  filterBtn: {
+    flex: 1,
+    marginHorizontal: 4,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#e0e0e0",
+    alignItems: "center",
+  },
   selectedFilter: { backgroundColor: "#1e90ff" },
   filterText: { fontWeight: "bold", fontSize: 13, color: "#000" },
-  card: { flexDirection: "row", alignItems: "center", backgroundColor: "#fff", padding: 12, borderRadius: 14, marginBottom: 10, width: "100%" },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 10,
+    width: "100%",
+  },
   avatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
   name: { fontWeight: "bold", fontSize: 16 },
   role: { fontSize: 12, color: "gray", marginTop: 2 },
