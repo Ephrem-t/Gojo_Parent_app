@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database } from "../constants/firebaseConfig";
 
 export default function Messages() {
@@ -25,9 +26,18 @@ export default function Messages() {
   const [schoolAdmins, setSchoolAdmins] = useState({});
   const [selectedFilter, setSelectedFilter] = useState("son");
   const [listData, setListData] = useState([]);
+  const [parentUserId, setParentUserId] = useState(null); // <-- dynamic parent ID
 
-  const parentUserId = "-OhJQh1ljwUpfz1dSuTS"; // logged-in parent ID
+  // Load parentId from AsyncStorage
+  useEffect(() => {
+    const loadParentId = async () => {
+      const storedParentId = await AsyncStorage.getItem("parentId");
+      if (storedParentId) setParentUserId(storedParentId);
+    };
+    loadParentId();
+  }, []);
 
+  // Fetch data from Firebase
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -65,8 +75,11 @@ export default function Messages() {
     fetchData();
   }, []);
 
+  // Filter list when data or parentUserId changes
   useEffect(() => {
-    filterList(selectedFilter);
+    if (parentUserId) {
+      filterList(selectedFilter);
+    }
   }, [
     selectedFilter,
     allUsers,
@@ -76,11 +89,13 @@ export default function Messages() {
     courses,
     assignments,
     schoolAdmins,
+    parentUserId,
   ]);
 
   const filterList = (filter) => {
-    let list = [];
+    if (!parentUserId) return;
 
+    let list = [];
     const parentNode = parents[parentUserId];
     const children = parentNode?.children ? Object.values(parentNode.children) : [];
 
@@ -111,7 +126,6 @@ export default function Messages() {
     // --- TEACHERS ---
     if (filter === "teacher") {
       const teacherMap = {};
-
       children.forEach((child) => {
         const student = students[child.studentId];
         if (!student) return;

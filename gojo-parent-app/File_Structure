@@ -3,10 +3,13 @@ GOJO-PARENT-APP
 ├── app/
 │   ├── _layout.jsx          ← Root layout (just <Slot />)
 │   ├── index.jsx            ← Login screen
+│   ├── chat.jsx            ← Login screen
+│   ├── messages.jsx            ← Login screen
+│   ├── profile.jsx            ← Login screen
 │   ├── dashboard/
 │   │   ├── _layout.jsx      ← Dashboard layout (wrap bottom tabs)
 │   │   ├── home.jsx         ← Home tab
-│   │   ├── students.jsx     ← Students tab
+│   │   ├── classMark.jsx     ← Class Mark tab
 │   │   ├── messages.jsx     ← Messages tab
 │   │   └── settings.jsx     ← Settings tab
 │

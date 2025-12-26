@@ -96,18 +96,18 @@ export default function DashboardLayout() {
       />
 
       <Tabs.Screen
-        name="students"
+        name="classMark"
         options={{
-          title: "Students",
+          title: "Class Mark",
           tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" size={size} color={color} />,
         }}
       />
 
       <Tabs.Screen
-        name="settings"
+        name="attendance"
         options={{
-          title: "Settings",
-          tabBarIcon: ({ color, size }) => <Ionicons name="settings-outline" size={size} color={color} />,
+          title: "Attendance",
+          tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
         }}
       />
     </Tabs>

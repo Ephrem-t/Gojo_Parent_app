@@ -22,6 +22,7 @@ code .
 
 
 
+
 // Run on phone//
 npm start
 
@@ -34,6 +35,9 @@ npm install firebase
 
 
 //Install React Navigation packages//
+
+
+
 npm install @react-navigation/native
 npm install @react-navigation/bottom-tabs
 npm install react-native-screens react-native-safe-area-context
@@ -45,3 +49,21 @@ npx expo install react-native-gesture-handler react-native-reanimated react-nati
 npx expo install expo-image-picker
 npm install emoji-mart-native
 npm install react-native-emoji-selector
+
+
+
+
+//build your React Native (Expo) Parent App into an APK//One Time Only//
+npm install -g expo-cli
+npm install -g eas-cli
+
+
+//Login to Expo//
+expo login
+
+//Open Your Parent App Project//
+cd gojo-parent-app
+
+
+//for animation point//
+npm install react-native-svg react-native-reanimated

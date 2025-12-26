@@ -97,8 +97,7 @@ Students
 │   ├── status
 │   ├── parents
 │   │   ├── parentId_1 // parentId
-│   │   │   ├── relationship
-│   │   │
+│   │   │   │   │   │
 │   │   
 │
 └── studentId_n
