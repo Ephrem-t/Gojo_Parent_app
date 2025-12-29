@@ -1,5 +1,5 @@
 // app/dashboard/attendance.jsx
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   StyleSheet,
   Text,
@@ -9,23 +9,81 @@ import {
   FlatList,
   ScrollView,
   Dimensions,
+  Animated,
 } from "react-native";
 import { ref, get } from "firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database } from "../../constants/firebaseConfig";
 import moment from "moment";
+import Svg, { Circle } from "react-native-svg";
 
 const { height: screenHeight } = Dimensions.get("window");
+
+// Animated Circle Component
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+const CircleProgress = ({ percentage, radius = 36, strokeWidth = 6, color }) => {
+  const animatedValue = useRef(new Animated.Value(0)).current;
+  const circumference = 2 * Math.PI * radius;
+
+  useEffect(() => {
+    Animated.timing(animatedValue, {
+      toValue: percentage,
+      duration: 1000,
+      useNativeDriver: false,
+    }).start();
+  }, [percentage]);
+
+  const strokeDashoffset = animatedValue.interpolate({
+    inputRange: [0, 100],
+    outputRange: [circumference, 0],
+  });
+
+  const size = (radius + strokeWidth) * 2;
+
+  return (
+    <View style={{ alignItems: "center", justifyContent: "center" }}>
+      <Svg width={size} height={size}>
+        <Circle
+          stroke="#e5e7eb"
+          fill="none"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+        />
+        <AnimatedCircle
+          stroke={color}
+          fill="none"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
+        />
+      </Svg>
+      <View style={styles.circleCenterText}>
+        <Text style={{ fontWeight: "700", fontSize: 14, color }}>
+          {Math.round(percentage)}%
+        </Text>
+      </View>
+    </View>
+  );
+};
 
 export default function Attendance() {
   const [children, setChildren] = useState([]);
   const [currentChildIndex, setCurrentChildIndex] = useState(0);
   const [childUser, setChildUser] = useState(null);
   const [attendanceData, setAttendanceData] = useState({});
+  const [allCourses, setAllCourses] = useState([]);
   const [parentUserId, setParentUserId] = useState(null);
   const [fetchedData, setFetchedData] = useState({});
   const [showChildList, setShowChildList] = useState(false);
-  const [selectedTab, setSelectedTab] = useState("daily"); // daily, weekly, monthly
+  const [selectedTab, setSelectedTab] = useState("daily");
+  const [expandedSubjects, setExpandedSubjects] = useState({});
 
   const defaultProfile =
     "https://cdn-icons-png.flaticon.com/512/847/847969.png";
@@ -44,29 +102,33 @@ export default function Attendance() {
 
   const fetchChildren = async () => {
     try {
-      const [parentsSnap, studentsSnap, usersSnap, attendanceSnap] =
+      const [parentsSnap, studentsSnap, usersSnap, attendanceSnap, coursesSnap, teachersSnap, assignmentsSnap] =
         await Promise.all([
           get(ref(database, "Parents")),
           get(ref(database, "Students")),
           get(ref(database, "Users")),
           get(ref(database, "Attendance")),
+          get(ref(database, "Courses")),
+          get(ref(database, "Teachers")),
+          get(ref(database, "TeacherAssignments")),
         ]);
 
       const parentsData = parentsSnap.val() || {};
       const studentsData = studentsSnap.val() || {};
       const usersData = usersSnap.val() || {};
       const attendanceDb = attendanceSnap.val() || {};
+      const coursesData = coursesSnap.val() || {};
+      const teachersData = teachersSnap.val() || {};
+      const assignmentsData = assignmentsSnap.val() || {};
 
-      setFetchedData({ studentsData, usersData, attendanceDb });
+      setFetchedData({ studentsData, usersData, attendanceDb, coursesData, teachersData, assignmentsData });
 
       const parentNode = parentsData[parentUserId];
-      const childrenArray = parentNode?.children
-        ? Object.values(parentNode.children)
-        : [];
+      const childrenArray = parentNode?.children ? Object.values(parentNode.children) : [];
       setChildren(childrenArray);
 
       if (childrenArray.length > 0) {
-        loadChild(childrenArray[0], 0, { studentsData, usersData, attendanceDb });
+        loadChild(childrenArray[0], 0, { studentsData, usersData, attendanceDb, coursesData, teachersData, assignmentsData });
       }
     } catch (error) {
       console.log("Error fetching children:", error);
@@ -75,7 +137,7 @@ export default function Attendance() {
 
   const loadChild = (child, index, data) => {
     if (!data) return;
-    const { studentsData, usersData, attendanceDb } = data;
+    const { studentsData, usersData, attendanceDb, coursesData, teachersData, assignmentsData } = data;
     const student = studentsData[child.studentId];
     if (!student) return;
 
@@ -94,9 +156,27 @@ export default function Attendance() {
       if (Object.keys(courseAttendance).length > 0)
         filteredAttendance[courseId] = courseAttendance;
     });
-
     setAttendanceData(filteredAttendance);
+
+    // Get all courses for this student's grade & section
+    const coursesList = Object.keys(coursesData)
+      .map((key) => ({ courseId: key, ...coursesData[key] }))
+      .filter(c => c.grade === student.grade && c.section === student.section);
+
+    // Add teacher info using TeacherAssignments
+    const coursesWithTeacher = coursesList.map(course => {
+      let teacherName = "N/A";
+      const assignment = Object.values(assignmentsData).find(a => a.courseId === course.courseId);
+      if (assignment) {
+        const teacher = teachersData[assignment.teacherId];
+        if (teacher) teacherName = usersData[teacher.userId]?.name || "N/A";
+      }
+      return { ...course, teacherName };
+    });
+
+    setAllCourses(coursesWithTeacher);
     setCurrentChildIndex(index);
+    setExpandedSubjects({});
   };
 
   const selectChild = (index) => {
@@ -104,23 +184,29 @@ export default function Attendance() {
     setShowChildList(false);
   };
 
-  // Filter attendance by daily, weekly, monthly
-  const filterAttendance = (course) => {
+  const filterAttendance = (courseId) => {
+    const course = attendanceData[courseId] || {};
     const today = moment();
     const filtered = {};
-
-    Object.keys(course).forEach((date) => {
+    Object.keys(course).forEach(date => {
       const mDate = moment(date, "YYYY-MM-DD");
-      if (selectedTab === "daily" && mDate.isSame(today, "day")) {
-        filtered[date] = course[date];
-      } else if (selectedTab === "weekly" && mDate.isSame(today, "week")) {
-        filtered[date] = course[date];
-      } else if (selectedTab === "monthly" && mDate.isSame(today, "month")) {
-        filtered[date] = course[date];
-      }
+      if (selectedTab === "daily" && mDate.isSame(today, "day")) filtered[date] = course[date];
+      if (selectedTab === "weekly" && mDate.isSame(today, "week")) filtered[date] = course[date];
+      if (selectedTab === "monthly" && mDate.isSame(today, "month")) filtered[date] = course[date];
     });
-
     return filtered;
+  };
+
+  const toggleExpand = (courseId) => {
+    setExpandedSubjects(prev => ({ ...prev, [courseId]: !prev[courseId] }));
+  };
+
+  const calculatePercentage = (courseId) => {
+    const courseAttendance = filterAttendance(courseId);
+    const totalDays = Object.keys(courseAttendance).length;
+    if (totalDays === 0) return 0;
+    const presentDays = Object.values(courseAttendance).filter(s => s === "present").length;
+    return (presentDays / totalDays) * 100;
   };
 
   const renderAttendanceItem = ({ item }) => {
@@ -211,27 +297,36 @@ export default function Attendance() {
 
       {/* Attendance Body */}
       <ScrollView style={styles.body}>
-        {Object.keys(attendanceData).length === 0 ? (
-          <Text style={styles.noDataText}>🚫 No Attendance Records</Text>
+        {allCourses.length === 0 ? (
+          <Text style={styles.noDataText}>🚫 No Subjects Found</Text>
         ) : (
-          Object.keys(attendanceData).map((courseId) => {
-            const course = filterAttendance(attendanceData[courseId]);
-            if (Object.keys(course).length === 0) return null;
-
+          allCourses.map((course) => {
+            const courseAttendance = filterAttendance(course.courseId);
+            const percent = calculatePercentage(course.courseId);
+            const isExpanded = expandedSubjects[course.courseId] || false;
             return (
-              <View key={courseId} style={styles.card}>
-                <Text style={styles.courseTitle}>
-                  {courseId.replace("course_", "").replace(/_/g, " ")}
-                </Text>
-                <FlatList
-                  data={Object.keys(course).map((date) => ({
-                    date,
-                    status: course[date],
-                  }))}
-                  keyExtractor={(item) => item.date}
-                  renderItem={renderAttendanceItem}
-                  scrollEnabled={false}
-                />
+              <View key={course.courseId} style={styles.card}>
+                <TouchableOpacity style={styles.subjectHeader} onPress={() => toggleExpand(course.courseId)}>
+                  <Text style={styles.courseTitle}>{course.name}</Text>
+                  <Text style={styles.teacherText}>👨‍🏫 {course.teacherName}</Text>
+                  <CircleProgress
+                    percentage={percent}
+                    color={percent >= 75 ? "#16a34a" : percent >= 50 ? "#f59e0b" : "#dc2626"}
+                  />
+                </TouchableOpacity>
+
+                {isExpanded && Object.keys(courseAttendance).length > 0 && (
+                  <FlatList
+                    data={Object.keys(courseAttendance).map(date => ({ date, status: courseAttendance[date] }))}
+                    keyExtractor={item => item.date}
+                    renderItem={renderAttendanceItem}
+                    scrollEnabled={false}
+                  />
+                )}
+
+                {isExpanded && Object.keys(courseAttendance).length === 0 && (
+                  <Text style={styles.noDataText}>No attendance records yet</Text>
+                )}
               </View>
             );
           })
@@ -346,7 +441,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 16,
     color: "#555",
-    marginTop: 20,
+    marginTop: 12,
   },
 
   card: {
@@ -360,18 +455,30 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
 
+  subjectHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
   courseTitle: {
     fontSize: 16,
     fontWeight: "800",
     color: "#2563eb",
-    marginBottom: 12,
+    flex: 1,
+  },
+
+  teacherText: {
+    fontSize: 12,
+    color: "#64748b",
+    marginHorizontal: 8,
   },
 
   attendanceCard: {
     backgroundColor: "#f0f4f8",
     padding: 12,
     borderRadius: 12,
-    marginBottom: 12,
+    marginVertical: 6,
   },
 
   attendanceDate: {
@@ -383,5 +490,11 @@ const styles = StyleSheet.create({
   attendanceStatus: {
     fontSize: 14,
     fontWeight: "700",
+  },
+
+  circleCenterText: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

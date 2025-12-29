@@ -30,52 +30,48 @@ export default function Login() {
       const dbRef = ref(database);
       const snapshot = await get(child(dbRef, `Users`));
 
-      if (snapshot.exists()) {
-        const users = snapshot.val();
-        let found = false;
+      if (!snapshot.exists()) {
+        showAlert("Error", "No users found in database");
+        return;
+      }
 
-        for (const key of Object.keys(users)) {
-          const user = users[key];
-          if (
-            user.role === "parent" &&
-            user.username === username &&
-            user.password === password
-          ) {
-            found = true;
-            if (!user.isActive) {
-              showAlert("Error", "Your account is inactive");
-              break;
-            }
+      const users = snapshot.val();
+      let found = false;
 
-            // ✅ Save userId to AsyncStorage
-            await AsyncStorage.setItem("userId", key);
+      for (const key of Object.keys(users)) {
+        const user = users[key];
+        if (user.role === "parent" && user.username === username && user.password === password) {
+          found = true;
 
-            // 🔹 Find parentId in Parents node
-            const parentsSnapshot = await get(ref(database, "Parents"));
-            if (parentsSnapshot.exists()) {
-              const parents = parentsSnapshot.val();
-              const parentId = Object.keys(parents).find(
-                (pKey) => parents[pKey].userId === key
-              );
-              if (parentId) {
-                await AsyncStorage.setItem("parentId", parentId);
-              }
-            }
-
-            showAlert("Success", `Login successful! Welcome ${user.username}`);
-            router.replace("/dashboard/home");
+          if (!user.isActive) {
+            showAlert("Error", "Your account is inactive");
             break;
           }
-        }
 
-        if (!found) {
-          showAlert("Error", "Invalid username or password");
+          // Save userId to AsyncStorage
+          await AsyncStorage.setItem("userId", key);
+
+          // Find parentId in Parents node
+          const parentsSnapshot = await get(ref(database, "Parents"));
+          if (parentsSnapshot.exists()) {
+            const parents = parentsSnapshot.val();
+            const parentId = Object.keys(parents).find(pKey => parents[pKey].userId === key);
+            if (parentId) {
+              await AsyncStorage.setItem("parentId", parentId);
+            }
+          }
+
+          showAlert("Success", `Login successful! Welcome ${user.username}`);
+          router.replace("/dashboard/home");
+          break;
         }
-      } else {
-        showAlert("Error", "No users found in database");
+      }
+
+      if (!found) {
+        showAlert("Error", "Invalid username or password");
       }
     } catch (error) {
-      console.log(error);
+      console.error("Login Error:", error);
       showAlert("Error", "Something went wrong");
     }
   };
@@ -89,6 +85,7 @@ export default function Login() {
         style={styles.input}
         value={username}
         onChangeText={setUsername}
+        autoCapitalize="none"
       />
 
       <TextInput
