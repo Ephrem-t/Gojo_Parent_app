@@ -18,6 +18,7 @@ import {
   Alert,
   Modal,
   Pressable,
+  Dimensions,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import EmojiSelector from "react-native-emoji-selector";
@@ -39,19 +40,50 @@ const formatTime = (timestamp) => {
   }
 };
 
-// --- Message Bubble Component ---
-const MessageBubble = ({ item, isSender, repliedMsg, onLongPress, onPressReplyPreview }) => {
+// --- MessageBubble ---
+const MessageBubble = ({
+  item,
+  isSender,
+  showAvatar,
+  repliedMsg,
+  onLongPress,
+  onPressReplyPreview,
+  receiverProfile,
+}) => {
+  const screenWidth = Dimensions.get("window").width;
+  const maxBubbleWidth = screenWidth * 0.75;
+
+  let bubbleWidth = maxBubbleWidth;
+  if (item.type === "text") {
+    const estimatedWidth = 20 + item.text.length * 7;
+    bubbleWidth = Math.min(estimatedWidth, maxBubbleWidth);
+  } else if (item.type === "image") {
+    bubbleWidth = 200;
+  }
+
   return (
     <View style={[styles.messageRow, { flexDirection: isSender ? "row-reverse" : "row" }]}>
+      {!isSender && showAvatar && receiverProfile?.image && (
+        <Image source={{ uri: receiverProfile.image }} style={styles.receiverAvatar} />
+      )}
+
       <TouchableOpacity onLongPress={() => onLongPress(item)} activeOpacity={0.9}>
-        <View style={[styles.messageBubble, isSender ? styles.senderMsg : styles.receiverMsg]}>
-          
-          {/* Reply Preview */}
+        <View
+          style={[
+            styles.messageBubble,
+            isSender ? styles.senderMsg : styles.receiverMsg,
+            { maxWidth: bubbleWidth, minWidth: 50 },
+          ]}
+        >
           {repliedMsg && (
             <TouchableOpacity onPress={() => onPressReplyPreview(repliedMsg)} activeOpacity={0.7}>
               <View style={styles.replyPreviewContainer}>
                 <View style={styles.replyLine} />
-                <Text style={styles.replyTextPreview}>
+                <Text
+                  style={[styles.replyTextPreview, isSender ? { color: "#ffffffaa" } : { color: "#000000aa" }]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
                   {repliedMsg.deleted
                     ? "This message was deleted"
                     : repliedMsg.type === "text"
@@ -67,24 +99,25 @@ const MessageBubble = ({ item, isSender, repliedMsg, onLongPress, onPressReplyPr
           {item.deleted ? (
             <Text style={styles.deletedText}>This message was deleted</Text>
           ) : item.type === "text" ? (
-            <Text style={[styles.messageText, !isSender && { color: "#000" }]}>
-              {item.text} {item.edited && <Text style={styles.editedText}>(edited)</Text>}
-            </Text>
+            <View style={styles.messageTextColumn}>
+              <Text style={[styles.messageText, !isSender && { color: "#000" }]}>
+                {item.text} {item.edited && <Text style={styles.editedText}>(edited)</Text>}
+              </Text>
+              <View style={styles.timestampWrapperBottomRight}>
+                <Text style={styles.timestamp}>{formatTime(item.timeStamp)}</Text>
+                {isSender && !item.deleted && (
+                  <Ionicons
+                    name={item.seen ? "checkmark-done" : "checkmark"}
+                    size={14}
+                    color={item.seen ? "#1e90ff" : "#555"}
+                    style={{ marginLeft: 4 }}
+                  />
+                )}
+              </View>
+            </View>
           ) : (
             <Image source={{ uri: item.imageUrl }} style={styles.imageMessage} />
           )}
-
-          <View style={styles.timestampRow}>
-            <Text style={styles.timestamp}>{formatTime(item.timeStamp)}</Text>
-            {isSender && !item.deleted && (
-              <Ionicons
-                name={item.seen ? "checkmark-done" : "checkmark"}
-                size={14}
-                color={item.seen ? "#1e90ff" : "#555"}
-                style={{ marginLeft: 4, alignSelf: "center" }}
-              />
-            )}
-          </View>
         </View>
       </TouchableOpacity>
     </View>
@@ -129,7 +162,7 @@ export default function Chat() {
   useEffect(() => {
     (async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") alert("We need media library permissions to upload images!");
+      if (status !== "granted") alert("Media library permission needed!");
     })();
   }, []);
 
@@ -180,7 +213,6 @@ export default function Chat() {
           type: value.type || "text",
         }))
         .sort((a, b) => a.timeStamp - b.timeStamp);
-
       setMessages(formatted);
 
       const unseenUpdates = {};
@@ -249,15 +281,19 @@ export default function Chat() {
     }
   };
 
-  const deleteMessage = async (msg) => { if (!chatId) return; await update(ref(database, `Chats/${chatId}/messages/${msg.messageId}`), { deleted: true }); };
+  const deleteMessage = async (msg) => {
+    if (!chatId) return;
+    await update(ref(database, `Chats/${chatId}/messages/${msg.messageId}`), { deleted: true });
+  };
   const editMessage = (msg) => { setSelectedMessage(msg); setEditText(msg.text); setEditModalVisible(true); };
   const saveEditedMessage = async () => {
     if (!editText.trim() || !selectedMessage || !chatId) return;
     await update(ref(database, `Chats/${chatId}/messages/${selectedMessage.messageId}`), { text: editText, edited: true });
-    setEditModalVisible(false); setSelectedMessage(null); setEditText("");
+    setEditModalVisible(false);
+    setSelectedMessage(null);
+    setEditText("");
   };
   const onLongPressMessage = (msg) => { setSelectedMessage(msg); setShowActionModal(true); };
-
   const scrollToMessage = (msg) => {
     const index = messages.findIndex((m) => m.messageId === msg.messageId);
     if (index >= 0 && flatListRef.current) {
@@ -265,26 +301,35 @@ export default function Chat() {
     }
   };
 
-  const renderItem = ({ item }) => {
+  const renderItem = ({ item, index }) => {
     const isSender = item.senderId === parentUserId;
     const repliedMsg = item.replyTo ? messages.find((m) => m.messageId === item.replyTo) : null;
-    return <MessageBubble item={item} isSender={isSender} repliedMsg={repliedMsg} onLongPress={onLongPressMessage} onPressReplyPreview={scrollToMessage} />;
+    const showAvatar = !isSender && (index === 0 || messages[index - 1].senderId !== item.senderId);
+    return (
+      <MessageBubble
+        item={item}
+        isSender={isSender}
+        showAvatar={showAvatar}
+        repliedMsg={repliedMsg}
+        onLongPress={onLongPressMessage}
+        onPressReplyPreview={scrollToMessage}
+        receiverProfile={receiverProfile}
+      />
+    );
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: "#e5ddd5" }}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
-      >
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}>
         {/* Top Bar */}
         <View style={styles.topBar}>
           <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back-outline" size={28} /></TouchableOpacity>
-          {receiverProfile && <View style={styles.profileContainer}>
-            {receiverProfile.image ? <Image source={{ uri: receiverProfile.image }} style={styles.profileImage} /> : <View style={styles.profilePlaceholder} />}
-            <Text style={styles.topBarTitle}>{receiverProfile.name}</Text>
-          </View>}
+          {receiverProfile && (
+            <View style={styles.profileContainer}>
+              {receiverProfile.image ? <Image source={{ uri: receiverProfile.image }} style={styles.profileImage} /> : <View style={styles.profilePlaceholder} />}
+              <Text style={styles.topBarTitle}>{receiverProfile.name}</Text>
+            </View>
+          )}
           <View style={{ width: 28 }} />
         </View>
 
@@ -294,7 +339,7 @@ export default function Chat() {
           data={messages.slice().reverse()}
           keyExtractor={(item) => item.messageId}
           renderItem={renderItem}
-          contentContainerStyle={{ padding: 12, paddingBottom: 120 }} // <-- extra padding so last msg is visible
+          contentContainerStyle={{ padding: 12, paddingBottom: 120 }}
           inverted
           showsVerticalScrollIndicator={false}
         />
@@ -311,7 +356,7 @@ export default function Chat() {
         </View>}
 
         {/* Input */}
-        <View style={{ paddingBottom: Platform.OS === "ios" ? 25 : 10, backgroundColor: "#ffffff" }}>
+        <View style={{ paddingBottom: Platform.OS === "ios" ? 25 : 10, backgroundColor: "#fff" }}>
           <View style={styles.inputContainer}>
             <TouchableOpacity onPress={() => setShowEmoji((prev) => !prev)}><Ionicons name="happy-outline" size={28} style={{ marginRight: 8 }} /></TouchableOpacity>
             <TextInput style={styles.input} value={newMessage} onChangeText={setNewMessage} placeholder="Type a message..." />
@@ -353,46 +398,41 @@ export default function Chat() {
 
 // --- Styles ---
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#e5ddd5" },
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: 70,
-    paddingHorizontal: 12,
-    backgroundColor: "#ffffff",
-    borderBottomWidth: 0.5,
-    borderBottomColor: "#ccc",
-    justifyContent: "space-between",
-  },
+  topBar: { flexDirection: "row", alignItems: "center", height: 70, paddingHorizontal: 12, backgroundColor: "#fff", borderBottomWidth: 0.5, borderBottomColor: "#ccc", justifyContent: "space-between" },
   profileContainer: { flexDirection: "row", alignItems: "center" },
   profileImage: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
-  profilePlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#cccccc", marginRight: 10 },
-  topBarTitle: { fontSize: 18, fontWeight: "600", color: "#000000" },
-  
+  profilePlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#ccc", marginRight: 10 },
+  topBarTitle: { fontSize: 18, fontWeight: "600", color: "#000" },
+
   messageRow: { marginVertical: 4 },
-  messageBubble: { paddingHorizontal: 12, paddingVertical: 8, maxWidth: "80%", flexShrink: 1 },
-  senderMsg: { backgroundColor: "#4288cfff", borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomLeftRadius: 16, borderBottomRightRadius: 4 },
-  receiverMsg: { backgroundColor: "#ffffff", borderTopLeftRadius: 16, borderTopRightRadius: 16, borderBottomRightRadius: 16, borderBottomLeftRadius: 4 },
-  messageText: { fontSize: 16, color: "#ffffff" },
-  editedText: { fontSize: 10, color: "#cccccc", marginLeft: 4 },
-  imageMessage: { width: 200, height: 200, borderRadius: 12, marginVertical: 2 },
-  timestampRow: { flexDirection: "row", justifyContent: "flex-end", marginTop: 2 },
-  timestamp: { fontSize: 10, color: "#888888" },
+  messageBubble: { paddingHorizontal: 12, paddingVertical: 8, maxWidth: "75%", borderRadius: 20, flexShrink: 1 },
+  senderMsg: { backgroundColor: "#0088cc", alignSelf: "flex-end", borderTopRightRadius: 5 },
+  receiverMsg: { backgroundColor: "#f0f0f0", alignSelf: "flex-start", borderTopLeftRadius: 5 },
 
-  inputContainer: { flexDirection: "row", padding: 10, backgroundColor: "#ffffff", alignItems: "center" },
-  input: { flex: 1, backgroundColor: "#f0f0f0", paddingHorizontal: 15, paddingVertical: 8, borderRadius: 25, fontSize: 16, color: "#000000", marginRight: 8 },
-  sendBtn: { backgroundColor: "#0088cc", padding: 12, borderRadius: 25 },
+  messageTextColumn: { flexDirection: "column", alignSelf: "flex-start", flexShrink: 1, minWidth: 50 },
+  messageText: { fontSize: 16, color: "#fff" },
+  editedText: { fontSize: 12, fontStyle: "italic", color: "#eee" },
+  timestampWrapperBottomRight: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", marginTop: 2 },
+  timestamp: { fontSize: 10, color: "#ccc" },
 
-  replyContainer: { flexDirection: "row", backgroundColor: "#f5f5f5", padding: 6, marginHorizontal: 12, borderRadius: 6, alignItems: "center", borderLeftWidth: 4, borderLeftColor: "#0088cc" },
-  replyText: { flex: 1, fontSize: 14, color: "#555555" },
-  cancelReply: { fontSize: 16, fontWeight: "bold", marginLeft: 8, color: "#555555" },
+  deletedText: { fontSize: 14, fontStyle: "italic", color: "#999" },
+  imageMessage: { width: 200, height: 200, borderRadius: 12, marginTop: 4 },
 
-  replyPreviewContainer: { backgroundColor: "#f0f0f01f", padding: 6, borderRadius: 6, marginBottom: 4 },
-  replyLine: { width: 3, backgroundColor: "#0099ffff", height: "100%", position: "absolute", left: 0, top: 0 },
-  replyTextPreview: { paddingLeft: 8, color: "#ffffffff", fontSize: 14 },
-  deletedText: { fontSize: 14, fontStyle: "italic", color: "#888888" },
+  receiverAvatar: { width: 32, height: 32, borderRadius: 16, marginRight: 8 },
+
+  inputContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#f5f5f5", paddingHorizontal: 8, paddingVertical: 6, borderRadius: 25, marginHorizontal: 12, marginTop: 6 },
+  input: { flex: 1, fontSize: 16, maxHeight: 100 },
+  sendBtn: { backgroundColor: "#0088cc", padding: 10, borderRadius: 20 },
+
+  replyPreviewContainer: { borderLeftWidth: 2, borderLeftColor: "#aaa", paddingLeft: 8, marginBottom: 4 },
+  replyLine: { width: 2, backgroundColor: "#aaa", position: "absolute", left: 0, top: 0, bottom: 0 },
+  replyTextPreview: { fontSize: 12, color: "#555" },
+
+  replyContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#eee", padding: 6, marginHorizontal: 12, borderRadius: 8, marginBottom: 4 },
+  replyText: { flex: 1, fontSize: 14 },
+  cancelReply: { fontWeight: "bold", marginLeft: 8, fontSize: 16 },
 
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
-  modalContent: { backgroundColor: "#ffffff", padding: 20, borderRadius: 12, width: 250 },
-  modalOption: { fontSize: 16, paddingVertical: 8, color: "#000000" },
+  modalContent: { backgroundColor: "#fff", padding: 20, borderRadius: 12, width: "80%" },
+  modalOption: { fontSize: 16, paddingVertical: 8 },
 });
