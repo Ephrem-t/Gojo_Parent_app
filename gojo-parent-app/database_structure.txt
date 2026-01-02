@@ -60,8 +60,8 @@ Root
 │
 ├─ School_Admins
 │   ├─ <adminId1>
-│   │    ├─ name: "string"
-│   │    └─ profileImage: "url"
+│   ├─   adminId:
+    ├─   userId"
 │   ├─ <adminId2>
 │   └─ ...
 
@@ -101,3 +101,39 @@ Students
 │   │   
 │
 └── studentId_n
+
+
+
+Attendance
+     ├── courseId1
+     |    ├── 2026-01-01
+     |    |    ├── studentId_1: "present"       // → studentId_1 of student from Students node
+     |    |    └── studentId_2: "absent"
+     |    └── 2026-01-02
+     |         ├── studentId_1: "late"
+     |         └── studentId_2: "present"
+
+
+
+
+ClassMarks
+ └── course_math_9A
+     └── student_123
+         ├── teacherName: "Mr. Bekele"
+         ├── assessments:
+         │   ├── a1:
+         │   │   ├── name: "Quiz 1"
+         │   │   ├── score: 7
+         │   │   ├── max: 10
+         │   ├── a2:
+         │   │   ├── name: "Test 1"
+         │   │   ├── score: 28
+         │   │   ├── max: 30
+         │   ├── a3:
+         │   │   ├── name: "Assignment"
+         │   │   ├── score: 5
+         │   │   ├── max: 5
+         │   └── a4:
+         │       ├── name: "Final Exam"
+         │       ├── score: 44
+         │       ├── max: 50

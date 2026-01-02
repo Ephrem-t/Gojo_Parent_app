@@ -6,49 +6,32 @@ import { database } from "../../constants/firebaseConfig";
 
 export default function Home() {
   const [posts, setPosts] = useState([]);
+  const [tick, setTick] = useState(0); // used to trigger re-render every minute
 
-  // Replace with logged-in parent userId
   const parentUserId = "parent_user_id_here";
 
+  // 🔹 Fetch posts from Firebase
   useEffect(() => {
     const fetchPosts = async () => {
       try {
         const dbRef = ref(database);
-
-        // 1️⃣ Get all posts
         const postsSnap = await get(child(dbRef, "Posts"));
         if (!postsSnap.exists()) return;
         const postsData = postsSnap.val();
 
-        // 2️⃣ Get all School Admins
-        const adminsSnap = await get(child(dbRef, "School_Admins"));
-        const adminsData = adminsSnap.exists() ? adminsSnap.val() : {};
-
-        // 3️⃣ Get all Users
         const usersSnap = await get(child(dbRef, "Users"));
         const usersData = usersSnap.exists() ? usersSnap.val() : {};
 
-        // 4️⃣ Map posts with admin info
         const postsList = Object.keys(postsData).map((postId) => {
           const post = postsData[postId];
 
           let adminName = "School Admin";
           let adminImage = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-          // ✅ Fetch admin user info via School_Admins → Users
-          if (post.adminId && adminsData[post.adminId]) {
-            const adminNode = adminsData[post.adminId];
-            const adminUserId = adminNode.userId;
-
-            if (adminUserId && usersData[adminUserId]) {
-              const adminUser = usersData[adminUserId];
-              adminName = adminUser.name || adminUser.username || adminName;
-              adminImage = adminUser.profileImage || adminImage;
-            } else {
-              console.log(`User not found for adminId: ${post.adminId}`, adminUserId);
-            }
-          } else {
-            console.log(`Admin node not found for postId: ${postId}`, post.adminId);
+          if (post.adminId && usersData[post.adminId]) {
+            const adminUser = usersData[post.adminId];
+            adminName = adminUser.name || adminUser.username || adminName;
+            adminImage = adminUser.profileImage || adminImage;
           }
 
           return {
@@ -63,7 +46,6 @@ export default function Home() {
           };
         });
 
-        // 5️⃣ Sort newest first
         setPosts(postsList.reverse());
       } catch (error) {
         console.log("Error loading posts:", error);
@@ -71,6 +53,12 @@ export default function Home() {
     };
 
     fetchPosts();
+  }, []);
+
+  // 🔹 Update tick every 1 minute for live time updates
+  useEffect(() => {
+    const interval = setInterval(() => setTick((t) => t + 1), 60000);
+    return () => clearInterval(interval);
   }, []);
 
   // ❤️ Like / Unlike post
@@ -93,6 +81,20 @@ export default function Home() {
     );
   };
 
+  // 🔹 Relative time helper
+  const getRelativeTime = (postTime) => {
+    const date = new Date(postTime);
+    const now = new Date();
+    const diff = Math.floor((now - date) / 1000);
+
+    if (diff < 60) return `${diff} sec ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} h ago`;
+    if (diff < 2592000) return `${Math.floor(diff / 86400)} day${Math.floor(diff / 86400) > 1 ? "s" : ""} ago`;
+    if (diff < 31536000) return `${Math.floor(diff / 2592000)} month${Math.floor(diff / 2592000) > 1 ? "s" : ""} ago`;
+    return `${Math.floor(diff / 31536000)} year${Math.floor(diff / 31536000) > 1 ? "s" : ""} ago`;
+  };
+
   // 🔹 Render each post
   const renderPost = ({ item }) => (
     <View style={styles.postCard}>
@@ -101,7 +103,7 @@ export default function Home() {
         <Image source={{ uri: item.adminImage }} style={styles.avatar} />
         <View>
           <Text style={styles.adminName}>{item.adminName}</Text>
-          <Text style={styles.time}>{item.time}</Text>
+          <Text style={styles.time}>{getRelativeTime(item.time)}</Text>
         </View>
       </View>
 

@@ -73,3 +73,4 @@ npm install react-native-svg react-native-reanimated
 npm install moment
 
 expo install expo-linear-gradient
+npx expo install expo-linear-gradient

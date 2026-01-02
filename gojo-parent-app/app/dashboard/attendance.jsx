@@ -1,86 +1,20 @@
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import {
   StyleSheet,
   Text,
   View,
   Image,
   TouchableOpacity,
-  FlatList,
   ScrollView,
-  Dimensions,
   Animated,
+  Easing,
+  Dimensions,
 } from "react-native";
 import { ref, get } from "firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database } from "../../constants/firebaseConfig";
 import moment from "moment";
-import Svg, { Circle } from "react-native-svg";
 
-const { height } = Dimensions.get("window");
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-
-/* =======================
-   CIRCLE PROGRESS
-======================= */
-const CircleProgress = ({
-  percentage,
-  radius = 36,
-  strokeWidth = 6,
-  color,
-}) => {
-  const animatedValue = useRef(new Animated.Value(0)).current;
-  const circumference = 2 * Math.PI * radius;
-
-  useEffect(() => {
-    Animated.timing(animatedValue, {
-      toValue: percentage,
-      duration: 900,
-      useNativeDriver: false,
-    }).start();
-  }, [percentage]);
-
-  const strokeDashoffset = animatedValue.interpolate({
-    inputRange: [0, 100],
-    outputRange: [circumference, 0],
-  });
-
-  const size = (radius + strokeWidth) * 2;
-
-  return (
-    <View style={{ alignItems: "center", justifyContent: "center" }}>
-      <Svg width={size} height={size}>
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke="#e5e7eb"
-          strokeWidth={strokeWidth}
-          fill="none"
-        />
-        <AnimatedCircle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-        />
-      </Svg>
-      <View style={styles.circleText}>
-        <Text style={{ fontWeight: "800", fontSize: 14, color }}>
-          {Math.round(percentage)}%
-        </Text>
-      </View>
-    </View>
-  );
-};
-
-/* =======================
-   MAIN SCREEN
-======================= */
 export default function Attendance() {
   const [parentId, setParentId] = useState(null);
   const [children, setChildren] = useState([]);
@@ -88,30 +22,31 @@ export default function Attendance() {
   const [childUser, setChildUser] = useState(null);
   const [attendanceData, setAttendanceData] = useState({});
   const [courses, setCourses] = useState([]);
-  const [expanded, setExpanded] = useState({});
   const [tab, setTab] = useState("daily");
-  const [cache, setCache] = useState({});
   const [showList, setShowList] = useState(false);
+  const [cache, setCache] = useState({});
+  const [expandedCourses, setExpandedCourses] = useState({}); // track expanded courses
 
   const defaultProfile =
     "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-  /* =======================
-     LOAD PARENT ID
-  ======================= */
+  const progressAnim = useRef({}).current;
+  const dropdownAnim = useRef(new Animated.Value(0)).current;
+
+  const windowHeight = Dimensions.get("window").height;
+
+  // Load parentId from AsyncStorage
   useEffect(() => {
     AsyncStorage.getItem("parentId").then((id) => {
       if (id) setParentId(id);
     });
   }, []);
 
-  /* =======================
-     FETCH ALL DATA ONCE
-  ======================= */
+  // Load data from Firebase
   useEffect(() => {
     if (!parentId) return;
 
-    const load = async () => {
+    const loadData = async () => {
       const [
         parentsSnap,
         studentsSnap,
@@ -143,153 +78,169 @@ export default function Attendance() {
       setCache(data);
 
       const parent = data.parents[parentId];
-      const kids = parent?.children
-        ? Object.values(parent.children)
-        : [];
-
+      const kids = parent?.children ? Object.values(parent.children) : [];
       setChildren(kids);
 
       if (kids.length > 0) loadChild(kids[0], 0, data);
     };
 
-    load();
+    loadData();
   }, [parentId]);
 
-  /* =======================
-     LOAD CHILD
-  ======================= */
+  // Load selected child
   const loadChild = (child, index, data) => {
     const student = data.students[child.studentId];
     if (!student) return;
 
-    const user = data.users[student.userId || student.use];
+    const user = data.users[student.userId];
     setChildUser({
       ...user,
       grade: student.grade,
       section: student.section,
+      studentId: child.studentId,
     });
 
-    /* Attendance filter */
-    const filtered = {};
-    Object.keys(data.attendance).forEach((courseId) => {
-      Object.keys(data.attendance[courseId]).forEach((date) => {
-        const status =
-          data.attendance[courseId][date][child.studentId];
-        if (status) {
-          if (!filtered[courseId]) filtered[courseId] = {};
-          filtered[courseId][date] = status;
-        }
-      });
-    });
-    setAttendanceData(filtered);
+    setAttendanceData(data.attendance || {});
 
-    /* Courses + teachers */
     const courseList = Object.keys(data.courses)
       .map((id) => ({ courseId: id, ...data.courses[id] }))
       .filter(
-        (c) =>
-          c.grade === student.grade &&
-          (c.section || c.secation) === student.section
+        (c) => c.grade === student.grade && (c.section || "") === student.section
       )
       .map((course) => {
-        let teacherName = "N/A";
         const assign = Object.values(data.assignments).find(
           (a) => a.courseId === course.courseId
         );
-        if (assign) {
-          const t = data.teachers[assign.teacherId];
-          teacherName = data.users[t?.userId]?.name || "N/A";
-        }
+        const teacherName = assign
+          ? data.users[data.teachers[assign.teacherId]?.userId]?.name || "N/A"
+          : "N/A";
         return { ...course, teacherName };
       });
 
     setCourses(courseList);
     setCurrentIndex(index);
-    setExpanded({});
     setShowList(false);
+    setExpandedCourses({}); // reset expanded
   };
 
-  /* =======================
-     HELPERS
-  ======================= */
-  const filterAttendance = (courseId) => {
-    const data = attendanceData[courseId] || {};
+  // Filtered attendance per course
+  const filteredAttendance = useMemo(() => {
+    if (!childUser?.studentId) return {};
+
+    const studentId = childUser.studentId;
     const now = moment();
-    return Object.fromEntries(
-      Object.entries(data).filter(([d]) => {
-        const m = moment(d, "YYYY-MM-DD");
-        if (tab === "daily") return m.isSame(now, "day");
-        if (tab === "weekly") return m.isSame(now, "week");
-        return m.isSame(now, "month");
-      })
-    );
+
+    return courses.reduce((acc, course) => {
+      const courseAttendance = attendanceData[course.courseId] || {};
+      let filtered = {};
+
+      if (tab === "daily") {
+        const today = now.format("YYYY-MM-DD");
+        const status = courseAttendance[today]?.[studentId];
+        if (status) filtered[today] = status;
+      } else {
+        Object.entries(courseAttendance).forEach(([date, students]) => {
+          const m = moment(date, "YYYY-MM-DD");
+          if (
+            (tab === "weekly" && m.isSame(now, "week")) ||
+            (tab === "monthly" && m.isSame(now, "month"))
+          ) {
+            const status = students?.[studentId];
+            if (status) filtered[date] = status;
+          }
+        });
+      }
+
+      acc[course.courseId] = filtered;
+      return acc;
+    }, {});
+  }, [attendanceData, childUser, courses, tab]);
+
+  const statusColor = (status) => {
+    switch (status) {
+      case "present":
+        return "#16a34a";
+      case "absent":
+        return "#dc2626";
+      case "late":
+        return "#f59e0b";
+      default:
+        return "#6b7280";
+    }
   };
 
-  const calcPercent = (courseId) => {
-    const data = filterAttendance(courseId);
-    const total = Object.keys(data).length;
-    if (!total) return 0;
-    const present = Object.values(data).filter(
-      (s) => s === "present"
-    ).length;
-    return (present / total) * 100;
-  };
+  useEffect(() => {
+    Animated.timing(dropdownAnim, {
+      toValue: showList ? 1 : 0,
+      duration: 200,
+      useNativeDriver: true,
+      easing: Easing.inOut(Easing.ease),
+    }).start();
+  }, [showList]);
 
-  const overallPercent = useMemo(() => {
-    let t = 0,
-      p = 0;
-    Object.keys(attendanceData).forEach((cid) => {
-      const d = filterAttendance(cid);
-      t += Object.keys(d).length;
-      p += Object.values(d).filter((s) => s === "present").length;
-    });
-    return t ? (p / t) * 100 : 0;
-  }, [attendanceData, tab]);
-
-  /* =======================
-     RENDER
-  ======================= */
   return (
     <View style={styles.container}>
       {/* HEADER */}
-      <View style={[styles.header, { height: height * 0.28 }]}>
-        <TouchableOpacity
-          style={styles.switch}
-          onPress={() => setShowList(!showList)}
-        >
-          <Text style={styles.switchText}>
-            {children[currentIndex]?.relationship || "Child"} ▼
-          </Text>
-        </TouchableOpacity>
-
-        {showList && (
-          <View style={styles.dropdown}>
-            {children.map((c, i) => {
-              const s = cache.students?.[c.studentId];
-              const u = cache.users?.[s?.userId || s?.use];
-              return (
-                <TouchableOpacity
-                  key={c.studentId}
-                  onPress={() => loadChild(c, i, cache)}
-                >
-                  <Text style={styles.dropdownText}>
-                    {u?.name || "Student"}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
-
+      <View style={styles.header}>
         <Image
           source={{ uri: childUser?.profileImage || defaultProfile }}
           style={styles.avatar}
         />
-        <Text style={styles.name}>{childUser?.name}</Text>
-        <Text style={styles.grade}>
-          Grade {childUser?.grade} - {childUser?.section}
-        </Text>
+        <View style={{ marginLeft: 12, flex: 1 }}>
+          <Text style={styles.childName}>{childUser?.name || "Student"}</Text>
+          <Text style={styles.grade}>
+            Grade {childUser?.grade || "-"} - {childUser?.section || "-"}
+          </Text>
+        </View>
+        {children.length > 1 && (
+          <TouchableOpacity
+            onPress={() => setShowList(!showList)}
+            style={styles.dropdownBtn}
+          >
+            <Text style={styles.dropdown}>▼</Text>
+          </TouchableOpacity>
+        )}
       </View>
+
+      {/* FLOATING DROPDOWN */}
+      {children.length > 1 && showList && (
+        <Animated.View
+          style={[
+            styles.dropdownList,
+            {
+              opacity: dropdownAnim,
+              top: 90, // adjust distance below header
+              zIndex: 9999,
+              elevation: 10,
+              transform: [
+                {
+                  scaleY: dropdownAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {children.map((c, i) => {
+            const s = cache.students?.[c.studentId];
+            const u = cache.users?.[s?.userId];
+            return (
+              <TouchableOpacity
+                key={c.studentId}
+                onPress={() => loadChild(c, i, cache)}
+                style={[
+                  styles.dropdownItemContainer,
+                  currentIndex === i && { backgroundColor: "#eef2ff" },
+                ]}
+              >
+                <Text style={styles.dropdownItem}>{u?.name || "Student"}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </Animated.View>
+      )}
 
       {/* TABS */}
       <View style={styles.tabs}>
@@ -299,76 +250,104 @@ export default function Attendance() {
             style={[styles.tab, tab === t && styles.tabActive]}
             onPress={() => setTab(t)}
           >
-            <Text style={tab === t && { color: "#fff" }}>
+            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
               {t.toUpperCase()}
             </Text>
           </TouchableOpacity>
         ))}
       </View>
 
+      {/* BODY */}
       <ScrollView style={styles.body}>
-        {/* OVERALL */}
-        <View style={styles.card}>
-          <Text style={styles.title}>Overall Attendance</Text>
-          <CircleProgress
-            percentage={overallPercent}
-            radius={45}
-            color="#2563eb"
-          />
-        </View>
-
-        {/* COURSES */}
         {courses.map((c) => {
-          const open = expanded[c.courseId];
-          const percent = calcPercent(c.courseId);
-          const data = filterAttendance(c.courseId);
+          const courseAttendance = filteredAttendance[c.courseId] || {};
+          let attendancePercent = 0;
+
+          if (tab !== "daily") {
+            const totalDays = Object.keys(courseAttendance).length;
+            const attendedDays = Object.values(courseAttendance).filter(
+              (s) => s === "present" || s === "late"
+            ).length;
+            attendancePercent =
+              totalDays > 0 ? Math.round((attendedDays / totalDays) * 100) : 0;
+          }
+
+          if (!progressAnim[c.courseId]) {
+            progressAnim[c.courseId] = new Animated.Value(0);
+          }
+
+          Animated.timing(progressAnim[c.courseId], {
+            toValue: attendancePercent,
+            duration: 800,
+            useNativeDriver: false,
+            easing: Easing.inOut(Easing.ease),
+          }).start();
+
+          const isExpanded = expandedCourses[c.courseId];
 
           return (
-            <View key={c.courseId} style={styles.card}>
-              <TouchableOpacity
-                style={styles.courseHeader}
-                onPress={() =>
-                  setExpanded((p) => ({
-                    ...p,
-                    [c.courseId]: !p[c.courseId],
-                  }))
-                }
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.course}>{c.name}</Text>
-                  <Text style={styles.teacher}>👨‍🏫 {c.teacherName}</Text>
+            <TouchableOpacity
+              key={c.courseId}
+              onPress={() =>
+                setExpandedCourses((prev) => ({
+                  ...prev,
+                  [c.courseId]: !prev[c.courseId],
+                }))
+              }
+              activeOpacity={0.9}
+              style={styles.courseCard}
+            >
+              <View style={styles.courseHeader}>
+                <Text style={styles.courseName}>{c.name}</Text>
+                <Text style={styles.teacher}>👨‍🏫 {c.teacherName}</Text>
+              </View>
+
+              {tab !== "daily" && (
+                <View style={styles.progressContainer}>
+                  <View style={styles.progressBarBackground}>
+                    <Animated.View
+                      style={[
+                        styles.progressBarFill,
+                        {
+                          width: progressAnim[c.courseId].interpolate({
+                            inputRange: [0, 100],
+                            outputRange: ["0%", "100%"],
+                          }),
+                          backgroundColor:
+                            attendancePercent >= 80
+                              ? "#16a34a"
+                              : attendancePercent >= 50
+                              ? "#fbbf24"
+                              : "#dc2626",
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.progressText}>{attendancePercent}%</Text>
                 </View>
+              )}
 
-                <CircleProgress
-                  percentage={percent}
-                  color={
-                    percent >= 75
-                      ? "#16a34a"
-                      : percent >= 50
-                      ? "#f59e0b"
-                      : "#dc2626"
-                  }
-                />
-              </TouchableOpacity>
-
-              {open &&
-                Object.keys(data).map((d) => (
-                  <View key={d} style={styles.attRow}>
-                    <Text>{moment(d).format("DD MMM, ddd")}</Text>
+              {(tab === "daily" || isExpanded) &&
+                Object.keys(courseAttendance).length > 0 &&
+                Object.entries(courseAttendance).map(([date, status]) => (
+                  <View key={date} style={styles.attRow}>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        { backgroundColor: statusColor(status) },
+                      ]}
+                    />
+                    <Text style={styles.attDate}>
+                      {moment(date).format("DD MMM, ddd")}
+                    </Text>
                     <Text
-                      style={{
-                        fontWeight: "700",
-                        color:
-                          data[d] === "present"
-                            ? "#16a34a"
-                            : "#dc2626",
-                      }}
+                      style={[styles.attStatus, { color: statusColor(status) }]}
                     >
-                      {data[d].toUpperCase()}
+                      {status.toUpperCase()}
                     </Text>
                   </View>
                 ))}
-            </View>
+            </TouchableOpacity>
           );
         })}
       </ScrollView>
@@ -376,76 +355,91 @@ export default function Attendance() {
   );
 }
 
-/* =======================
-   STYLES
-======================= */
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: "#f3f4f6" },
   header: {
-    backgroundColor: "#1976D2",
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-  },
-  avatar: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    borderWidth: 4,
-    borderColor: "#fff",
-  },
-  name: { color: "#fff", fontSize: 20, fontWeight: "800" },
-  grade: { color: "#e5e7eb" },
-  switch: {
-    position: "absolute",
-    top: 20,
-    right: 20,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    padding: 8,
-    borderRadius: 20,
-  },
-  switchText: { color: "#fff", fontWeight: "700" },
-  dropdown: {
-    position: "absolute",
-    top: 60,
-    right: 20,
+    padding: 16,
     backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 10,
+    borderRadius: 12,
+    margin: 16,
+    elevation: 4,
+    zIndex: 1,
   },
-  dropdownText: { paddingVertical: 6 },
+  avatar: { width: 60, height: 60, borderRadius: 30 },
+  childName: { fontSize: 18, fontWeight: "700", color: "#111827" },
+  grade: { fontSize: 13, color: "#6b7280", marginTop: 2 },
+  dropdownBtn: { paddingHorizontal: 8 },
+  dropdown: { fontSize: 16, color: "#2563eb" },
+  dropdownList: {
+    position: "absolute",
+    right: 16,
+    backgroundColor: "#fff",
+    padding: 8,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    overflow: "hidden",
+  },
+  dropdownItemContainer: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  dropdownItem: { fontSize: 14, color: "#111827" },
   tabs: {
     flexDirection: "row",
     justifyContent: "space-around",
-    padding: 10,
-    backgroundColor: "#e0e7ff",
+    marginHorizontal: 16,
+    marginTop: 12,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 12,
   },
-  tab: {
-    padding: 8,
-    paddingHorizontal: 18,
-    borderRadius: 20,
-    backgroundColor: "#f1f5f9",
-  },
-  tabActive: { backgroundColor: "#1976D2" },
-  body: { padding: 16 },
-  card: {
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 18,
+  tab: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12 },
+  tabActive: { backgroundColor: "#2563eb" },
+  tabText: { fontSize: 13, fontWeight: "600", color: "#6b7280" },
+  tabTextActive: { color: "#fff" },
+  body: { paddingHorizontal: 16, marginTop: 16 },
+  courseCard: {
     marginBottom: 16,
-    elevation: 4,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    elevation: 3,
   },
-  title: { fontSize: 18, fontWeight: "800", marginBottom: 8 },
-  courseHeader: { flexDirection: "row", alignItems: "center" },
-  course: { fontSize: 16, fontWeight: "800", color: "#2563eb" },
-  teacher: { fontSize: 12, color: "#64748b" },
+  courseHeader: { marginBottom: 12 },
+  courseName: { fontSize: 16, fontWeight: "600", color: "#111827" },
+  teacher: { fontSize: 13, color: "#6b7280", marginTop: 2 },
   attRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 6,
-  },
-  circleText: {
-    position: "absolute",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderBottomColor: "#f3f4f6",
+    borderBottomWidth: 1,
+  },
+  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
+  attDate: { flex: 1, fontSize: 13, color: "#111827" },
+  attStatus: { fontSize: 13, fontWeight: "600" },
+  progressContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  progressBarBackground: {
+    flex: 1,
+    height: 10,
+    backgroundColor: "#e5e7eb",
+    borderRadius: 5,
+    overflow: "hidden",
+    marginRight: 8,
+  },
+  progressBarFill: {
+    height: 10,
+    borderRadius: 5,
+  },
+  progressText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#111827",
   },
 });

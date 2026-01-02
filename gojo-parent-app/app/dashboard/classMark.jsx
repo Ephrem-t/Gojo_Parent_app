@@ -1,366 +1,319 @@
-// app/dashboard/classMark.jsx
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
   StyleSheet,
   Text,
   View,
   Image,
   TouchableOpacity,
-  FlatList,
   ScrollView,
-  Dimensions,
-  Animated,
-  ActivityIndicator,
 } from "react-native";
 import { ref, get } from "firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database } from "../../constants/firebaseConfig";
-import Svg, { Circle } from "react-native-svg";
 
-const { height: screenHeight } = Dimensions.get("window");
-const defaultProfile =
-  "https://cdn-icons-png.flaticon.com/512/847/847969.png";
-
-// ======================
-// Circle Progress Component
-// ======================
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-
-const CircleProgress = ({ percentage, radius = 36, strokeWidth = 6, color }) => {
-  const animatedValue = useRef(new Animated.Value(0)).current;
-  const circumference = 2 * Math.PI * radius;
-
-  useEffect(() => {
-    Animated.timing(animatedValue, {
-      toValue: percentage,
-      duration: 1000,
-      useNativeDriver: false,
-    }).start();
-  }, [percentage]);
-
-  const strokeDashoffset = animatedValue.interpolate({
-    inputRange: [0, 100],
-    outputRange: [circumference, 0],
-  });
-
-  const size = (radius + strokeWidth) * 2;
-
-  return (
-    <Svg width={size} height={size}>
-      <Circle
-        stroke="#e5e7eb"
-        fill="none"
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        strokeWidth={strokeWidth}
-      />
-      <AnimatedCircle
-        stroke={color}
-        fill="none"
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        strokeWidth={strokeWidth}
-        strokeDasharray={circumference}
-        strokeDashoffset={strokeDashoffset}
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-};
-
-// ======================
-// Marks Card Component
-// ======================
-const MarksCard = ({ mark }) => {
-  const total = (mark.mark20 || 0) + (mark.mark30 || 0) + (mark.mark50 || 0);
-  const percentage = Math.min(total, 100);
-  const statusColor =
-    percentage >= 75 ? "#16a34a" : percentage >= 50 ? "#f59e0b" : "#dc2626";
-
-  const assessments = [
-    { key: "mark20", label: "Quiz", max: 20, color: "#2563eb" },
-    { key: "mark30", label: "Test", max: 30, color: "#16a34a" },
-    { key: "mark50", label: "Final", max: 50, color: "#ea580c" },
-  ];
-
-  return (
-    <View style={styles.card}>
-      <Text style={styles.courseTitle}>
-        {mark.courseId.replace("course_", "").replace(/_/g, " ")}
-      </Text>
-
-      <View style={styles.circleWrapper}>
-        <CircleProgress percentage={percentage} color={statusColor} />
-        <View style={styles.circleLabel}>
-          <Text style={[styles.totalText, { color: statusColor }]}>{total}</Text>
-          <Text style={styles.maxText}>/100</Text>
-        </View>
-      </View>
-
-      {assessments.map(({ key, label, max, color }) => (
-        <View key={key} style={styles.assessmentRow}>
-          <View style={styles.assessmentLabelRow}>
-            <Text style={styles.assessmentLabel}>{label}</Text>
-            <Text style={styles.assessmentValue}>
-              {mark[key] || 0} / {max}
-            </Text>
-          </View>
-          <View style={styles.progressBackground}>
-            <View
-              style={[
-                styles.progressBar,
-                { width: `${((mark[key] || 0) / max) * 100}%`, backgroundColor: color },
-              ]}
-            />
-          </View>
-        </View>
-      ))}
-
-      <Text style={[styles.statusText, { color: statusColor }]}>
-        {percentage >= 75 ? "Excellent" : percentage >= 50 ? "Good" : "Needs Improvement"}
-      </Text>
-
-      {mark.teacherName && <Text style={styles.teacherText}>👨‍🏫 {mark.teacherName}</Text>}
-    </View>
-  );
-};
-
-// ======================
-// Child Dropdown Component
-// ======================
-const ChildDropdown = ({ children, show, onSelect, fetchedData }) => {
-  if (!show) return null;
-  return (
-    <View style={styles.childList}>
-      {children.map((child, index) => {
-        const student = fetchedData.studentsData[child.studentId];
-        const user = fetchedData.usersData[student?.userId] || {};
-        return (
-          <TouchableOpacity
-            key={child.studentId}
-            style={styles.childListItem}
-            onPress={() => onSelect(index)}
-          >
-            <Text style={styles.childListText}>{user.name || "Student"}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
-};
-
-// ======================
-// Header Component
-// ======================
-const HeaderSection = ({
-  childUser,
-  children,
-  currentChildIndex,
-  showChildList,
-  toggleDropdown,
-  selectChild,
-  fetchedData,
-}) => {
-  return (
-    <View style={[styles.header, { height: screenHeight * 0.3 }]}>
-      {children.length > 0 && (
-        <View style={{ position: "absolute", top: 20, right: 20, zIndex: 10 }}>
-          <TouchableOpacity style={styles.childSwitch} onPress={toggleDropdown}>
-            <Text style={styles.childName}>
-              {children[currentChildIndex]?.relationship || "Child"} ▼
-            </Text>
-          </TouchableOpacity>
-          <ChildDropdown
-            children={children}
-            show={showChildList}
-            onSelect={selectChild}
-            fetchedData={fetchedData}
-          />
-        </View>
-      )}
-
-      <Image
-        source={{ uri: childUser?.profileImage || defaultProfile }}
-        style={styles.profileImage}
-      />
-      <Text style={styles.headerText}>{childUser?.name || "Student Name"}</Text>
-      <Text style={styles.gradeSectionText}>
-        Grade {childUser?.grade || "--"} - Section {childUser?.section || "--"}
-      </Text>
-    </View>
-  );
-};
-
-// ======================
-// Main ClassMark Component
-// ======================
 export default function ClassMark() {
+  const [parentId, setParentId] = useState(null);
   const [children, setChildren] = useState([]);
-  const [currentChildIndex, setCurrentChildIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [childUser, setChildUser] = useState(null);
-  const [marks, setMarks] = useState([]);
-  const [parentUserId, setParentUserId] = useState(null);
-  const [fetchedData, setFetchedData] = useState({});
-  const [showChildList, setShowChildList] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [courses, setCourses] = useState([]);
+  const [marks, setMarks] = useState({});
+  const [showList, setShowList] = useState(false);
+  const [cache, setCache] = useState({});
+  const [expanded, setExpanded] = useState({}); // 🔽 expand state
 
-  // Load logged-in parentId from AsyncStorage
+  const defaultProfile =
+    "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+
+  /* ---------------- LOAD PARENT ID ---------------- */
   useEffect(() => {
-    const loadParentId = async () => {
-      const storedParentId = await AsyncStorage.getItem("parentId");
-      if (storedParentId) setParentUserId(storedParentId);
-    };
-    loadParentId();
+    AsyncStorage.getItem("parentId").then((id) => {
+      if (id) setParentId(id);
+    });
   }, []);
 
-  // Fetch children when parent ID available
+  /* ---------------- LOAD ALL DATA ---------------- */
   useEffect(() => {
-    if (parentUserId) fetchChildren();
-  }, [parentUserId]);
+    if (!parentId) return;
 
-  const fetchChildren = async () => {
-    setLoading(true);
-    try {
-      const [parentsSnap, studentsSnap, usersSnap, classMarksSnap] =
-        await Promise.all([
-          get(ref(database, "Parents")),
-          get(ref(database, "Students")),
-          get(ref(database, "Users")),
-          get(ref(database, "ClassMarks")),
-        ]);
+    const loadData = async () => {
+      const [
+        parentsSnap,
+        studentsSnap,
+        usersSnap,
+        coursesSnap,
+        marksSnap,
+        teachersSnap,
+        assignSnap,
+      ] = await Promise.all([
+        get(ref(database, "Parents")),
+        get(ref(database, "Students")),
+        get(ref(database, "Users")),
+        get(ref(database, "Courses")),
+        get(ref(database, "ClassMarks")),
+        get(ref(database, "Teachers")),
+        get(ref(database, "TeacherAssignments")),
+      ]);
 
-      const parentsData = parentsSnap.val() || {};
-      const studentsData = studentsSnap.val() || {};
-      const usersData = usersSnap.val() || {};
-      const classMarksData = classMarksSnap.val() || {};
+      const data = {
+        parents: parentsSnap.val() || {},
+        students: studentsSnap.val() || {},
+        users: usersSnap.val() || {},
+        courses: coursesSnap.val() || {},
+        marks: marksSnap.val() || {},
+        teachers: teachersSnap.val() || {},
+        assignments: assignSnap.val() || {},
+      };
 
-      setFetchedData({ studentsData, usersData, classMarksData });
+      setCache(data);
 
-      const parentNode = parentsData[parentUserId];
-      const childrenArray = parentNode?.children
-        ? Object.values(parentNode.children)
-        : [];
-      setChildren(childrenArray);
+      const parent = data.parents[parentId];
+      const kids = parent?.children ? Object.values(parent.children) : [];
+      setChildren(kids);
 
-      if (childrenArray.length > 0) {
-        loadChild(childrenArray[0], 0, { studentsData, usersData, classMarksData });
-      }
-    } catch (error) {
-      console.log("Error fetching children:", error);
-    }
-    setLoading(false);
-  };
+      if (kids.length > 0) loadChild(kids[0], 0, data);
+    };
 
+    loadData();
+  }, [parentId]);
+
+  /* ---------------- LOAD CHILD ---------------- */
   const loadChild = (child, index, data) => {
-    if (!data) return;
-    const { studentsData, usersData, classMarksData } = data;
-    const student = studentsData[child.studentId];
+    const student = data.students[child.studentId];
     if (!student) return;
 
-    const user = usersData[student.userId] || null;
-    setChildUser({ ...user, grade: student.grade, section: student.section });
+    const user = data.users[student.userId];
 
-    const marksArray = [];
-    Object.keys(classMarksData).forEach((courseId) => {
-      const course = classMarksData[courseId];
-      if (course[child.studentId]) {
-        marksArray.push({
-          courseId,
-          mark20: course[child.studentId].mark20 ?? 0,
-          mark30: course[child.studentId].mark30 ?? 0,
-          mark50: course[child.studentId].mark50 ?? 0,
-          teacherName: course[child.studentId].teacherName || "N/A",
-        });
-      } else {
-        marksArray.push({
-          courseId,
-          mark20: 0,
-          mark30: 0,
-          mark50: 0,
-          teacherName: "N/A",
-        });
-      }
+    setChildUser({
+      ...user,
+      grade: student.grade,
+      section: student.section,
+      studentId: child.studentId,
     });
 
-    setMarks(marksArray);
-    setCurrentChildIndex(index);
+    const courseList = Object.keys(data.courses)
+      .map((id) => ({ courseId: id, ...data.courses[id] }))
+      .filter(
+        (c) => c.grade === student.grade && c.section === student.section
+      )
+      .map((course) => {
+        const assign = Object.values(data.assignments).find(
+          (a) => a.courseId === course.courseId
+        );
+        const teacherName = assign
+          ? data.users[data.teachers[assign.teacherId]?.userId]?.name || "N/A"
+          : "N/A";
+        return { ...course, teacherName };
+      });
+
+    setCourses(courseList);
+    setMarks(data.marks || {});
+    setExpanded({}); // reset expand on child change
+    setCurrentIndex(index);
+    setShowList(false);
   };
 
-  const selectChild = (index) => {
-    loadChild(children[index], index, fetchedData);
-    setShowChildList(false);
+  /* ---------------- TOTAL MARK ---------------- */
+  const calcTotal = (assessments) => {
+    let score = 0;
+    let max = 0;
+
+    Object.values(assessments || {}).forEach((a) => {
+      score += a.score || 0;
+      max += a.max || 0;
+    });
+
+    return { score, max };
   };
 
-  const toggleDropdown = () => setShowChildList(!showChildList);
-
-  if (loading) {
-    return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-        <ActivityIndicator size="large" color="#1976D2" />
-      </View>
-    );
-  }
+  /* ---------------- TOGGLE EXPAND ---------------- */
+  const toggleExpand = (courseId) => {
+    setExpanded((prev) => ({
+      ...prev,
+      [courseId]: !prev[courseId],
+    }));
+  };
 
   return (
     <View style={styles.container}>
-      <HeaderSection
-        childUser={childUser}
-        children={children}
-        currentChildIndex={currentChildIndex}
-        showChildList={showChildList}
-        toggleDropdown={toggleDropdown}
-        selectChild={selectChild}
-        fetchedData={fetchedData}
-      />
-
-      <ScrollView style={styles.body}>
-        {marks.length === 0 ? (
-          <Text style={styles.noMarksText}>🚫 No Performance Records</Text>
-        ) : (
-          <FlatList
-            data={marks}
-            keyExtractor={(item, index) => item.courseId + index}
-            renderItem={({ item }) => <MarksCard mark={item} />}
-            numColumns={2}
-            columnWrapperStyle={{ justifyContent: "space-between" }}
-            contentContainerStyle={{ paddingBottom: 20 }}
+      {/* ================= HEADER ================= */}
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={styles.headerLeft}
+          onPress={() => setShowList(!showList)}
+          activeOpacity={0.8}
+        >
+          <Image
+            source={{ uri: childUser?.profileImage || defaultProfile }}
+            style={styles.avatar}
           />
-        )}
+
+          <View style={styles.headerText}>
+            <Text style={styles.childName} numberOfLines={1}>
+              {childUser?.name || "Student"}
+            </Text>
+            <Text style={styles.gradeText}>
+              Grade {childUser?.grade} • Section {childUser?.section}
+            </Text>
+          </View>
+
+          {children.length > 1 && (
+            <Text style={styles.arrow}>{showList ? "▲" : "▼"}</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* ================= DROPDOWN ================= */}
+      {children.length > 1 && showList && (
+        <View style={styles.dropdown}>
+          {children.map((c, i) => {
+            const s = cache.students?.[c.studentId];
+            const u = cache.users?.[s?.userId];
+
+            return (
+              <TouchableOpacity
+                key={c.studentId}
+                style={[
+                  styles.dropdownItem,
+                  currentIndex === i && styles.dropdownActive,
+                ]}
+                onPress={() => loadChild(c, i, cache)}
+              >
+                <Text style={styles.dropdownText}>{u?.name}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      )}
+
+      {/* ================= BODY ================= */}
+      <ScrollView contentContainerStyle={{ padding: 16 }}>
+        {courses.map((course) => {
+          const studentMarks =
+            marks?.[course.courseId]?.[childUser?.studentId];
+          if (!studentMarks) return null;
+
+          const { score, max } = calcTotal(studentMarks.assessments);
+          const percent = max > 0 ? Math.round((score / max) * 100) : 0;
+          const isOpen = expanded[course.courseId];
+
+          return (
+            <View key={course.courseId} style={styles.card}>
+              {/* 🔽 CLICKABLE COURSE HEADER */}
+              <TouchableOpacity
+                onPress={() => toggleExpand(course.courseId)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.courseHeader}>
+                  <View>
+                    <Text style={styles.courseName}>{course.name}</Text>
+                    <Text style={styles.teacher}>
+                      👨‍🏫 {course.teacherName}
+                    </Text>
+                  </View>
+                  <Text style={styles.arrow}>
+                    {isOpen ? "▲" : "▼"}
+                  </Text>
+                </View>
+
+                <View style={styles.totalBox}>
+                  <Text style={styles.totalText}>
+                    Total: {score} / {max}
+                  </Text>
+                  <Text style={styles.percent}>{percent}%</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* 🔽 DETAILS */}
+              {isOpen &&
+                Object.values(studentMarks.assessments || {}).map(
+                  (a, index) => (
+                    <View key={index} style={styles.row}>
+                      <Text style={styles.assessName}>{a.name}</Text>
+                      <Text style={styles.assessScore}>
+                        {a.score}/{a.max}
+                      </Text>
+                    </View>
+                  )
+                )}
+            </View>
+          );
+        })}
       </ScrollView>
     </View>
   );
 }
 
-// ======================
-// Styles
-// ======================
+/* ================= STYLES ================= */
+
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { backgroundColor: "#1976D2", justifyContent: "center", alignItems: "center" },
-  profileImage: { width: 140, height: 140, borderRadius: 70, borderWidth: 4, borderColor: "#fff", marginBottom: 10 },
-  headerText: { color: "#fff", fontSize: 20, fontWeight: "bold" },
-  gradeSectionText: { color: "#fff", fontSize: 16, marginTop: 4 },
-  childSwitch: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.2)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, elevation: 5 },
-  childName: { color: "#fff", fontSize: 14, fontWeight: "bold" },
-  childList: { backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 8, marginTop: 6, paddingVertical: 4, minWidth: 120, shadowColor: "#000", shadowOpacity: 0.1, shadowRadius: 5, elevation: 5 },
-  childListItem: { paddingVertical: 8, paddingHorizontal: 12 },
-  childListText: { fontSize: 14, color: "#fff" },
-  body: { flex: 7, padding: 20 },
-  noMarksText: { textAlign: "center", fontSize: 16, color: "#555", marginTop: 20 },
-  card: { backgroundColor: "#fff", padding: 16, borderRadius: 20, marginBottom: 20, width: "48%", shadowColor: "#000", shadowOpacity: 0.08, shadowRadius: 12, elevation: 4 },
-  courseTitle: { fontSize: 16, fontWeight: "800", color: "#2563eb", marginBottom: 12 },
-  circleWrapper: { alignItems: "center", marginBottom: 16, position: "relative" },
-  circleLabel: { position: "absolute", top: 18, left: 0, right: 0, alignItems: "center" },
-  totalText: { fontSize: 18, fontWeight: "800" },
-  maxText: { fontSize: 11, color: "#64748b" },
-  assessmentRow: { marginBottom: 10 },
-  assessmentLabelRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 4 },
-  assessmentLabel: { fontSize: 13, fontWeight: "600", color: "#334155" },
-  assessmentValue: { fontSize: 13, fontWeight: "600", color: "#334155" },
-  progressBackground: { height: 6, borderRadius: 3, backgroundColor: "#e5e7eb", overflow: "hidden" },
-  progressBar: { height: "100%", borderRadius: 3 },
-  statusText: { marginTop: 12, textAlign: "center", fontSize: 13, fontWeight: "700" },
-  teacherText: { marginTop: 6, textAlign: "center", fontSize: 12, color: "#64748b" },
+  container: { flex: 1, backgroundColor: "#f3f4f6" },
+
+  header: {
+    backgroundColor: "#ffffff",
+    margin: 20,
+    borderRadius: 16,
+    padding: 18,
+    elevation: 6,
+    minHeight: 90,
+    zIndex: 10,
+  },
+  headerLeft: { flexDirection: "row", alignItems: "center" },
+  avatar: { width: 56, height: 56, borderRadius: 28, marginRight: 14 },
+  headerText: { flex: 1 },
+  childName: { fontSize: 18, fontWeight: "700", color: "#111827" },
+  gradeText: { fontSize: 14, color: "#6b7280", marginTop: 4 },
+  arrow: { fontSize: 16, color: "#2563eb" },
+
+  dropdown: {
+    position: "absolute",
+    top: 110,
+    left: 20,
+    right: 20,
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    elevation: 10,
+    zIndex: 999,
+  },
+  dropdownItem: { paddingVertical: 14, paddingHorizontal: 18 },
+  dropdownActive: { backgroundColor: "#eef2ff" },
+  dropdownText: { fontSize: 15, fontWeight: "600" },
+
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 16,
+    padding: 18,
+    marginBottom: 16,
+    elevation: 4,
+  },
+
+  courseHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  courseName: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  teacher: { fontSize: 13, color: "#6b7280", marginBottom: 6 },
+
+  totalBox: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: "#f1f5f9",
+    padding: 12,
+    borderRadius: 12,
+    marginTop: 6,
+  },
+  totalText: { fontWeight: "600" },
+  percent: { fontWeight: "700", color: "#2563eb" },
+
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  assessName: { fontSize: 14 },
+  assessScore: { fontSize: 14, fontWeight: "600" },
 });
