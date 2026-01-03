@@ -100,6 +100,7 @@ const MessageBubble = ({
               <Image source={{ uri: item.imageUrl }} style={styles.imageMessage} />
             )}
 
+            {/* Timestamp and Tick */}
             {item.type === "text" && !item.deleted && (
               <View style={styles.timestampWrapperInline}>
                 <Text style={styles.timestamp}>{formatTime(item.timeStamp)}</Text>
@@ -107,7 +108,7 @@ const MessageBubble = ({
                   <Ionicons
                     name={item.seen ? "checkmark-done" : "checkmark"}
                     size={14}
-                    color={item.seen ? "#1e90ff" : "#555"}
+                    color={item.seen ? "#ffffffff" : "#ffffffff"}
                     style={{ marginLeft: 4 }}
                   />
                 )}
@@ -195,7 +196,7 @@ export default function Chat() {
     return [parentUserId, receiverUserId].sort().join("_");
   }, [parentUserId, receiverUserId]);
 
-  // Listen for messages
+  // Listen for messages & auto mark RECEIVED messages as seen
   useEffect(() => {
     if (!chatId) return;
     const messagesRef = ref(database, `Chats/${chatId}/messages`);
@@ -206,14 +207,23 @@ export default function Chat() {
         .sort((a, b) => a.timeStamp - b.timeStamp);
       setMessages(formatted);
 
-      // Update seen messages
-      const unseenUpdates = {};
+      // Automatically mark messages as seen for RECEIVED messages only
+      const seenUpdates = {};
       formatted.forEach((msg) => {
         if (!msg.seen && msg.receiverId === parentUserId) {
-          unseenUpdates[`${msg.messageId}/seen`] = true;
+          seenUpdates[`${msg.messageId}/seen`] = true;
         }
       });
-      if (Object.keys(unseenUpdates).length > 0) await update(messagesRef, unseenUpdates);
+      if (Object.keys(seenUpdates).length > 0) {
+        await update(messagesRef, seenUpdates);
+
+        // Also mark lastMessage as seen if it was sent by the other user
+        const lastMsgRef = ref(database, `Chats/${chatId}/lastMessage`);
+        const lastMsgSnap = await get(lastMsgRef);
+        if (lastMsgSnap.exists() && lastMsgSnap.val().senderId !== parentUserId) {
+          await update(lastMsgRef, { seen: true });
+        }
+      }
     });
     return () => unsubscribe();
   }, [chatId, parentUserId]);
@@ -454,7 +464,7 @@ const styles = StyleSheet.create({
   deletedText: { fontSize: 14, fontStyle: "italic", color: "#888" },
 
   timestampWrapperInline: { flexDirection: "row", alignItems: "flex-end", marginLeft: 4 },
-  timestamp: { fontSize: 10, color: "#555", marginLeft: 4 },
+  timestamp: { fontSize: 10, color: "#a7a7a7ff", marginLeft: 4 },
 
   imageMessage: { width: 180, height: 180, borderRadius: 10 },
 
