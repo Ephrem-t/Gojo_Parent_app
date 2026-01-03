@@ -16,8 +16,6 @@ import {
   View,
   Image,
   Alert,
-  Modal,
-  Pressable,
   Dimensions,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
@@ -40,39 +38,34 @@ const formatTime = (timestamp) => {
   }
 };
 
-// --- MessageBubble ---
+// --- Message Bubble Component ---
 const MessageBubble = ({
   item,
   isSender,
-  showAvatar,
   repliedMsg,
   onLongPress,
   onPressReplyPreview,
-  receiverProfile,
+  isFirstInGroup,
+  isLastInGroup,
 }) => {
   const screenWidth = Dimensions.get("window").width;
   const maxBubbleWidth = screenWidth * 0.75;
 
-  let bubbleWidth = maxBubbleWidth;
-  if (item.type === "text") {
-    const estimatedWidth = 20 + item.text.length * 7;
-    bubbleWidth = Math.min(estimatedWidth, maxBubbleWidth);
-  } else if (item.type === "image") {
-    bubbleWidth = 200;
-  }
-
   return (
     <View style={[styles.messageRow, { flexDirection: isSender ? "row-reverse" : "row" }]}>
-      {!isSender && showAvatar && receiverProfile?.image && (
-        <Image source={{ uri: receiverProfile.image }} style={styles.receiverAvatar} />
-      )}
-
       <TouchableOpacity onLongPress={() => onLongPress(item)} activeOpacity={0.9}>
         <View
           style={[
             styles.messageBubble,
             isSender ? styles.senderMsg : styles.receiverMsg,
-            { maxWidth: bubbleWidth, minWidth: 50 },
+            {
+              maxWidth: maxBubbleWidth,
+              minWidth: 60,
+              borderTopLeftRadius: isSender ? 16 : isFirstInGroup ? 16 : 4,
+              borderTopRightRadius: isSender ? (isFirstInGroup ? 16 : 4) : 16,
+              borderBottomLeftRadius: isSender ? 16 : isLastInGroup ? 16 : 4,
+              borderBottomRightRadius: isSender ? (isLastInGroup ? 16 : 4) : 16,
+            },
           ]}
         >
           {repliedMsg && (
@@ -96,16 +89,22 @@ const MessageBubble = ({
             </TouchableOpacity>
           )}
 
-          {item.deleted ? (
-            <Text style={styles.deletedText}>This message was deleted</Text>
-          ) : item.type === "text" ? (
-            <View style={styles.messageTextColumn}>
-              <Text style={[styles.messageText, !isSender && { color: "#000" }]}>
+          <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap" }}>
+            {item.deleted ? (
+              <Text style={styles.deletedText}>This message was deleted</Text>
+            ) : item.type === "text" ? (
+              <Text style={[styles.messageText, { color: isSender ? "#fff" : "#000" }]}>
                 {item.text} {item.edited && <Text style={styles.editedText}>(edited)</Text>}
               </Text>
-              <View style={styles.timestampWrapperBottomRight}>
+            ) : (
+              <Image source={{ uri: item.imageUrl }} style={styles.imageMessage} />
+            )}
+
+            {/* Timestamp and seen icon */}
+            {item.type === "text" && !item.deleted && (
+              <View style={styles.timestampWrapperInline}>
                 <Text style={styles.timestamp}>{formatTime(item.timeStamp)}</Text>
-                {isSender && !item.deleted && (
+                {isSender && (
                   <Ionicons
                     name={item.seen ? "checkmark-done" : "checkmark"}
                     size={14}
@@ -114,17 +113,15 @@ const MessageBubble = ({
                   />
                 )}
               </View>
-            </View>
-          ) : (
-            <Image source={{ uri: item.imageUrl }} style={styles.imageMessage} />
-          )}
+            )}
+          </View>
         </View>
       </TouchableOpacity>
     </View>
   );
 };
 
-// --- Chat Component ---
+// --- Main Chat Component ---
 export default function Chat() {
   const router = useRouter();
   const { userId: receiverParamId } = useLocalSearchParams();
@@ -136,13 +133,11 @@ export default function Chat() {
   const [newMessage, setNewMessage] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
   const [selectedMessage, setSelectedMessage] = useState(null);
-  const [showActionModal, setShowActionModal] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
-  const [editText, setEditText] = useState("");
   const [replyingTo, setReplyingTo] = useState(null);
 
   const flatListRef = useRef();
 
+  // Fetch parent
   useEffect(() => {
     const fetchParent = async () => {
       try {
@@ -159,6 +154,7 @@ export default function Chat() {
     fetchParent();
   }, []);
 
+  // Request media permissions
   useEffect(() => {
     (async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -166,6 +162,7 @@ export default function Chat() {
     })();
   }, []);
 
+  // Fetch receiver profile
   useEffect(() => {
     if (!receiverParamId) return;
     const fetchReceiver = async () => {
@@ -201,20 +198,18 @@ export default function Chat() {
     return [parentUserId, receiverUserId].sort().join("_");
   }, [parentUserId, receiverUserId]);
 
+  // Listen for messages
   useEffect(() => {
     if (!chatId) return;
     const messagesRef = ref(database, `Chats/${chatId}/messages`);
     const unsubscribe = onValue(messagesRef, async (snapshot) => {
       const data = snapshot.val() || {};
       const formatted = Object.entries(data)
-        .map(([key, value]) => ({
-          ...value,
-          messageId: key,
-          type: value.type || "text",
-        }))
+        .map(([key, value]) => ({ ...value, messageId: key }))
         .sort((a, b) => a.timeStamp - b.timeStamp);
       setMessages(formatted);
 
+      // Update seen messages
       const unseenUpdates = {};
       formatted.forEach((msg) => {
         if (!msg.seen && msg.receiverId === parentUserId) {
@@ -226,54 +221,106 @@ export default function Chat() {
     return () => unsubscribe();
   }, [chatId, parentUserId]);
 
+  // Send Text Message
   const sendMessage = async () => {
     if (!newMessage.trim() || !chatId) return;
-    const messagesRef = ref(database, `Chats/${chatId}/messages`);
-    const newMsgRef = push(messagesRef);
-    await update(newMsgRef, {
+
+    const messagesRef = ref(database, `Chats/${chatId}`);
+    const newMsgRef = push(ref(database, `Chats/${chatId}/messages`));
+
+    const messageData = {
       messageId: newMsgRef.key,
       senderId: parentUserId,
       receiverId: receiverUserId,
       text: newMessage,
       imageUrl: null,
+      replyTo: replyingTo?.messageId || null,
       seen: false,
       edited: false,
       deleted: false,
       timeStamp: Date.now(),
       type: "text",
-      replyTo: replyingTo?.messageId || null,
+    };
+
+    await update(newMsgRef, messageData);
+
+    // Update lastMessage
+    await update(messagesRef, {
+      lastMessage: {
+        text: newMessage,
+        senderId: parentUserId,
+        seen: false,
+        timeStamp: messageData.timeStamp,
+      },
+      unread: {
+        [receiverUserId]: (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val()
+          ? (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val() + 1
+          : 1,
+        [parentUserId]: 0,
+      },
+      participants: {
+        [parentUserId]: true,
+        [receiverUserId]: true,
+      },
     });
+
     setNewMessage("");
-    setShowEmoji(false);
     setReplyingTo(null);
+    setShowEmoji(false);
   };
 
+  // Pick Image
   const pickImage = async () => {
     if (!chatId) return;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (result.canceled) return;
+
       const uri = result.assets[0].uri;
       const blob = await (await fetch(uri)).blob();
       const storageReference = storageRef(storage, `chatImages/${Date.now()}.jpg`);
       await uploadBytes(storageReference, blob);
       const downloadURL = await getDownloadURL(storageReference);
 
-      const messagesRef = ref(database, `Chats/${chatId}/messages`);
-      const newMsgRef = push(messagesRef);
-      await update(newMsgRef, {
+      const messagesRef = ref(database, `Chats/${chatId}`);
+      const newMsgRef = push(ref(database, `Chats/${chatId}/messages`));
+
+      const messageData = {
         messageId: newMsgRef.key,
         senderId: parentUserId,
         receiverId: receiverUserId,
         text: "",
         imageUrl: downloadURL,
+        replyTo: replyingTo?.messageId || null,
         seen: false,
         edited: false,
         deleted: false,
         timeStamp: Date.now(),
         type: "image",
-        replyTo: replyingTo?.messageId || null,
+      };
+
+      await update(newMsgRef, messageData);
+
+      // Update lastMessage
+      await update(messagesRef, {
+        lastMessage: {
+          text: "📷 Image",
+          senderId: parentUserId,
+          seen: false,
+          timeStamp: messageData.timeStamp,
+        },
+        unread: {
+          [receiverUserId]: (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val()
+            ? (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val() + 1
+            : 1,
+          [parentUserId]: 0,
+        },
+        participants: {
+          [parentUserId]: true,
+          [receiverUserId]: true,
+        },
       });
+
       setReplyingTo(null);
     } catch (err) {
       Alert.alert("Error", "Failed to send image");
@@ -281,39 +328,29 @@ export default function Chat() {
     }
   };
 
-  const deleteMessage = async (msg) => {
-    if (!chatId) return;
-    await update(ref(database, `Chats/${chatId}/messages/${msg.messageId}`), { deleted: true });
-  };
-  const editMessage = (msg) => { setSelectedMessage(msg); setEditText(msg.text); setEditModalVisible(true); };
-  const saveEditedMessage = async () => {
-    if (!editText.trim() || !selectedMessage || !chatId) return;
-    await update(ref(database, `Chats/${chatId}/messages/${selectedMessage.messageId}`), { text: editText, edited: true });
-    setEditModalVisible(false);
-    setSelectedMessage(null);
-    setEditText("");
-  };
-  const onLongPressMessage = (msg) => { setSelectedMessage(msg); setShowActionModal(true); };
-  const scrollToMessage = (msg) => {
-    const index = messages.findIndex((m) => m.messageId === msg.messageId);
-    if (index >= 0 && flatListRef.current) {
-      try { flatListRef.current.scrollToIndex({ index: messages.length - 1 - index, animated: true }); } catch {}
-    }
-  };
-
+  // Render Item
   const renderItem = ({ item, index }) => {
     const isSender = item.senderId === parentUserId;
     const repliedMsg = item.replyTo ? messages.find((m) => m.messageId === item.replyTo) : null;
-    const showAvatar = !isSender && (index === 0 || messages[index - 1].senderId !== item.senderId);
+
+    // Determine message grouping
+    const prevMsg = messages[index - 1];
+    const nextMsg = messages[index + 1];
+    const isFirstInGroup = !prevMsg || prevMsg.senderId !== item.senderId;
+    const isLastInGroup = !nextMsg || nextMsg.senderId !== item.senderId;
+
     return (
       <MessageBubble
         item={item}
         isSender={isSender}
-        showAvatar={showAvatar}
         repliedMsg={repliedMsg}
-        onLongPress={onLongPressMessage}
-        onPressReplyPreview={scrollToMessage}
-        receiverProfile={receiverProfile}
+        onLongPress={(msg) => setSelectedMessage(msg)}
+        onPressReplyPreview={(msg) => {
+          const idx = messages.findIndex((m) => m.messageId === msg.messageId);
+          flatListRef.current?.scrollToIndex({ index: messages.length - 1 - idx, animated: true });
+        }}
+        isFirstInGroup={isFirstInGroup}
+        isLastInGroup={isLastInGroup}
       />
     );
   };
@@ -323,10 +360,12 @@ export default function Chat() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}>
         {/* Top Bar */}
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => router.back()}><Ionicons name="arrow-back-outline" size={28} /></TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back-outline" size={28} />
+          </TouchableOpacity>
           {receiverProfile && (
             <View style={styles.profileContainer}>
-              {receiverProfile.image ? <Image source={{ uri: receiverProfile.image }} style={styles.profileImage} /> : <View style={styles.profilePlaceholder} />}
+              {/* Only show name */}
               <Text style={styles.topBarTitle}>{receiverProfile.name}</Text>
             </View>
           )}
@@ -345,52 +384,37 @@ export default function Chat() {
         />
 
         {/* Replying */}
-        {replyingTo && <View style={styles.replyContainer}>
-          <Text style={styles.replyText}>Replying to: {replyingTo.text?.slice(0, 50) || "Image..."}</Text>
-          <TouchableOpacity onPress={() => setReplyingTo(null)}><Text style={styles.cancelReply}>X</Text></TouchableOpacity>
-        </View>}
+        {replyingTo && (
+          <View style={styles.replyContainer}>
+            <Text style={styles.replyText}>Replying to: {replyingTo.text?.slice(0, 50) || "Image..."}</Text>
+            <TouchableOpacity onPress={() => setReplyingTo(null)}>
+              <Text style={styles.cancelReply}>X</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Emoji Selector */}
-        {showEmoji && <View style={{ height: 250 }}>
-          <EmojiSelector onEmojiSelected={(emoji) => setNewMessage((prev) => prev + emoji)} showSearchBar={false} columns={8} />
-        </View>}
+        {showEmoji && (
+          <View style={{ height: 250 }}>
+            <EmojiSelector onEmojiSelected={(emoji) => setNewMessage((prev) => prev + emoji)} showSearchBar={false} columns={8} />
+          </View>
+        )}
 
         {/* Input */}
         <View style={{ paddingBottom: Platform.OS === "ios" ? 25 : 10, backgroundColor: "#fff" }}>
           <View style={styles.inputContainer}>
-            <TouchableOpacity onPress={() => setShowEmoji((prev) => !prev)}><Ionicons name="happy-outline" size={28} style={{ marginRight: 8 }} /></TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowEmoji((prev) => !prev)}>
+              <Ionicons name="happy-outline" size={28} style={{ marginRight: 8 }} />
+            </TouchableOpacity>
             <TextInput style={styles.input} value={newMessage} onChangeText={setNewMessage} placeholder="Type a message..." />
-            <TouchableOpacity onPress={pickImage} style={{ marginRight: 8 }}><Ionicons name="attach-outline" size={28} color="#555" /></TouchableOpacity>
-            <TouchableOpacity onPress={sendMessage} style={styles.sendBtn}><Ionicons name="send" size={24} color="#fff" /></TouchableOpacity>
+            <TouchableOpacity onPress={pickImage} style={{ marginRight: 8 }}>
+              <Ionicons name="attach-outline" size={28} color="#555" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={sendMessage} style={styles.sendBtn}>
+              <Ionicons name="send" size={24} color="#fff" />
+            </TouchableOpacity>
           </View>
         </View>
-
-        {/* Action Modal */}
-        <Modal visible={showActionModal} transparent animationType="fade" onRequestClose={() => setShowActionModal(false)}>
-          <Pressable style={styles.modalOverlay} onPress={() => setShowActionModal(false)}>
-            <View style={styles.modalContent}>
-              {selectedMessage && selectedMessage.senderId === parentUserId && !selectedMessage.deleted && <>
-                <Pressable onPress={() => { editMessage(selectedMessage); setShowActionModal(false); }}><Text style={styles.modalOption}>Edit</Text></Pressable>
-                <Pressable onPress={() => { deleteMessage(selectedMessage); setShowActionModal(false); }}><Text style={[styles.modalOption, { color: "red" }]}>Delete</Text></Pressable>
-              </>}
-              {!selectedMessage?.deleted && <Pressable onPress={() => { setReplyingTo(selectedMessage); setShowActionModal(false); }}><Text style={styles.modalOption}>Reply</Text></Pressable>}
-              <Pressable onPress={() => setShowActionModal(false)}><Text style={styles.modalOption}>Cancel</Text></Pressable>
-            </View>
-          </Pressable>
-        </Modal>
-
-        {/* Edit Modal */}
-        <Modal visible={editModalVisible} transparent animationType="fade" onRequestClose={() => setEditModalVisible(false)}>
-          <Pressable style={styles.modalOverlay} onPress={() => setEditModalVisible(false)}>
-            <View style={styles.modalContent}>
-              <Text style={{ fontSize: 16, marginBottom: 10 }}>Edit Message:</Text>
-              <TextInput value={editText} onChangeText={setEditText} style={{ backgroundColor: "#f0f0f0", padding: 10, borderRadius: 8, marginBottom: 12 }} />
-              <Pressable onPress={saveEditedMessage} style={{ backgroundColor: "#0088cc", padding: 10, borderRadius: 8 }}>
-                <Text style={{ color: "#fff", textAlign: "center", fontWeight: "bold" }}>Save</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -398,41 +422,34 @@ export default function Chat() {
 
 // --- Styles ---
 const styles = StyleSheet.create({
-  topBar: { flexDirection: "row", alignItems: "center", height: 70, paddingHorizontal: 12, backgroundColor: "#fff", borderBottomWidth: 0.5, borderBottomColor: "#ccc", justifyContent: "space-between" },
-  profileContainer: { flexDirection: "row", alignItems: "center" },
-  profileImage: { width: 40, height: 40, borderRadius: 20, marginRight: 10 },
-  profilePlaceholder: { width: 40, height: 40, borderRadius: 20, backgroundColor: "#ccc", marginRight: 10 },
-  topBarTitle: { fontSize: 18, fontWeight: "600", color: "#000" },
+  topBar: { flexDirection: "row", alignItems: "center", padding: 12, backgroundColor: "#fff", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  profileContainer: { flexDirection: "row", alignItems: "center", marginLeft: 12 },
+  topBarTitle: { fontSize: 18, fontWeight: "600", marginLeft: 10 },
 
-  messageRow: { marginVertical: 4 },
-  messageBubble: { paddingHorizontal: 12, paddingVertical: 8, maxWidth: "75%", borderRadius: 20, flexShrink: 1 },
-  senderMsg: { backgroundColor: "#0088cc", alignSelf: "flex-end", borderTopRightRadius: 5 },
-  receiverMsg: { backgroundColor: "#f0f0f0", alignSelf: "flex-start", borderTopLeftRadius: 5 },
+  messageRow: { marginVertical: 2 },
 
-  messageTextColumn: { flexDirection: "column", alignSelf: "flex-start", flexShrink: 1, minWidth: 50 },
-  messageText: { fontSize: 16, color: "#fff" },
-  editedText: { fontSize: 12, fontStyle: "italic", color: "#eee" },
-  timestampWrapperBottomRight: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", marginTop: 2 },
-  timestamp: { fontSize: 10, color: "#ccc" },
+  messageBubble: { padding: 10, borderRadius: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  senderMsg: { backgroundColor: "#1e90ff", alignSelf: "flex-end" },
+  receiverMsg: { backgroundColor: "#f0f0f0", alignSelf: "flex-start" },
 
-  deletedText: { fontSize: 14, fontStyle: "italic", color: "#999" },
-  imageMessage: { width: 200, height: 200, borderRadius: 12, marginTop: 4 },
+  messageText: { fontSize: 16 },
+  editedText: { fontSize: 10, fontStyle: "italic", color: "#555" },
+  deletedText: { fontSize: 14, fontStyle: "italic", color: "#888" },
 
-  receiverAvatar: { width: 32, height: 32, borderRadius: 16, marginRight: 8 },
+  timestampWrapperInline: { flexDirection: "row", alignItems: "flex-end", marginLeft: 4 },
+  timestamp: { fontSize: 10, color: "#555", marginLeft: 4 },
 
-  inputContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#f5f5f5", paddingHorizontal: 8, paddingVertical: 6, borderRadius: 25, marginHorizontal: 12, marginTop: 6 },
-  input: { flex: 1, fontSize: 16, maxHeight: 100 },
-  sendBtn: { backgroundColor: "#0088cc", padding: 10, borderRadius: 20 },
+  imageMessage: { width: 180, height: 180, borderRadius: 10 },
 
-  replyPreviewContainer: { borderLeftWidth: 2, borderLeftColor: "#aaa", paddingLeft: 8, marginBottom: 4 },
-  replyLine: { width: 2, backgroundColor: "#aaa", position: "absolute", left: 0, top: 0, bottom: 0 },
-  replyTextPreview: { fontSize: 12, color: "#555" },
+  replyPreviewContainer: { borderLeftWidth: 3, borderLeftColor: "#888", paddingLeft: 6, marginBottom: 4 },
+  replyLine: { height: 1 },
+  replyTextPreview: { fontSize: 12 },
 
-  replyContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#eee", padding: 6, marginHorizontal: 12, borderRadius: 8, marginBottom: 4 },
-  replyText: { flex: 1, fontSize: 14 },
-  cancelReply: { fontWeight: "bold", marginLeft: 8, fontSize: 16 },
+  inputContainer: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6 },
+  input: { flex: 1, fontSize: 16, paddingVertical: 6 },
+  sendBtn: { backgroundColor: "#1e90ff", padding: 10, borderRadius: 20 },
 
-  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
-  modalContent: { backgroundColor: "#fff", padding: 20, borderRadius: 12, width: "80%" },
-  modalOption: { fontSize: 16, paddingVertical: 8 },
+  replyContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#eee", padding: 6, borderLeftWidth: 3, borderLeftColor: "#1e90ff" },
+  replyText: { flex: 1, fontSize: 14, color: "#333" },
+  cancelReply: { fontSize: 14, color: "#555", marginLeft: 6 },
 });

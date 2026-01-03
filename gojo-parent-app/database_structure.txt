@@ -137,3 +137,50 @@ ClassMarks
          │       ├── name: "Final Exam"
          │       ├── score: 44
          │       ├── max: 50
+
+
+
+
+
+
+
+
+
+
+
+
+         
+Chats
+└── parentUserId_receiverUserId   // sorted
+    ├── participants
+    │   ├── parentUserId: true
+    │   └── receiverUserId: true
+    │
+    ├── lastMessage
+    │   ├── text: "hi"
+    │   ├── senderId: "senderUserId"
+    │   ├── seen: false
+    │   └── timeStamp: 1623468
+    │
+    ├── unread
+    │   ├── parentUserId: 0
+    │   └── receiverUserId: 2
+    │
+    └── messages
+         └── messageId
+              ├── senderId: "USER_123"
+              ├── receiverId: "USER_456"
+              ├── type: "text" | "image"
+              ├── text: "Hello" | ""
+              ├── imageUrl: "https://firebasestorage..." | null
+              ├── replyTo: "{messageId}" | null
+              ├── seen: true | false
+              ├── edited: false
+              ├── deleted: false
+              └── timeStamp: 1700000000000
+
+
+
+
+
+
