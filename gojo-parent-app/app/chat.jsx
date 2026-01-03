@@ -100,7 +100,6 @@ const MessageBubble = ({
               <Image source={{ uri: item.imageUrl }} style={styles.imageMessage} />
             )}
 
-            {/* Timestamp and seen icon */}
             {item.type === "text" && !item.deleted && (
               <View style={styles.timestampWrapperInline}>
                 <Text style={styles.timestamp}>{formatTime(item.timeStamp)}</Text>
@@ -168,13 +167,11 @@ export default function Chat() {
     const fetchReceiver = async () => {
       try {
         let userId = null;
-        let name = null;
         const roles = ["Students", "Teachers", "School_Admins"];
         for (let role of roles) {
           const snap = await get(child(ref(database), `${role}/${receiverParamId}`));
           if (snap.exists()) {
             userId = snap.val().userId;
-            name = snap.val().name || role.slice(0, -1);
             break;
           }
         }
@@ -183,7 +180,7 @@ export default function Chat() {
 
         const profileSnap = await get(child(ref(database), `Users/${userId}`));
         setReceiverProfile({
-          name,
+          name: profileSnap.exists() ? profileSnap.val().name : "User",
           image: profileSnap.exists() ? profileSnap.val().profileImage || null : null,
         });
       } catch (err) {
@@ -224,7 +221,6 @@ export default function Chat() {
   // Send Text Message
   const sendMessage = async () => {
     if (!newMessage.trim() || !chatId) return;
-
     const messagesRef = ref(database, `Chats/${chatId}`);
     const newMsgRef = push(ref(database, `Chats/${chatId}/messages`));
 
@@ -244,7 +240,6 @@ export default function Chat() {
 
     await update(newMsgRef, messageData);
 
-    // Update lastMessage
     await update(messagesRef, {
       lastMessage: {
         text: newMessage,
@@ -301,7 +296,6 @@ export default function Chat() {
 
       await update(newMsgRef, messageData);
 
-      // Update lastMessage
       await update(messagesRef, {
         lastMessage: {
           text: "📷 Image",
@@ -333,7 +327,6 @@ export default function Chat() {
     const isSender = item.senderId === parentUserId;
     const repliedMsg = item.replyTo ? messages.find((m) => m.messageId === item.replyTo) : null;
 
-    // Determine message grouping
     const prevMsg = messages[index - 1];
     const nextMsg = messages[index + 1];
     const isFirstInGroup = !prevMsg || prevMsg.senderId !== item.senderId;
@@ -365,7 +358,11 @@ export default function Chat() {
           </TouchableOpacity>
           {receiverProfile && (
             <View style={styles.profileContainer}>
-              {/* Only show name */}
+              {receiverProfile.image ? (
+                <Image source={{ uri: receiverProfile.image }} style={styles.profileImage} />
+              ) : (
+                <View style={styles.profilePlaceholder} />
+              )}
               <Text style={styles.topBarTitle}>{receiverProfile.name}</Text>
             </View>
           )}
@@ -422,13 +419,33 @@ export default function Chat() {
 
 // --- Styles ---
 const styles = StyleSheet.create({
-  topBar: { flexDirection: "row", alignItems: "center", padding: 12, backgroundColor: "#fff", shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  topBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
   profileContainer: { flexDirection: "row", alignItems: "center", marginLeft: 12 },
+  profileImage: { width: 36, height: 36, borderRadius: 18 },
+  profilePlaceholder: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#ccc" },
   topBarTitle: { fontSize: 18, fontWeight: "600", marginLeft: 10 },
 
   messageRow: { marginVertical: 2 },
 
-  messageBubble: { padding: 10, borderRadius: 16, shadowColor: "#000", shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 2, elevation: 1 },
+  messageBubble: {
+    padding: 10,
+    borderRadius: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
   senderMsg: { backgroundColor: "#1e90ff", alignSelf: "flex-end" },
   receiverMsg: { backgroundColor: "#f0f0f0", alignSelf: "flex-start" },
 
