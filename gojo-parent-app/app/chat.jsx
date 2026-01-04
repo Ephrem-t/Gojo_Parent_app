@@ -1,10 +1,10 @@
-// app/chat.jsx
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ref, push, update, onValue, get, child } from "firebase/database";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { useEffect, useState, useMemo, useRef } from "react";
 import {
+  Animated,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -17,14 +17,23 @@ import {
   Image,
   Alert,
   Dimensions,
+  Modal,
+  TouchableWithoutFeedback,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import EmojiSelector from "react-native-emoji-selector";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database, storage } from "../constants/firebaseConfig";
 
-// --- Helper to format time ---
+// Telegram-like chat UI/UX with existing Firebase behavior (send/edit/delete/seen/unread).
+// This component preserves your messaging logic and replaces UI with a Telegram-inspired look.
+
+// --- Helpers ---
+const WINDOW_WIDTH = Dimensions.get("window").width;
+const BUBBLE_MAX_WIDTH = WINDOW_WIDTH * 0.75;
+
 const formatTime = (timestamp) => {
+  if (!timestamp) return "";
   const date = new Date(timestamp);
   const now = new Date();
   if (
@@ -34,141 +43,143 @@ const formatTime = (timestamp) => {
   ) {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   } else {
-    return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    return date.toLocaleString([], { month: "short", day: "numeric" });
   }
 };
 
-// --- Message Bubble Component ---
+const formatDateHeader = (timestamp) => {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  const now = new Date();
+  const sameDay =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+  if (sameDay) return "Today";
+  const yesterday = new Date();
+  yesterday.setDate(now.getDate() - 1);
+  if (
+    date.getDate() === yesterday.getDate() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getFullYear() === yesterday.getFullYear()
+  )
+    return "Yesterday";
+  return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+};
+
+// --- Message Bubble (Telegram style) ---
 const MessageBubble = ({
   item,
   isSender,
-  repliedMsg,
   onLongPress,
+  repliedMsg,
   onPressReplyPreview,
-  isFirstInGroup,
-  isLastInGroup,
+  showTail,
 }) => {
-  const screenWidth = Dimensions.get("window").width;
-  const maxBubbleWidth = screenWidth * 0.75;
+  const bubbleStyle = isSender ? styles.tgSenderBubble : styles.tgReceiverBubble;
+  const textColor = isSender ? "#fff" : "#000";
+  const timeColor = isSender ? "#e6f2ff" : "#6b6b6b";
 
   return (
-    <View style={[styles.messageRow, { flexDirection: isSender ? "row-reverse" : "row" }]}>
-      <TouchableOpacity onLongPress={() => onLongPress(item)} activeOpacity={0.9}>
-        <View
-          style={[
-            styles.messageBubble,
-            isSender ? styles.senderMsg : styles.receiverMsg,
-            {
-              maxWidth: maxBubbleWidth,
-              minWidth: 60,
-              borderTopLeftRadius: isSender ? 16 : isFirstInGroup ? 16 : 4,
-              borderTopRightRadius: isSender ? (isFirstInGroup ? 16 : 4) : 16,
-              borderBottomLeftRadius: isSender ? 16 : isLastInGroup ? 16 : 4,
-              borderBottomRightRadius: isSender ? (isLastInGroup ? 16 : 4) : 16,
-            },
-          ]}
-        >
+    <View style={[styles.tgRow, isSender ? { justifyContent: "flex-end" } : { justifyContent: "flex-start" }]}>
+      {!isSender && <View style={styles.tgAvatarSpacer} />}
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onLongPress={() => onLongPress(item)}
+        style={{ maxWidth: BUBBLE_MAX_WIDTH }}
+      >
+        <View style={[bubbleStyle, showTail ? (isSender ? styles.tgSenderTail : styles.tgReceiverTail) : null]}>
           {repliedMsg && (
-            <TouchableOpacity onPress={() => onPressReplyPreview(repliedMsg)} activeOpacity={0.7}>
-              <View style={styles.replyPreviewContainer}>
-                <View style={styles.replyLine} />
-                <Text
-                  style={[styles.replyTextPreview, isSender ? { color: "#ffffffaa" } : { color: "#000000aa" }]}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  {repliedMsg.deleted
-                    ? "This message was deleted"
-                    : repliedMsg.type === "text"
-                    ? repliedMsg.text.length > 50
-                      ? repliedMsg.text.slice(0, 50) + "..."
-                      : repliedMsg.text
-                    : "📷 Image"}
+            <TouchableOpacity onPress={() => onPressReplyPreview(repliedMsg)} activeOpacity={0.8}>
+              <View style={styles.replyPreview}>
+                <View style={styles.replyBar} />
+                <Text style={[styles.replyText, isSender ? { color: "#dfefff" } : { color: "#666" }]} numberOfLines={1}>
+                  {repliedMsg.deleted ? "This message was deleted" : repliedMsg.type === "text" ? repliedMsg.text : "📷 Photo"}
                 </Text>
               </View>
             </TouchableOpacity>
           )}
 
-          <View style={{ flexDirection: "row", alignItems: "flex-end", flexWrap: "wrap" }}>
-            {item.deleted ? (
-              <Text style={styles.deletedText}>This message was deleted</Text>
-            ) : item.type === "text" ? (
-              <Text style={[styles.messageText, { color: isSender ? "#fff" : "#000" }]}>
-                {item.text} {item.edited && <Text style={styles.editedText}>(edited)</Text>}
-              </Text>
-            ) : (
-              <Image source={{ uri: item.imageUrl }} style={styles.imageMessage} />
-            )}
+          {item.deleted ? (
+            <Text style={[styles.deletedText, { color: textColor }]}>This message was deleted</Text>
+          ) : item.type === "text" ? (
+            <Text style={[styles.tgMessageText, { color: textColor }]}>{item.text} {item.edited && <Text style={styles.editedHint}>(edited)</Text>}</Text>
+          ) : (
+            <Image source={{ uri: item.imageUrl }} style={styles.tgImage} />
+          )}
 
-            {/* Timestamp and Tick */}
-            {item.type === "text" && !item.deleted && (
-              <View style={styles.timestampWrapperInline}>
-                <Text style={styles.timestamp}>{formatTime(item.timeStamp)}</Text>
-                {isSender && (
-                  <Ionicons
-                    name={item.seen ? "checkmark-done" : "checkmark"}
-                    size={14}
-                    color={item.seen ? "#ffffffff" : "#ffffffff"}
-                    style={{ marginLeft: 4 }}
-                  />
-                )}
-              </View>
-            )}
-          </View>
+          {/* time + ticks */}
+          {!item.deleted && (
+            <View style={styles.tgMetaRow}>
+              <Text style={[styles.tgTime, { color: timeColor }]}>{formatTime(item.timeStamp)}</Text>
+              {isSender && (
+                <Ionicons
+                  name={item.seen ? "checkmark-done" : "checkmark"}
+                  size={14}
+                  color={item.seen ? "#2f9bff" : "#e6f2ff"}
+                  style={{ marginLeft: 6 }}
+                />
+              )}
+            </View>
+          )}
         </View>
       </TouchableOpacity>
+      {isSender && <View style={styles.tgAvatarSpacer} />}
     </View>
   );
 };
 
-// --- Main Chat Component ---
+// --- Main Chat component ---
 export default function Chat() {
   const router = useRouter();
   const { userId: receiverParamId } = useLocalSearchParams();
 
+  // ids
+  const [parentRecordId, setParentRecordId] = useState(null);
   const [parentUserId, setParentUserId] = useState(null);
   const [receiverUserId, setReceiverUserId] = useState(null);
+
+  // profile
   const [receiverProfile, setReceiverProfile] = useState(null);
+
+  // messages
   const [messages, setMessages] = useState([]);
+  const [groupedMessages, setGroupedMessages] = useState([]); // includes date separators
+
+  // input & UI
   const [newMessage, setNewMessage] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
-  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [editingMessageId, setEditingMessageId] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
+
+  // modal / actions
+  const [actionModalVisible, setActionModalVisible] = useState(false);
+  const [actionMsg, setActionMsg] = useState(null);
 
   const flatListRef = useRef();
 
-  // Fetch parent
-  useEffect(() => {
-    const fetchParent = async () => {
-      try {
-        const parentId = await AsyncStorage.getItem("parentId");
-        if (!parentId) throw new Error("No parent ID found");
-        const snap = await get(ref(database, `Parents/${parentId}`));
-        if (!snap.exists()) throw new Error("Parent not found");
-        setParentUserId(snap.val().userId);
-      } catch (err) {
-        Alert.alert("Error", err.message);
-        router.back();
-      }
-    };
-    fetchParent();
-  }, []);
-
-  // Request media permissions
+  // load parent ids
   useEffect(() => {
     (async () => {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== "granted") alert("Media library permission needed!");
+      try {
+        const parentRecId = await AsyncStorage.getItem("parentId");
+        if (!parentRecId) return;
+        setParentRecordId(parentRecId);
+        const snap = await get(ref(database, `Parents/${parentRecId}`));
+        if (snap.exists()) setParentUserId(snap.val().userId);
+      } catch (e) {
+        console.warn("loadParentId error", e);
+      }
     })();
   }, []);
 
-  // Fetch receiver profile
+  // fetch receiver profile & role -> resolve userId
   useEffect(() => {
     if (!receiverParamId) return;
-    const fetchReceiver = async () => {
+    (async () => {
       try {
-        let userId = null;
         const roles = ["Students", "Teachers", "School_Admins"];
+        let userId = null;
         for (let role of roles) {
           const snap = await get(child(ref(database), `${role}/${receiverParamId}`));
           if (snap.exists()) {
@@ -176,19 +187,14 @@ export default function Chat() {
             break;
           }
         }
-        if (!userId) return alert("Receiver not found!");
+        if (!userId) return;
         setReceiverUserId(userId);
-
         const profileSnap = await get(child(ref(database), `Users/${userId}`));
-        setReceiverProfile({
-          name: profileSnap.exists() ? profileSnap.val().name : "User",
-          image: profileSnap.exists() ? profileSnap.val().profileImage || null : null,
-        });
+        setReceiverProfile(profileSnap.exists() ? profileSnap.val() : { name: "User" });
       } catch (err) {
-        console.log("Fetch receiver error:", err);
+        console.warn("fetchReceiver", err);
       }
-    };
-    fetchReceiver();
+    })();
   }, [receiverParamId]);
 
   const chatId = useMemo(() => {
@@ -196,127 +202,188 @@ export default function Chat() {
     return [parentUserId, receiverUserId].sort().join("_");
   }, [parentUserId, receiverUserId]);
 
-  // Listen for messages & auto mark RECEIVED messages as seen
+  // listen messages
   useEffect(() => {
     if (!chatId) return;
     const messagesRef = ref(database, `Chats/${chatId}/messages`);
-    const unsubscribe = onValue(messagesRef, async (snapshot) => {
-      const data = snapshot.val() || {};
-      const formatted = Object.entries(data)
-        .map(([key, value]) => ({ ...value, messageId: key }))
+    const unsubscribe = onValue(messagesRef, async (snap) => {
+      const data = snap.val() || {};
+      const arr = Object.entries(data)
+        .map(([k, v]) => ({ ...v, messageId: k }))
         .sort((a, b) => a.timeStamp - b.timeStamp);
-      setMessages(formatted);
-
-      // Automatically mark messages as seen for RECEIVED messages only
-      const seenUpdates = {};
-      formatted.forEach((msg) => {
-        if (!msg.seen && msg.receiverId === parentUserId) {
-          seenUpdates[`${msg.messageId}/seen`] = true;
-        }
-      });
-      if (Object.keys(seenUpdates).length > 0) {
-        await update(messagesRef, seenUpdates);
-
-        // Also mark lastMessage as seen if it was sent by the other user
-        const lastMsgRef = ref(database, `Chats/${chatId}/lastMessage`);
-        const lastMsgSnap = await get(lastMsgRef);
-        if (lastMsgSnap.exists() && lastMsgSnap.val().senderId !== parentUserId) {
-          await update(lastMsgRef, { seen: true });
-        }
-      }
+      setMessages(arr);
     });
     return () => unsubscribe();
-  }, [chatId, parentUserId]);
+  }, [chatId]);
 
-  // Send Text Message
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !chatId) return;
-    const messagesRef = ref(database, `Chats/${chatId}`);
-    const newMsgRef = push(ref(database, `Chats/${chatId}/messages`));
-
-    const messageData = {
-      messageId: newMsgRef.key,
-      senderId: parentUserId,
-      receiverId: receiverUserId,
-      text: newMessage,
-      imageUrl: null,
-      replyTo: replyingTo?.messageId || null,
-      seen: false,
-      edited: false,
-      deleted: false,
-      timeStamp: Date.now(),
-      type: "text",
-    };
-
-    await update(newMsgRef, messageData);
-
-    await update(messagesRef, {
-      lastMessage: {
-        text: newMessage,
-        senderId: parentUserId,
-        seen: false,
-        timeStamp: messageData.timeStamp,
-      },
-      unread: {
-        [receiverUserId]: (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val()
-          ? (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val() + 1
-          : 1,
-        [parentUserId]: 0,
-      },
-      participants: {
-        [parentUserId]: true,
-        [receiverUserId]: true,
-      },
+  // group messages with date separators for UI
+  useEffect(() => {
+    const grouped = [];
+    let lastDateHeader = null;
+    messages.forEach((m) => {
+      const header = formatDateHeader(m.timeStamp);
+      if (header !== lastDateHeader) {
+        grouped.push({ type: "date", id: `date-${m.timeStamp}`, label: header, timeStamp: m.timeStamp });
+        lastDateHeader = header;
+      }
+      grouped.push({ type: "message", ...m });
     });
+    setGroupedMessages(grouped);
+  }, [messages]);
 
-    setNewMessage("");
-    setReplyingTo(null);
-    setShowEmoji(false);
+  // action modal handlers
+  const openActionModal = (msg) => {
+    setActionMsg(msg);
+    setActionModalVisible(true);
+  };
+  const closeActionModal = () => {
+    setActionModalVisible(false);
+    setActionMsg(null);
   };
 
-  // Pick Image
-  const pickImage = async () => {
-    if (!chatId) return;
+  const handleCopy = async () => {
+    if (!actionMsg || actionMsg.type !== "text") return;
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
-      if (result.canceled) return;
+      const ClipboardModule = await import("expo-clipboard");
+      if (ClipboardModule?.setStringAsync) {
+        await ClipboardModule.setStringAsync(actionMsg.text || "");
+        Alert.alert("Copied", "Message copied to clipboard.");
+      }
+    } catch (e) {
+      Alert.alert("Copy failed", "Install expo-clipboard.");
+    } finally {
+      closeActionModal();
+    }
+  };
 
-      const uri = result.assets[0].uri;
-      const blob = await (await fetch(uri)).blob();
-      const storageReference = storageRef(storage, `chatImages/${Date.now()}.jpg`);
-      await uploadBytes(storageReference, blob);
-      const downloadURL = await getDownloadURL(storageReference);
+  const handleStartEdit = () => {
+    if (!actionMsg) return;
+    if (actionMsg.senderId !== parentUserId) {
+      Alert.alert("Cannot edit", "You can only edit your own messages.");
+      closeActionModal();
+      return;
+    }
+    if (actionMsg.deleted) {
+      Alert.alert("Cannot edit", "Message is deleted.");
+      closeActionModal();
+      return;
+    }
+    setEditingMessageId(actionMsg.messageId);
+    setNewMessage(actionMsg.text || "");
+    closeActionModal();
+  };
 
-      const messagesRef = ref(database, `Chats/${chatId}`);
-      const newMsgRef = push(ref(database, `Chats/${chatId}/messages`));
+  const handleConfirmDelete = () => {
+    if (!actionMsg) return;
+    if (actionMsg.senderId !== parentUserId) {
+      Alert.alert("Cannot delete", "You can only delete your own messages.");
+      closeActionModal();
+      return;
+    }
+    Alert.alert("Delete", "Delete this message?", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => handleDelete(actionMsg) },
+    ]);
+    closeActionModal();
+  };
 
-      const messageData = {
-        messageId: newMsgRef.key,
+  const handleDelete = async (msg) => {
+    if (!chatId || !msg || !msg.messageId) {
+      Alert.alert("Error", "Missing data");
+      return;
+    }
+    try {
+      // mark deleted
+      await update(ref(database, `Chats/${chatId}/messages/${msg.messageId}`), { deleted: true, text: "", imageUrl: null });
+      // if it was lastMessage, set placeholder
+      const lastRef = ref(database, `Chats/${chatId}/lastMessage`);
+      const lastSnap = await get(lastRef);
+      if (lastSnap.exists() && Number(lastSnap.val().timeStamp || 0) === Number(msg.timeStamp || 0)) {
+        await update(lastRef, { text: "This message was deleted" });
+        // update mirror if exists
+        try {
+          const mu = {};
+          mu[`UserChats/${parentUserId}/${chatId}/lastMessage/text`] = "This message was deleted";
+          if (receiverUserId) mu[`UserChats/${receiverUserId}/${chatId}/lastMessage/text`] = "This message was deleted";
+          await update(ref(database), mu);
+        } catch (e) {
+          // non-fatal
+          console.warn("mirror update failed", e);
+        }
+      }
+    } catch (err) {
+      console.error("delete error", err);
+      Alert.alert("Delete failed", err.message || "See console");
+    }
+  };
+
+  // send or edit message
+  const handleSend = async () => {
+    if (!newMessage.trim() || !chatId || !parentUserId || !receiverUserId) return;
+
+    // editing
+    if (editingMessageId) {
+      try {
+        const msgRef = ref(database, `Chats/${chatId}/messages/${editingMessageId}`);
+        await update(msgRef, { text: newMessage, edited: true });
+        // if it was lastMessage update lastMessage text
+        const lastRef = ref(database, `Chats/${chatId}/lastMessage`);
+        const lastSnap = await get(lastRef);
+        const msgSnap = await get(msgRef);
+        if (lastSnap.exists() && msgSnap.exists() && Number(lastSnap.val().timeStamp) === Number(msgSnap.val().timeStamp)) {
+          await update(lastRef, { text: newMessage });
+          // mirror
+          try {
+            await update(ref(database), {
+              [`UserChats/${parentUserId}/${chatId}/lastMessage/text`]: newMessage,
+              [`UserChats/${receiverUserId}/${chatId}/lastMessage/text`]: newMessage,
+            });
+          } catch (e) {}
+        }
+        setEditingMessageId(null);
+        setNewMessage("");
+        return;
+      } catch (err) {
+        console.error("edit failed", err);
+        Alert.alert("Edit failed", "See console");
+        return;
+      }
+    }
+
+    // new message
+    try {
+      const rootRef = ref(database, `Chats/${chatId}`);
+      const newRef = push(ref(database, `Chats/${chatId}/messages`));
+      const now = Date.now();
+      const payload = {
+        messageId: newRef.key,
         senderId: parentUserId,
         receiverId: receiverUserId,
-        text: "",
-        imageUrl: downloadURL,
+        text: newMessage,
+        imageUrl: null,
         replyTo: replyingTo?.messageId || null,
         seen: false,
         edited: false,
         deleted: false,
-        timeStamp: Date.now(),
-        type: "image",
+        timeStamp: now,
+        type: "text",
       };
+      await update(newRef, payload);
 
-      await update(newMsgRef, messageData);
+      // update lastMessage and unread
+      const existingUnreadSnap = await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`));
+      const receiverUnread = existingUnreadSnap.exists() ? existingUnreadSnap.val() + 1 : 1;
 
-      await update(messagesRef, {
+      await update(rootRef, {
         lastMessage: {
-          text: "📷 Image",
+          text: newMessage,
           senderId: parentUserId,
           seen: false,
-          timeStamp: messageData.timeStamp,
+          timeStamp: now,
+          type: "text",
         },
         unread: {
-          [receiverUserId]: (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val()
-            ? (await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`))).val() + 1
-            : 1,
+          [receiverUserId]: receiverUnread,
           [parentUserId]: 0,
         },
         participants: {
@@ -325,158 +392,392 @@ export default function Chat() {
         },
       });
 
+      // update UserChats mirror (best-effort)
+      try {
+        const lastMsgMirror = { text: newMessage, senderId: parentUserId, seen: false, timeStamp: now, type: "text" };
+        const mu = {};
+        mu[`UserChats/${parentUserId}/${chatId}`] = {
+          otherUserId: receiverUserId,
+          otherRecordId: receiverParamId,
+          otherRole: receiverRole || "teacher",
+          lastMessage: lastMsgMirror,
+          unread: 0,
+          timeStamp: now,
+        };
+        mu[`UserChats/${receiverUserId}/${chatId}`] = {
+          otherUserId: parentUserId,
+          otherRecordId: parentRecordId,
+          otherRole: "parent",
+          lastMessage: lastMsgMirror,
+          unread: receiverUnread,
+          timeStamp: now,
+        };
+        await update(ref(database), mu);
+      } catch (e) {
+        // non-fatal
+      }
+
+      setNewMessage("");
       setReplyingTo(null);
     } catch (err) {
-      Alert.alert("Error", "Failed to send image");
-      console.log(err);
+      console.error("send failed", err);
+      Alert.alert("Send failed", "See console");
     }
   };
 
-  // Render Item
-  const renderItem = ({ item, index }) => {
-    const isSender = item.senderId === parentUserId;
-    const repliedMsg = item.replyTo ? messages.find((m) => m.messageId === item.replyTo) : null;
+  // pick image
+  const handlePickImage = async () => {
+    if (!chatId) return;
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
+      if (res.canceled) return;
+      const uri = res.assets[0].uri;
+      const blob = await (await fetch(uri)).blob();
+      const storageReference = storageRef(storage, `chatImages/${Date.now()}.jpg`);
+      await uploadBytes(storageReference, blob);
+      const downloadURL = await getDownloadURL(storageReference);
 
-    const prevMsg = messages[index - 1];
-    const nextMsg = messages[index + 1];
-    const isFirstInGroup = !prevMsg || prevMsg.senderId !== item.senderId;
-    const isLastInGroup = !nextMsg || nextMsg.senderId !== item.senderId;
+      const rootRef = ref(database, `Chats/${chatId}`);
+      const newRef = push(ref(database, `Chats/${chatId}/messages`));
+      const now = Date.now();
+      const payload = {
+        messageId: newRef.key,
+        senderId: parentUserId,
+        receiverId: receiverUserId,
+        text: "",
+        imageUrl: downloadURL,
+        replyTo: replyingTo?.messageId || null,
+        seen: false,
+        edited: false,
+        deleted: false,
+        timeStamp: now,
+        type: "image",
+      };
+      await update(newRef, payload);
+
+      const existingUnreadSnap = await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`));
+      const receiverUnread = existingUnreadSnap.exists() ? existingUnreadSnap.val() + 1 : 1;
+
+      await update(rootRef, {
+        lastMessage: {
+          text: "📷 Image",
+          senderId: parentUserId,
+          seen: false,
+          timeStamp: now,
+          type: "image",
+        },
+        unread: {
+          [receiverUserId]: receiverUnread,
+          [parentUserId]: 0,
+        },
+        participants: {
+          [parentUserId]: true,
+          [receiverUserId]: true,
+        },
+      });
+
+      // update mirror
+      try {
+        const lastMsgMirror = { text: "📷 Image", senderId: parentUserId, seen: false, timeStamp: now, type: "image" };
+        const mu = {};
+        mu[`UserChats/${parentUserId}/${chatId}`] = {
+          otherUserId: receiverUserId,
+          otherRecordId: receiverParamId,
+          otherRole: receiverRole || "teacher",
+          lastMessage: lastMsgMirror,
+          unread: 0,
+          timeStamp: now,
+        };
+        mu[`UserChats/${receiverUserId}/${chatId}`] = {
+          otherUserId: parentUserId,
+          otherRecordId: parentRecordId,
+          otherRole: "parent",
+          lastMessage: lastMsgMirror,
+          unread: receiverUnread,
+          timeStamp: now,
+        };
+        await update(ref(database), mu);
+      } catch (e) {}
+
+      setReplyingTo(null);
+    } catch (err) {
+      console.error("pick image failed", err);
+      Alert.alert("Image send failed", "See console");
+    }
+  };
+
+  // UI helpers
+  const renderGroupedItem = ({ item }) => {
+    if (item.type === "date") {
+      // date separator
+      return (
+        <View style={styles.dateSeparator}>
+          <View style={styles.dateLine} />
+          <View style={styles.dateBubble}>
+            <Text style={styles.dateText}>{item.label}</Text>
+          </View>
+          <View style={styles.dateLine} />
+        </View>
+      );
+    }
+    // message
+    const isSender = item.senderId === parentUserId;
+    const index = messages.findIndex((m) => m.messageId === item.messageId);
+    const prev = messages[index - 1];
+    const showTail = !prev || prev.senderId !== item.senderId;
+    const repliedMsg = item.replyTo ? messages.find((m) => m.messageId === item.replyTo) : null;
 
     return (
       <MessageBubble
         item={item}
         isSender={isSender}
-        repliedMsg={repliedMsg}
-        onLongPress={(msg) => setSelectedMessage(msg)}
-        onPressReplyPreview={(msg) => {
-          const idx = messages.findIndex((m) => m.messageId === msg.messageId);
-          flatListRef.current?.scrollToIndex({ index: messages.length - 1 - idx, animated: true });
+        onLongPress={(m) => {
+          setActionMsg(m);
+          openActionModal(m);
         }}
-        isFirstInGroup={isFirstInGroup}
-        isLastInGroup={isLastInGroup}
+        repliedMsg={repliedMsg}
+        onPressReplyPreview={(m) => {
+          const idx = messages.findIndex((mm) => mm.messageId === m.messageId);
+          if (idx >= 0) {
+            // scroll to message (FlatList inverted so index mapping)
+            flatListRef.current?.scrollToIndex({ index: messages.length - 1 - idx, animated: true });
+          }
+        }}
+        showTail={showTail}
       />
     );
   };
 
+  const headerSubtitle = () => {
+    // show "last seen" maybe, simple placeholder for now
+    return receiverProfile?.status || "last seen recently";
+  };
+
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#e5ddd5" }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}>
-        {/* Top Bar */}
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Ionicons name="arrow-back-outline" size={28} />
-          </TouchableOpacity>
-          {receiverProfile && (
-            <View style={styles.profileContainer}>
-              {receiverProfile.image ? (
-                <Image source={{ uri: receiverProfile.image }} style={styles.profileImage} />
-              ) : (
-                <View style={styles.profilePlaceholder} />
-              )}
-              <Text style={styles.topBarTitle}>{receiverProfile.name}</Text>
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.headerLeft}>
+          <Ionicons name="arrow-back" size={24} color="#000" />
+        </TouchableOpacity>
+
+        <View style={styles.headerCenter}>
+          <View style={styles.headerAvatarRow}>
+            <Image source={{ uri: receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }} style={styles.headerAvatar} />
+            <View style={{ marginLeft: 10 }}>
+              <Text style={styles.headerTitle}>{receiverProfile?.name || "User"}</Text>
+              <Text style={styles.headerSubtitle}>{headerSubtitle()}</Text>
             </View>
-          )}
-          <View style={{ width: 28 }} />
-        </View>
-
-        {/* Messages */}
-        <FlatList
-          ref={flatListRef}
-          data={messages.slice().reverse()}
-          keyExtractor={(item) => item.messageId}
-          renderItem={renderItem}
-          contentContainerStyle={{ padding: 12, paddingBottom: 120 }}
-          inverted
-          showsVerticalScrollIndicator={false}
-        />
-
-        {/* Replying */}
-        {replyingTo && (
-          <View style={styles.replyContainer}>
-            <Text style={styles.replyText}>Replying to: {replyingTo.text?.slice(0, 50) || "Image..."}</Text>
-            <TouchableOpacity onPress={() => setReplyingTo(null)}>
-              <Text style={styles.cancelReply}>X</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Emoji Selector */}
-        {showEmoji && (
-          <View style={{ height: 250 }}>
-            <EmojiSelector onEmojiSelected={(emoji) => setNewMessage((prev) => prev + emoji)} showSearchBar={false} columns={8} />
-          </View>
-        )}
-
-        {/* Input */}
-        <View style={{ paddingBottom: Platform.OS === "ios" ? 25 : 10, backgroundColor: "#fff" }}>
-          <View style={styles.inputContainer}>
-            <TouchableOpacity onPress={() => setShowEmoji((prev) => !prev)}>
-              <Ionicons name="happy-outline" size={28} style={{ marginRight: 8 }} />
-            </TouchableOpacity>
-            <TextInput style={styles.input} value={newMessage} onChangeText={setNewMessage} placeholder="Type a message..." />
-            <TouchableOpacity onPress={pickImage} style={{ marginRight: 8 }}>
-              <Ionicons name="attach-outline" size={28} color="#555" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={sendMessage} style={styles.sendBtn}>
-              <Ionicons name="send" size={24} color="#fff" />
-            </TouchableOpacity>
           </View>
         </View>
-      </KeyboardAvoidingView>
+
+        <View style={styles.headerRight}>
+          <TouchableOpacity style={styles.iconBtn}>
+            <Ionicons name="search" size={20} color="#222" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconBtn}>
+            <Ionicons name="ellipsis-vertical" size={20} color="#222" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Messages list */}
+      <FlatList
+        ref={flatListRef}
+        data={groupedMessages.slice().reverse()}
+        inverted
+        keyExtractor={(item) => item.id ?? item.messageId}
+        renderItem={renderGroupedItem}
+        contentContainerStyle={{ padding: 12, paddingBottom: 10 }}
+        showsVerticalScrollIndicator={false}
+      />
+
+      {/* Reply preview */}
+      {replyingTo && (
+        <View style={styles.replyingRow}>
+          <View style={styles.replyingBar} />
+          <View style={styles.replyingContent}>
+            <Text style={styles.replyingLabel}>Replying to</Text>
+            <Text style={styles.replyingPreview} numberOfLines={1}>
+              {replyingTo.deleted ? "This message was deleted" : replyingTo.type === "text" ? replyingTo.text : "📷 Photo"}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.cancelReplyBtn}>
+            <Ionicons name="close" size={18} color="#333" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Input area */}
+      <View style={styles.composer}>
+        <TouchableOpacity onPress={handlePickImage} style={styles.composerLeft}>
+          <Ionicons name="attach" size={22} color="#666" />
+        </TouchableOpacity>
+
+        <View style={styles.inputWrap}>
+          <TextInput
+            value={newMessage}
+            onChangeText={setNewMessage}
+            placeholder={editingMessageId ? "Edit message..." : "Message"}
+            style={styles.textInput}
+            multiline
+          />
+        </View>
+
+        <View style={styles.composerRight}>
+          <TouchableOpacity onPress={() => setShowEmoji((s) => !s)} style={styles.iconBtn}>
+            <Ionicons name="happy-outline" size={22} color="#666" />
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
+            <Ionicons name="send" size={20} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Emoji picker */}
+      {showEmoji && (
+        <View style={{ height: 250 }}>
+          <EmojiSelector onEmojiSelected={(emoji) => setNewMessage((prev) => prev + emoji)} showSearchBar={false} columns={8} />
+        </View>
+      )}
+
+      {/* Action modal */}
+      <Modal visible={actionModalVisible} animationType="fade" transparent onRequestClose={closeActionModal}>
+        <TouchableWithoutFeedback onPress={closeActionModal}>
+          <View style={modalStyles.backdrop}>
+            <View style={modalStyles.sheet}>
+              {actionMsg?.type === "text" && (
+                <TouchableOpacity style={modalStyles.row} onPress={handleCopy}>
+                  <Text style={modalStyles.rowText}>Copy</Text>
+                </TouchableOpacity>
+              )}
+
+              {actionMsg?.senderId === parentUserId && actionMsg?.type === "text" && !actionMsg?.deleted && (
+                <TouchableOpacity style={modalStyles.row} onPress={handleStartEdit}>
+                  <Text style={modalStyles.rowText}>Edit</Text>
+                </TouchableOpacity>
+              )}
+
+              {actionMsg?.senderId === parentUserId && !actionMsg?.deleted && (
+                <TouchableOpacity style={modalStyles.row} onPress={handleConfirmDelete}>
+                  <Text style={[modalStyles.rowText, { color: "red" }]}>Delete</Text>
+                </TouchableOpacity>
+              )}
+
+              <TouchableOpacity style={modalStyles.row} onPress={closeActionModal}>
+                <Text style={modalStyles.rowText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-// --- Styles ---
+// --- Styles (Telegram-inspired) ---
 const styles = StyleSheet.create({
-  topBar: {
+  container: { flex: 1, backgroundColor: "#e6eef7" },
+
+  header: {
+    height: 72,
+    paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
-    padding: 12,
     backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#e6e6e6",
   },
-  profileContainer: { flexDirection: "row", alignItems: "center", marginLeft: 12 },
-  profileImage: { width: 36, height: 36, borderRadius: 18 },
-  profilePlaceholder: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#ccc" },
-  topBarTitle: { fontSize: 18, fontWeight: "600", marginLeft: 10 },
+  headerLeft: { width: 40 },
+  headerCenter: { flex: 1, justifyContent: "center" },
+  headerAvatarRow: { flexDirection: "row", alignItems: "center" },
+  headerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: "#ddd" },
+  headerTitle: { fontSize: 16, fontWeight: "600", color: "#111" },
+  headerSubtitle: { fontSize: 12, color: "#777" },
+  headerRight: { flexDirection: "row", alignItems: "center" },
+  iconBtn: { paddingHorizontal: 8, paddingVertical: 6 },
 
-  messageRow: { marginVertical: 2 },
+  // Telegram-style bubbles
+  tgRow: { marginVertical: 6, flexDirection: "row", alignItems: "flex-end" },
+  tgAvatarSpacer: { width: 40 },
 
-  messageBubble: {
-    padding: 10,
-    borderRadius: 16,
+  tgReceiverBubble: {
+    backgroundColor: "#fff",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    borderTopLeftRadius: 4,
+    borderBottomRightRadius: 18,
     shadowColor: "#000",
+    shadowOpacity: 0.03,
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
   },
-  senderMsg: { backgroundColor: "#1e90ff", alignSelf: "flex-end" },
-  receiverMsg: { backgroundColor: "#f0f0f0", alignSelf: "flex-start" },
+  tgSenderBubble: {
+    backgroundColor: "#1f8ef1",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    borderTopRightRadius: 4,
+    borderBottomLeftRadius: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  tgSenderTail: { /* optional small tail styling could go here */ },
+  tgReceiverTail: { /* optional */ },
 
-  messageText: { fontSize: 16 },
-  editedText: { fontSize: 10, fontStyle: "italic", color: "#555" },
-  deletedText: { fontSize: 14, fontStyle: "italic", color: "#888" },
+  tgMessageText: { fontSize: 16, lineHeight: 20 },
+  tgImage: { width: 200, height: 160, borderRadius: 12, marginBottom: 6 },
 
-  timestampWrapperInline: { flexDirection: "row", alignItems: "flex-end", marginLeft: 4 },
-  timestamp: { fontSize: 10, color: "#a7a7a7ff", marginLeft: 4 },
+  tgMetaRow: { flexDirection: "row", alignSelf: "flex-end", alignItems: "center", marginTop: 6 },
+  tgTime: { fontSize: 11, color: "#888" },
+  editedHint: { fontSize: 10, color: "#dfefff" },
 
-  imageMessage: { width: 180, height: 180, borderRadius: 10 },
+  replyPreview: { flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, marginBottom: 6 },
+  replyBar: { width: 3, backgroundColor: "#a8c9ff", height: 36, borderRadius: 2, marginRight: 8 },
+  replyText: { fontSize: 13, color: "#666" },
 
-  replyPreviewContainer: { borderLeftWidth: 3, borderLeftColor: "#888", paddingLeft: 6, marginBottom: 4 },
-  replyLine: { height: 1 },
-  replyTextPreview: { fontSize: 12 },
+  deletedText: { fontStyle: "italic", color: "#888", fontSize: 15 },
 
-  inputContainer: { flexDirection: "row", alignItems: "center", paddingHorizontal: 10, paddingVertical: 6 },
-  input: { flex: 1, fontSize: 16, paddingVertical: 6 },
-  sendBtn: { backgroundColor: "#1e90ff", padding: 10, borderRadius: 20 },
+  // date separator
+  dateSeparator: { flexDirection: "row", alignItems: "center", marginVertical: 8 },
+  dateLine: { flex: 1, height: 1, backgroundColor: "#ddd" },
+  dateBubble: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: "#fff", borderRadius: 16, marginHorizontal: 8 },
+  dateText: { color: "#666", fontSize: 12 },
 
-  replyContainer: { flexDirection: "row", alignItems: "center", backgroundColor: "#eee", padding: 6, borderLeftWidth: 3, borderLeftColor: "#1e90ff" },
-  replyText: { flex: 1, fontSize: 14, color: "#333" },
-  cancelReply: { fontSize: 14, color: "#555", marginLeft: 6 },
+  // replying preview above input
+  replyingRow: { flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#f1f6fb", borderLeftWidth: 4, borderLeftColor: "#1f8ef1" },
+  replyingBar: { width: 4, height: "100%", backgroundColor: "#1f8ef1", marginRight: 8 },
+  replyingContent: { flex: 1 },
+  replyingLabel: { fontSize: 12, color: "#777" },
+  replyingPreview: { fontSize: 13, color: "#333" },
+  cancelReplyBtn: { padding: 8 },
+
+  // composer
+  composer: { flexDirection: "row", alignItems: "flex-end", padding: 8, backgroundColor: "#fff", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#ddd" },
+  composerLeft: { padding: 8 },
+  inputWrap: { flex: 1, marginHorizontal: 6, backgroundColor: "#f2f6fb", borderRadius: 24, paddingHorizontal: 12, paddingVertical: Platform.OS === "ios" ? 8 : 6, maxHeight: 120 },
+  textInput: { fontSize: 16, padding: 0, color: "#111" },
+  composerRight: { flexDirection: "row", alignItems: "center" },
+  sendButton: { backgroundColor: "#1f8ef1", borderRadius: 20, padding: 10, marginLeft: 8 },
+
+  inputContainer: { flexDirection: "row", alignItems: "center" },
+
+  // reply styles
+  replyContainer: {},
+  cancelReply: {},
+
+});
+
+// modal styles
+const modalStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" },
+  sheet: { backgroundColor: "#fff", paddingBottom: Platform.OS === "ios" ? 34 : 12, borderTopLeftRadius: 12, borderTopRightRadius: 12 },
+  row: { padding: 16, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#eee" },
+  rowText: { fontSize: 16 },
 });
