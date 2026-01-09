@@ -1,6 +1,7 @@
 // constants/firebaseConfig.js
 import { initializeApp } from "firebase/app";
 import { getDatabase } from "firebase/database";
+import { getStorage } from "firebase/storage";
 
 // Your Firebase config here
 const firebaseConfig = {
@@ -19,3 +20,6 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Realtime Database
 export const database = getDatabase(app);
+
+// Initialize Storage
+export const storage = getStorage(app);

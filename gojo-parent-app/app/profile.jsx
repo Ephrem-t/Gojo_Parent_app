@@ -13,10 +13,14 @@ import {
   Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ref, get } from "firebase/database";
-import { database } from "../constants/firebaseConfig";
+import { ref, get, update } from "firebase/database";
+import { database, storage } from "../constants/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
+import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const { width } = Dimensions.get("window");
 const HEADER_MAX_HEIGHT = 200;
@@ -28,6 +32,7 @@ export default function ParentProfile() {
   const router = useRouter();
   const [parentUser, setParentUser] = useState(null);
   const [children, setChildren] = useState([]);
+  const [showMenu, setShowMenu] = useState(false);
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const defaultProfile =
@@ -82,6 +87,77 @@ export default function ParentProfile() {
     loadParentData();
   }, []);
 
+  const handleChildPress = (child) => {
+    router.push(`/userProfile?recordId=${child.studentId}`);
+  };
+
+  const handleImagePicker = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        await uploadProfileImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.log("Error picking image:", error);
+      Alert.alert("Error", "Failed to pick image");
+    }
+  };
+
+  const uploadProfileImage = async (imageUri) => {
+    try {
+      console.log("Starting image upload for URI:", imageUri);
+      
+      const parentId = await AsyncStorage.getItem("parentId");
+      if (!parentId) {
+        console.log("No parentId found");
+        Alert.alert("Error", "User not found");
+        return;
+      }
+      console.log("ParentId found:", parentId);
+
+      console.log("Fetching image blob...");
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      console.log("Blob created, size:", blob.size);
+      
+      console.log("Creating storage reference...");
+      const imageRef = storageRef(storage, `profileImages/${parentId}`);
+      console.log("Storage ref created:", imageRef.fullPath);
+      
+      console.log("Uploading to storage...");
+      await uploadBytes(imageRef, blob);
+      console.log("Upload successful");
+      
+      console.log("Getting download URL...");
+      const downloadURL = await getDownloadURL(imageRef);
+      console.log("Download URL obtained:", downloadURL);
+      
+      console.log("Updating database...");
+      await update(ref(database, `Users/${parentUser.userId}`), {
+        profileImage: downloadURL
+      });
+      console.log("Database updated");
+
+      setParentUser(prev => ({
+        ...prev,
+        profileImage: downloadURL
+      }));
+
+      Alert.alert("Success", "Profile picture updated successfully");
+    } catch (error) {
+      console.log("Detailed error uploading image:", error);
+      console.log("Error code:", error.code);
+      console.log("Error message:", error.message);
+      Alert.alert("Error", `Failed to upload image: ${error.message}`);
+    }
+  };
+
   const handleLogout = () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
@@ -94,6 +170,82 @@ export default function ParentProfile() {
         },
       },
     ]);
+  };
+
+  const handleEditInfo = () => {
+    setShowMenu(false);
+    // TODO: Navigate to edit profile screen
+    Alert.alert("Edit Info", "Edit profile functionality coming soon!");
+  };
+
+  const handleSetProfilePhoto = () => {
+    setShowMenu(false);
+    handleImagePicker();
+  };
+
+  const handleSaveProfilePhoto = async () => {
+    setShowMenu(false);
+    
+    console.log("Starting save profile photo...");
+    console.log("Profile image URL:", parentUser?.profileImage);
+    console.log("Default profile:", defaultProfile);
+    
+    if (!parentUser?.profileImage || parentUser.profileImage === defaultProfile) {
+      Alert.alert("Error", "No profile photo to save");
+      return;
+    }
+
+    try {
+      console.log("Requesting media library permissions...");
+      // Request media library permissions
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      console.log("Permission status:", status);
+      
+      if (status === 'denied') {
+        Alert.alert("Permission Required", "Please allow access to save photos to your gallery in Settings");
+        return;
+      }
+      
+      if (status !== 'granted') {
+        // Try requesting again for undetermined status
+        const { status: newStatus } = await MediaLibrary.requestPermissionsAsync();
+        console.log("Second permission request status:", newStatus);
+        
+        if (newStatus !== 'granted') {
+          Alert.alert("Permission Required", "Please allow access to save photos to your gallery");
+          return;
+        }
+      }
+
+      console.log("Creating download...");
+      // Download image using new API
+      const fileName = `profile_photo_${Date.now()}.jpg`;
+      console.log("Filename:", fileName);
+      
+      const fileUri = FileSystem.cacheDirectory + fileName;
+      console.log("Download path:", fileUri);
+      
+      const downloadObject = FileSystem.downloadAsync(parentUser.profileImage, fileUri);
+      console.log("Download started:", downloadObject);
+      
+      const { uri } = await downloadObject;
+      console.log("Downloaded to:", uri);
+      
+      console.log("Creating asset...");
+      // Save to device gallery
+      const asset = await MediaLibrary.createAssetAsync(uri);
+      console.log("Asset created:", asset);
+      
+      console.log("Creating album...");
+      await MediaLibrary.createAlbumAsync('Gojo Parent App', asset, false);
+      console.log("Album created");
+      
+      Alert.alert("Success", "Profile photo saved to your phone's gallery!");
+    } catch (error) {
+      console.log("Error saving photo:", error);
+      console.log("Error details:", JSON.stringify(error, null, 2));
+      Alert.alert("Error", `Failed to save profile photo: ${error.message || error}`);
+    }
   };
 
   if (!parentUser) {
@@ -164,10 +316,35 @@ export default function ParentProfile() {
           {parentUser.name}
         </Animated.Text>
 
-        <TouchableOpacity style={styles.topIcon}>
+        <TouchableOpacity style={styles.topIcon} onPress={() => setShowMenu(!showMenu)}>
           <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
         </TouchableOpacity>
       </View>
+
+      {/* Telegram Style Dropdown Menu */}
+      {showMenu && (
+        <>
+          <TouchableOpacity 
+            style={styles.menuOverlay} 
+            activeOpacity={1}
+            onPress={() => setShowMenu(false)}
+          />
+          <View style={styles.dropdownMenu}>
+            <TouchableOpacity style={styles.menuItem} onPress={handleEditInfo}>
+              <Text style={styles.menuText}>Edit Info</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleSetProfilePhoto}>
+              <Text style={styles.menuText}>Set Profile Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleSaveProfilePhoto}>
+              <Text style={styles.menuText}>Save to Gallery</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
+              <Text style={[styles.menuText, styles.logoutText]}>Logout</Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
       {/* Scrollable content */}
       <Animated.ScrollView
@@ -210,7 +387,11 @@ export default function ParentProfile() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Children</Text>
             {children.map((child) => (
-              <View key={child.studentId} style={styles.childCard}>
+              <TouchableOpacity 
+                key={child.studentId} 
+                style={styles.childCard}
+                onPress={() => handleChildPress(child)}
+              >
                 <Image source={{ uri: child.profileImage }} style={styles.childImage} />
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={styles.childName}>{child.name}</Text>
@@ -221,7 +402,8 @@ export default function ParentProfile() {
                     Relation: {child.relationship}
                   </Text>
                 </View>
-              </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
             ))}
           </View>
         )}
@@ -275,17 +457,36 @@ export default function ParentProfile() {
       </Animated.View>
 
       {/* Camera Icon */}
-      <Animated.View
+      <TouchableOpacity 
         style={[
-          styles.cameraIcon,
           {
-            transform: [{ translateY: cameraTranslate }],
-            opacity: cameraOpacity,
-          },
+            position: "absolute",
+            top: HEADER_MAX_HEIGHT - CAMERA_SIZE / 2,
+            right: 20,
+            width: CAMERA_SIZE,
+            height: CAMERA_SIZE,
+            zIndex: 20,
+          }
         ]}
+        onPress={handleImagePicker}
       >
-        <Ionicons name="camera" size={24} color="#fff" />
-      </Animated.View>
+        <Animated.View
+          style={[
+            {
+              width: CAMERA_SIZE,
+              height: CAMERA_SIZE,
+              borderRadius: CAMERA_SIZE / 2,
+              backgroundColor: "#2AABEE",
+              justifyContent: "center",
+              alignItems: "center",
+              transform: [{ translateY: cameraTranslate }],
+              opacity: cameraOpacity,
+            },
+          ]}
+        >
+          <Ionicons name="camera" size={24} color="#fff" />
+        </Animated.View>
+      </TouchableOpacity>
     </View>
   );
 }
@@ -296,7 +497,7 @@ const styles = StyleSheet.create({
 
   topBar: {
     position: "absolute",
-    top: 10,
+    top: 20,
     left: 12,
     right: 12,
     height: 40,
@@ -376,4 +577,47 @@ const styles = StyleSheet.create({
 
   accountItem: { flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
   accountText: { fontSize: 16, marginLeft: 12, flex: 1 },
+
+  // Telegram Style Dropdown Menu
+  dropdownMenu: {
+    position: "absolute",
+    top: 28,
+    right: 8,
+    backgroundColor: "#fff",
+    borderRadius: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 1000,
+    minWidth: 180,
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
+  },
+  menuOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "transparent",
+    zIndex: 999,
+  },
+  menuItem: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+    backgroundColor: "#fff",
+  },
+  menuText: {
+    fontSize: 16,
+    color: "#000",
+    fontWeight: "400",
+  },
+  logoutText: {
+    color: "#ff3b30",
+    fontWeight: "500",
+  },
 });

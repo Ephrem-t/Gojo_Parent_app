@@ -34,6 +34,10 @@ npm install firebase
 
 
 
+npm install expo-clipboard
+npm install expo-file-system expo-media-library
+
+
  npm install
 
 //Install React Navigation packages//
@@ -45,6 +49,10 @@ npm install @react-navigation/bottom-tabs
 npm install react-native-screens react-native-safe-area-context
 
 npx expo install react-native-gesture-handler react-native-reanimated react-native-screens react-native-safe-area-context @react-native-community/masked-view
+
+npm install expo-file-system expo-media-library
+
+
 
 
 
