@@ -174,8 +174,7 @@ export default function ParentProfile() {
 
   const handleEditInfo = () => {
     setShowMenu(false);
-    // TODO: Navigate to edit profile screen
-    Alert.alert("Edit Info", "Edit profile functionality coming soon!");
+    router.push("/editMyInfo");
   };
 
   const handleSetProfilePhoto = () => {
