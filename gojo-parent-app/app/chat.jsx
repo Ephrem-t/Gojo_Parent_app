@@ -1,14 +1,14 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { ref, push, update, onValue, get, child } from "firebase/database";
+import { ref, push, update, onValue, get, child, off } from "firebase/database";
 import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import { useEffect, useState, useMemo, useRef } from "react";
 import {
   Animated,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,14 +19,13 @@ import {
   Dimensions,
   Modal,
   TouchableWithoutFeedback,
+  ActivityIndicator,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import EmojiSelector from "react-native-emoji-selector";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database, storage } from "../constants/firebaseConfig";
-
-// Telegram-like chat UI/UX with existing Firebase behavior (send/edit/delete/seen/unread).
-// This component preserves your messaging logic and replaces UI with a Telegram-inspired look.
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 // --- Helpers ---
 const WINDOW_WIDTH = Dimensions.get("window").width;
@@ -78,7 +77,7 @@ const MessageBubble = ({
 }) => {
   const bubbleStyle = isSender ? styles.tgSenderBubble : styles.tgReceiverBubble;
   const textColor = isSender ? "#fff" : "#000";
-  const timeColor = isSender ? "#e6f2ff" : "#6b6b6b";
+  const timeColor = isSender ? "#dfefff" : "#6b6b6b";
 
   return (
     <View style={[styles.tgRow, isSender ? { justifyContent: "flex-end" } : { justifyContent: "flex-start" }]}>
@@ -103,7 +102,9 @@ const MessageBubble = ({
           {item.deleted ? (
             <Text style={[styles.deletedText, { color: textColor }]}>This message was deleted</Text>
           ) : item.type === "text" ? (
-            <Text style={[styles.tgMessageText, { color: textColor }]}>{item.text} {item.edited && <Text style={styles.editedHint}>(edited)</Text>}</Text>
+            <Text style={[styles.tgMessageText, { color: textColor }]}>
+              {item.text} {item.edited && <Text style={styles.editedHint}>(edited)</Text>}
+            </Text>
           ) : (
             <Image source={{ uri: item.imageUrl }} style={styles.tgImage} />
           )}
@@ -133,11 +134,13 @@ const MessageBubble = ({
 export default function Chat() {
   const router = useRouter();
   const { userId: receiverParamId } = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
 
   // ids
   const [parentRecordId, setParentRecordId] = useState(null);
   const [parentUserId, setParentUserId] = useState(null);
   const [receiverUserId, setReceiverUserId] = useState(null);
+  const [receiverRole, setReceiverRole] = useState(null);
 
   // profile
   const [receiverProfile, setReceiverProfile] = useState(null);
@@ -157,6 +160,13 @@ export default function Chat() {
   const [actionMsg, setActionMsg] = useState(null);
 
   const flatListRef = useRef();
+  const messagesListenerRef = useRef(null);
+
+  // composer height to offset FlatList padding so messages aren't hidden by floating composer
+  const [composerHeight, setComposerHeight] = useState(64);
+
+  // animated translateY for floating composer (negative keyboard height)
+  const animatedTranslateY = useRef(new Animated.Value(0)).current;
 
   // load parent ids
   useEffect(() => {
@@ -176,25 +186,31 @@ export default function Chat() {
   // fetch receiver profile & role -> resolve userId
   useEffect(() => {
     if (!receiverParamId) return;
+    let mounted = true;
     (async () => {
       try {
         const roles = ["Students", "Teachers", "School_Admins"];
         let userId = null;
+        let foundRole = null;
         for (let role of roles) {
           const snap = await get(child(ref(database), `${role}/${receiverParamId}`));
           if (snap.exists()) {
             userId = snap.val().userId;
+            foundRole = role;
             break;
           }
         }
         if (!userId) return;
+        if (!mounted) return;
         setReceiverUserId(userId);
+        setReceiverRole(foundRole);
         const profileSnap = await get(child(ref(database), `Users/${userId}`));
         setReceiverProfile(profileSnap.exists() ? profileSnap.val() : { name: "User" });
       } catch (err) {
         console.warn("fetchReceiver", err);
       }
     })();
+    return () => { mounted = false; };
   }, [receiverParamId]);
 
   const chatId = useMemo(() => {
@@ -206,6 +222,10 @@ export default function Chat() {
   useEffect(() => {
     if (!chatId) return;
     const messagesRef = ref(database, `Chats/${chatId}/messages`);
+
+    // detach previous if any
+    if (messagesListenerRef.current) messagesListenerRef.current();
+
     const unsubscribe = onValue(messagesRef, async (snap) => {
       const data = snap.val() || {};
       const arr = Object.entries(data)
@@ -213,7 +233,14 @@ export default function Chat() {
         .sort((a, b) => a.timeStamp - b.timeStamp);
       setMessages(arr);
     });
-    return () => unsubscribe();
+
+    messagesListenerRef.current = () => off(messagesRef, "value", unsubscribe);
+    return () => {
+      if (messagesListenerRef.current) {
+        messagesListenerRef.current();
+        messagesListenerRef.current = null;
+      }
+    };
   }, [chatId]);
 
   // group messages with date separators for UI
@@ -230,6 +257,79 @@ export default function Chat() {
     });
     setGroupedMessages(grouped);
   }, [messages]);
+
+  // mark as seen + clear unread when messages loaded and chat is open
+  useEffect(() => {
+    const markSeenAndClearUnread = async () => {
+      if (!chatId || !parentUserId) return;
+      try {
+        const lastRef = ref(database, `Chats/${chatId}/lastMessage`);
+        const lastSnap = await get(lastRef);
+        const last = lastSnap.exists() ? lastSnap.val() : null;
+
+        if (last && last.senderId === receiverUserId && !last.seen) {
+          await update(lastRef, { seen: true });
+          try {
+            const mu = {};
+            mu[`UserChats/${parentUserId}/${chatId}/lastMessage/seen`] = true;
+            mu[`UserChats/${receiverUserId}/${chatId}/lastMessage/seen`] = true;
+            await update(ref(database), mu);
+          } catch (e) {}
+        }
+
+        await update(ref(database, `Chats/${chatId}/unread`), { [parentUserId]: 0 });
+        try {
+          await update(ref(database), { [`UserChats/${parentUserId}/${chatId}/unread`]: 0 });
+        } catch (e) {}
+      } catch (err) {
+        console.warn("markSeen error", err);
+      }
+    };
+
+    markSeenAndClearUnread();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, chatId, parentUserId, receiverUserId]);
+
+  // auto-scroll to bottom on new messages
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+      } catch (e) {}
+    }, 100);
+    return () => clearTimeout(t);
+  }, [groupedMessages]);
+
+  // keyboard listeners to animate floating composer using translateY (negative keyboard height)
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const onShow = (e) => {
+      const kbHeight = e?.endCoordinates?.height ?? (Platform.OS === "android" ? e?.end?.height ?? 300 : 300);
+      Animated.timing(animatedTranslateY, {
+        toValue: -kbHeight,
+        duration: e?.duration ?? 250,
+        useNativeDriver: true,
+      }).start();
+    };
+    const onHide = (e) => {
+      Animated.timing(animatedTranslateY, {
+        toValue: 0,
+        duration: e?.duration ?? 200,
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const subShow = Keyboard.addListener(showEvent, onShow);
+    const subHide = Keyboard.addListener(hideEvent, onHide);
+
+    return () => {
+      subShow.remove();
+      subHide.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // action modal handlers
   const openActionModal = (msg) => {
@@ -293,23 +393,17 @@ export default function Chat() {
       return;
     }
     try {
-      // mark deleted
       await update(ref(database, `Chats/${chatId}/messages/${msg.messageId}`), { deleted: true, text: "", imageUrl: null });
-      // if it was lastMessage, set placeholder
       const lastRef = ref(database, `Chats/${chatId}/lastMessage`);
       const lastSnap = await get(lastRef);
       if (lastSnap.exists() && Number(lastSnap.val().timeStamp || 0) === Number(msg.timeStamp || 0)) {
         await update(lastRef, { text: "This message was deleted" });
-        // update mirror if exists
         try {
           const mu = {};
           mu[`UserChats/${parentUserId}/${chatId}/lastMessage/text`] = "This message was deleted";
           if (receiverUserId) mu[`UserChats/${receiverUserId}/${chatId}/lastMessage/text`] = "This message was deleted";
           await update(ref(database), mu);
-        } catch (e) {
-          // non-fatal
-          console.warn("mirror update failed", e);
-        }
+        } catch (e) {}
       }
     } catch (err) {
       console.error("delete error", err);
@@ -319,24 +413,22 @@ export default function Chat() {
 
   // send or edit message
   const handleSend = async () => {
-    if (!newMessage.trim() || !chatId || !parentUserId || !receiverUserId) return;
+    if (!chatId || !parentUserId || !receiverUserId) return;
+    const textTrim = newMessage.trim();
 
-    // editing
     if (editingMessageId) {
       try {
         const msgRef = ref(database, `Chats/${chatId}/messages/${editingMessageId}`);
-        await update(msgRef, { text: newMessage, edited: true });
-        // if it was lastMessage update lastMessage text
+        await update(msgRef, { text: textTrim, edited: true });
         const lastRef = ref(database, `Chats/${chatId}/lastMessage`);
         const lastSnap = await get(lastRef);
         const msgSnap = await get(msgRef);
         if (lastSnap.exists() && msgSnap.exists() && Number(lastSnap.val().timeStamp) === Number(msgSnap.val().timeStamp)) {
-          await update(lastRef, { text: newMessage });
-          // mirror
+          await update(lastRef, { text: textTrim });
           try {
             await update(ref(database), {
-              [`UserChats/${parentUserId}/${chatId}/lastMessage/text`]: newMessage,
-              [`UserChats/${receiverUserId}/${chatId}/lastMessage/text`]: newMessage,
+              [`UserChats/${parentUserId}/${chatId}/lastMessage/text`]: textTrim,
+              [`UserChats/${receiverUserId}/${chatId}/lastMessage/text`]: textTrim,
             });
           } catch (e) {}
         }
@@ -350,7 +442,7 @@ export default function Chat() {
       }
     }
 
-    // new message
+    if (!textTrim) return;
     try {
       const rootRef = ref(database, `Chats/${chatId}`);
       const newRef = push(ref(database, `Chats/${chatId}/messages`));
@@ -359,7 +451,7 @@ export default function Chat() {
         messageId: newRef.key,
         senderId: parentUserId,
         receiverId: receiverUserId,
-        text: newMessage,
+        text: textTrim,
         imageUrl: null,
         replyTo: replyingTo?.messageId || null,
         seen: false,
@@ -370,13 +462,12 @@ export default function Chat() {
       };
       await update(newRef, payload);
 
-      // update lastMessage and unread
       const existingUnreadSnap = await get(ref(database, `Chats/${chatId}/unread/${receiverUserId}`));
       const receiverUnread = existingUnreadSnap.exists() ? existingUnreadSnap.val() + 1 : 1;
 
       await update(rootRef, {
         lastMessage: {
-          text: newMessage,
+          text: textTrim,
           senderId: parentUserId,
           seen: false,
           timeStamp: now,
@@ -392,9 +483,8 @@ export default function Chat() {
         },
       });
 
-      // update UserChats mirror (best-effort)
       try {
-        const lastMsgMirror = { text: newMessage, senderId: parentUserId, seen: false, timeStamp: now, type: "text" };
+        const lastMsgMirror = { text: textTrim, senderId: parentUserId, seen: false, timeStamp: now, type: "text" };
         const mu = {};
         mu[`UserChats/${parentUserId}/${chatId}`] = {
           otherUserId: receiverUserId,
@@ -413,9 +503,7 @@ export default function Chat() {
           timeStamp: now,
         };
         await update(ref(database), mu);
-      } catch (e) {
-        // non-fatal
-      }
+      } catch (e) {}
 
       setNewMessage("");
       setReplyingTo(null);
@@ -427,8 +515,13 @@ export default function Chat() {
 
   // pick image
   const handlePickImage = async () => {
-    if (!chatId) return;
+    if (!chatId || !parentUserId || !receiverUserId) return;
     try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert("Permission required", "We need access to your photos to send images.");
+        return;
+      }
       const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7 });
       if (res.canceled) return;
       const uri = res.assets[0].uri;
@@ -476,7 +569,6 @@ export default function Chat() {
         },
       });
 
-      // update mirror
       try {
         const lastMsgMirror = { text: "📷 Image", senderId: parentUserId, seen: false, timeStamp: now, type: "image" };
         const mu = {};
@@ -506,10 +598,21 @@ export default function Chat() {
     }
   };
 
-  // UI helpers
+  // UI helpers: compute scroll index for a message (grouped list)
+  const scrollToMessage = (msg) => {
+    if (!msg || !groupedMessages?.length) return;
+    const idx = groupedMessages.findIndex((g) => g.type === "message" && g.messageId === msg.messageId);
+    if (idx === -1) return;
+    const targetIndex = groupedMessages.length - 1 - idx; // because FlatList is inverted
+    try {
+      flatListRef.current?.scrollToIndex({ index: targetIndex, animated: true });
+    } catch (e) {
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }
+  };
+
   const renderGroupedItem = ({ item }) => {
     if (item.type === "date") {
-      // date separator
       return (
         <View style={styles.dateSeparator}>
           <View style={styles.dateLine} />
@@ -520,7 +623,6 @@ export default function Chat() {
         </View>
       );
     }
-    // message
     const isSender = item.senderId === parentUserId;
     const index = messages.findIndex((m) => m.messageId === item.messageId);
     const prev = messages[index - 1];
@@ -537,11 +639,7 @@ export default function Chat() {
         }}
         repliedMsg={repliedMsg}
         onPressReplyPreview={(m) => {
-          const idx = messages.findIndex((mm) => mm.messageId === m.messageId);
-          if (idx >= 0) {
-            // scroll to message (FlatList inverted so index mapping)
-            flatListRef.current?.scrollToIndex({ index: messages.length - 1 - idx, animated: true });
-          }
+          scrollToMessage(m);
         }}
         showTail={showTail}
       />
@@ -549,12 +647,14 @@ export default function Chat() {
   };
 
   const headerSubtitle = () => {
-    // show "last seen" maybe, simple placeholder for now
     return receiverProfile?.status || "last seen recently";
   };
 
+  // base bottom offset (keeps composer near bottom safe area). Reduced to sit lower.
+  const baseBottom = insets.bottom + 4;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "right", "left", "bottom"]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.headerLeft}>
@@ -562,13 +662,26 @@ export default function Chat() {
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          <View style={styles.headerAvatarRow}>
-            <Image source={{ uri: receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }} style={styles.headerAvatar} />
+          {/* Avatar + name are now tappable to open the profile */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={styles.headerAvatarRow}
+            onPress={() =>
+              router.push({
+                pathname: "/userProfile",
+                params: { recordId: receiverParamId, userId: receiverUserId },
+              })
+            }
+          >
+            <Image
+              source={{ uri: receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
+              style={styles.headerAvatar}
+            />
             <View style={{ marginLeft: 10 }}>
               <Text style={styles.headerTitle}>{receiverProfile?.name || "User"}</Text>
               <Text style={styles.headerSubtitle}>{headerSubtitle()}</Text>
             </View>
-          </View>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.headerRight}>
@@ -581,66 +694,96 @@ export default function Chat() {
         </View>
       </View>
 
-      {/* Messages list */}
-      <FlatList
-        ref={flatListRef}
-        data={groupedMessages.slice().reverse()}
-        inverted
-        keyExtractor={(item) => item.id ?? item.messageId}
-        renderItem={renderGroupedItem}
-        contentContainerStyle={{ padding: 12, paddingBottom: 10 }}
-        showsVerticalScrollIndicator={false}
-      />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 72 : 0}
+      >
+        <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+          <View style={{ flex: 1 }}>
+            {/* Messages list */}
+            <FlatList
+              ref={flatListRef}
+              data={groupedMessages.slice().reverse()}
+              inverted
+              keyExtractor={(item) => item.id ?? item.messageId}
+              renderItem={renderGroupedItem}
+              contentContainerStyle={{ padding: 12, paddingBottom: composerHeight + insets.bottom + 8 }}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+            />
 
-      {/* Reply preview */}
-      {replyingTo && (
-        <View style={styles.replyingRow}>
-          <View style={styles.replyingBar} />
-          <View style={styles.replyingContent}>
-            <Text style={styles.replyingLabel}>Replying to</Text>
-            <Text style={styles.replyingPreview} numberOfLines={1}>
-              {replyingTo.deleted ? "This message was deleted" : replyingTo.type === "text" ? replyingTo.text : "📷 Photo"}
-            </Text>
+            {/* Reply preview (above floating composer) */}
+            {replyingTo && (
+              <View style={[styles.replyingRow, { marginBottom: 8, marginHorizontal: 12, marginTop: 0 }]}>
+                <View style={styles.replyingBar} />
+                <View style={styles.replyingContent}>
+                  <Text style={styles.replyingLabel}>Replying to</Text>
+                  <Text style={styles.replyingPreview} numberOfLines={1}>
+                    {replyingTo.deleted ? "This message was deleted" : replyingTo.type === "text" ? replyingTo.text : "📷 Photo"}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.cancelReplyBtn}>
+                  <Ionicons name="close" size={18} color="#333" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Floating composer: anchored at baseBottom and translated up by keyboard height */}
+            <Animated.View
+              style={[
+                styles.floatingComposer,
+                {
+                  bottom: baseBottom,
+                  transform: [{ translateY: animatedTranslateY }],
+                },
+              ]}
+              onLayout={(e) => {
+                const h = e.nativeEvent.layout.height;
+                if (h && h !== composerHeight) setComposerHeight(h);
+              }}
+            >
+              <View style={styles.floatingInner}>
+                <TouchableOpacity onPress={handlePickImage} style={styles.composerLeft}>
+                  <Ionicons name="attach" size={22} color="#666" />
+                </TouchableOpacity>
+
+                <View style={styles.inputWrapFloating}>
+                  <TextInput
+                    value={newMessage}
+                    onChangeText={setNewMessage}
+                    placeholder={editingMessageId ? "Edit message..." : "Message"}
+                    style={styles.textInput}
+                    multiline
+                    returnKeyType="send"
+                    onSubmitEditing={() => {
+                      if (Platform.OS === "ios") handleSend();
+                    }}
+                  />
+                </View>
+
+                <View style={styles.composerRight}>
+                  <TouchableOpacity onPress={() => setShowEmoji((s) => !s)} style={styles.iconBtn}>
+                    <Ionicons name="happy-outline" size={22} color="#666" />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity onPress={handleSend} style={[styles.sendButton, !newMessage.trim() && { opacity: 0.5 }]} disabled={!newMessage.trim()}>
+                    <Ionicons name="send" size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Animated.View>
+
+            {/* Emoji picker */}
+            {showEmoji && (
+              <View style={{ height: 250 }}>
+                <EmojiSelector onEmojiSelected={(emoji) => setNewMessage((prev) => prev + emoji)} showSearchBar={false} columns={8} />
+              </View>
+            )}
           </View>
-          <TouchableOpacity onPress={() => setReplyingTo(null)} style={styles.cancelReplyBtn}>
-            <Ionicons name="close" size={18} color="#333" />
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Input area */}
-      <View style={styles.composer}>
-        <TouchableOpacity onPress={handlePickImage} style={styles.composerLeft}>
-          <Ionicons name="attach" size={22} color="#666" />
-        </TouchableOpacity>
-
-        <View style={styles.inputWrap}>
-          <TextInput
-            value={newMessage}
-            onChangeText={setNewMessage}
-            placeholder={editingMessageId ? "Edit message..." : "Message"}
-            style={styles.textInput}
-            multiline
-          />
-        </View>
-
-        <View style={styles.composerRight}>
-          <TouchableOpacity onPress={() => setShowEmoji((s) => !s)} style={styles.iconBtn}>
-            <Ionicons name="happy-outline" size={22} color="#666" />
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={handleSend} style={styles.sendButton}>
-            <Ionicons name="send" size={20} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Emoji picker */}
-      {showEmoji && (
-        <View style={{ height: 250 }}>
-          <EmojiSelector onEmojiSelected={(emoji) => setNewMessage((prev) => prev + emoji)} showSearchBar={false} columns={8} />
-        </View>
-      )}
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
 
       {/* Action modal */}
       <Modal visible={actionModalVisible} animationType="fade" transparent onRequestClose={closeActionModal}>
@@ -707,8 +850,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 18,
-    borderTopLeftRadius: 4,
-    borderBottomRightRadius: 18,
+    borderTopLeftRadius: 6,
+    borderBottomRightRadius: 6,
     shadowColor: "#000",
     shadowOpacity: 0.03,
     shadowOffset: { width: 0, height: 1 },
@@ -720,16 +863,16 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 18,
-    borderTopRightRadius: 4,
-    borderBottomLeftRadius: 18,
+    borderTopRightRadius: 6,
+    borderBottomLeftRadius: 6,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 1 },
     shadowRadius: 2,
     elevation: 2,
   },
-  tgSenderTail: { /* optional small tail styling could go here */ },
-  tgReceiverTail: { /* optional */ },
+  tgSenderTail: {},
+  tgReceiverTail: {},
 
   tgMessageText: { fontSize: 16, lineHeight: 20 },
   tgImage: { width: 200, height: 160, borderRadius: 12, marginBottom: 6 },
@@ -738,7 +881,7 @@ const styles = StyleSheet.create({
   tgTime: { fontSize: 11, color: "#888" },
   editedHint: { fontSize: 10, color: "#dfefff" },
 
-  replyPreview: { flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, marginBottom: 6 },
+  replyPreview: { flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingHorizontal: 8, borderRadius: 10, marginBottom: 6, backgroundColor: "rgba(0,0,0,0.03)" },
   replyBar: { width: 3, backgroundColor: "#a8c9ff", height: 36, borderRadius: 2, marginRight: 8 },
   replyText: { fontSize: 13, color: "#666" },
 
@@ -751,27 +894,40 @@ const styles = StyleSheet.create({
   dateText: { color: "#666", fontSize: 12 },
 
   // replying preview above input
-  replyingRow: { flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#f1f6fb", borderLeftWidth: 4, borderLeftColor: "#1f8ef1" },
+  replyingRow: { flexDirection: "row", alignItems: "center", padding: 8, backgroundColor: "#f1f6fb", borderLeftWidth: 4, borderLeftColor: "#1f8ef1", borderRadius: 10 },
   replyingBar: { width: 4, height: "100%", backgroundColor: "#1f8ef1", marginRight: 8 },
   replyingContent: { flex: 1 },
   replyingLabel: { fontSize: 12, color: "#777" },
   replyingPreview: { fontSize: 13, color: "#333" },
   cancelReplyBtn: { padding: 8 },
 
-  // composer
-  composer: { flexDirection: "row", alignItems: "flex-end", padding: 8, backgroundColor: "#fff", borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#ddd" },
-  composerLeft: { padding: 8 },
-  inputWrap: { flex: 1, marginHorizontal: 6, backgroundColor: "#f2f6fb", borderRadius: 24, paddingHorizontal: 12, paddingVertical: Platform.OS === "ios" ? 8 : 6, maxHeight: 120 },
-  textInput: { fontSize: 16, padding: 0, color: "#111" },
+  // floating composer
+  floatingComposer: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    zIndex: 50,
+  },
+  floatingInner: {
+    backgroundColor: "#fff",
+    borderRadius: 28,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  composerLeft: { padding: 6 },
+  inputWrapFloating: { flex: 1, marginHorizontal: 6, backgroundColor: "#f2f6fb", borderRadius: 20, paddingHorizontal: 12, paddingVertical: Platform.OS === "ios" ? 8 : 6, maxHeight: 140 },
+  textInput: { fontSize: 16, padding: 0, color: "#111", minHeight: 36, maxHeight: 120 },
   composerRight: { flexDirection: "row", alignItems: "center" },
   sendButton: { backgroundColor: "#1f8ef1", borderRadius: 20, padding: 10, marginLeft: 8 },
 
   inputContainer: { flexDirection: "row", alignItems: "center" },
-
-  // reply styles
-  replyContainer: {},
-  cancelReply: {},
-
 });
 
 // modal styles

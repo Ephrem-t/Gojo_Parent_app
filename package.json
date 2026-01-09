@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "@babel/parser": "^7.28.5",
     "@react-navigation/bottom-tabs": "^7.9.0"
   }
 }
