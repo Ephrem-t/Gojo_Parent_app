@@ -3,7 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Tabs, useRouter } from "expo-router";
 import { ref, onValue, off } from "firebase/database";
 import { useEffect, useState, useRef } from "react";
-import { ActivityIndicator, Image, Text, TouchableOpacity, View, StyleSheet } from "react-native";
+import { ActivityIndicator, Image, Text, TouchableOpacity, View, StyleSheet, Animated } from "react-native";
 import { database } from "../../constants/firebaseConfig";
 
 export default function DashboardLayout() {
@@ -12,6 +12,29 @@ export default function DashboardLayout() {
   const [loading, setLoading] = useState(true);
   const [parentUserId, setParentUserId] = useState(null);
   const [totalUnread, setTotalUnread] = useState(0);
+
+  // Shimmer animation
+  const shimmerAnim = new Animated.Value(0);
+  
+  useEffect(() => {
+    const shimmer = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmerAnim, {
+          toValue: 0,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    shimmer.start();
+    
+    return () => shimmer.stop();
+  }, []);
 
   // Keep refs to listeners so we can detach them on cleanup
   const parentListenerRef = useRef(null);
@@ -73,6 +96,39 @@ export default function DashboardLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Skeleton components
+  const ProfileSkeleton = () => (
+    <Animated.View 
+      style={[
+        { width: 40, height: 40, borderRadius: 20 },
+        styles.skeleton,
+        {
+          opacity: shimmerAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.3, 0.7],
+          }),
+        }
+      ]} 
+    />
+  );
+
+  const MessageIconSkeleton = () => (
+    <View style={styles.messageContainer}>
+      <Animated.View 
+        style={[
+          { width: 24, height: 24, borderRadius: 4 },
+          styles.skeleton,
+          {
+            opacity: shimmerAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0.3, 0.7],
+            }),
+          }
+        ]} 
+      />
+    </View>
+  );
+
   // Listen for total unread when we have the parentUserId
   useEffect(() => {
     if (!parentUserId) {
@@ -114,19 +170,22 @@ export default function DashboardLayout() {
         headerTitleAlign: "left",
         tabBarActiveTintColor: "#1e90ff",
         tabBarInactiveTintColor: "gray",
-        tabBarStyle: { height: 70 },
+        tabBarStyle: { 
+          height: 70,
+          paddingBottom: 20,
+          backgroundColor: "#fff",
+        },
         tabBarItemStyle: { flex: 1, justifyContent: "center" },
-        tabBarLabelStyle: { fontSize: 12, marginBottom: 6 },
+        tabBarLabelStyle: { display: "none" },
       }}
     >
       <Tabs.Screen
         name="home"
         options={{
+          title: "Home",
           headerLeft: () => (
             <TouchableOpacity style={{ marginLeft: 15 }} onPress={() => router.push("/profile")}>
-              {loading ? (
-                <ActivityIndicator size="small" />
-              ) : (
+              {loading ? <ProfileSkeleton /> : (
                 <Image
                   source={{ uri: profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
                   style={{ width: 40, height: 40, borderRadius: 20 }}
@@ -134,17 +193,19 @@ export default function DashboardLayout() {
               )}
             </TouchableOpacity>
           ),
-          headerTitle: () => <Text style={{ fontSize: 22, fontWeight: "bold" }}>Gojo Study</Text>,
+          headerTitle: () => <Text style={styles.instagramTitle}>Gojo Study</Text>,
           headerRight: () => (
             <TouchableOpacity style={{ marginRight: 15 }} onPress={() => router.push("/messages")}>
-              <View style={{ width: 36, height: 36, alignItems: "center", justifyContent: "center" }}>
-                <Ionicons name="paper-plane-outline" size={24} />
-                {totalUnread > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{totalUnread > 99 ? "99+" : totalUnread}</Text>
-                  </View>
-                )}
-              </View>
+              {loading ? <MessageIconSkeleton /> : (
+                <View style={styles.messageContainer}>
+                  <Ionicons name="paper-plane-outline" size={24} color="#000" />
+                  {totalUnread > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadText}>{totalUnread > 99 ? "99+" : totalUnread}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </TouchableOpacity>
           ),
           tabBarIcon: ({ color, size }) => <Ionicons name="home-outline" size={size} color={color} />,
@@ -155,7 +216,7 @@ export default function DashboardLayout() {
         name="classMark"
         options={{
           title: "Class Mark",
-          tabBarIcon: ({ color, size }) => <Ionicons name="people-outline" size={size} color={color} />,
+          tabBarIcon: ({ color, size }) => <Ionicons name="create-outline" size={size} color={color} />,
         }}
       />
 
@@ -184,4 +245,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   unreadText: { color: "#fff", fontSize: 10, fontWeight: "bold" },
+  skeleton: {
+    backgroundColor: "#e1e1e1",
+  },
+  instagramTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    fontFamily: "System",
+    letterSpacing: -0.5,
+    marginLeft: 10,
+  },
+  messageContainer: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
 });

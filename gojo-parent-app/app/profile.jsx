@@ -11,10 +11,13 @@ import {
   Animated,
   StatusBar,
   Alert,
+  TextInput,
+  Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get, update } from "firebase/database";
-import { database, storage } from "../constants/firebaseConfig";
+import { updatePassword } from "firebase/auth";
+import { database, storage, auth } from "../constants/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -35,6 +38,18 @@ export default function ParentProfile() {
   const [showMenu, setShowMenu] = useState(false);
   const [showFullProfileImage, setShowFullProfileImage] = useState(true); // Start with full image
   const scrollY = useRef(new Animated.Value(0)).current;
+  
+  // Password change states
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  
+  // Validation error states
+  const [currentPasswordError, setCurrentPasswordError] = useState("");
+  const [newPasswordError, setNewPasswordError] = useState("");
+  const [confirmPasswordError, setConfirmPasswordError] = useState("");
 
   const defaultProfile =
     "https://cdn-icons-png.flaticon.com/512/847/847969.png";
@@ -266,6 +281,122 @@ export default function ParentProfile() {
     }
   };
 
+  const validateCurrentPassword = async () => {
+    if (!currentPassword) {
+      setCurrentPasswordError("Current password is required");
+      return false;
+    }
+    
+    // Check if current password matches the one in database
+    try {
+      const userRef = ref(database, `Users/${parentUser.userId}`);
+      const snapshot = await get(userRef);
+      const userData = snapshot.val();
+      
+      if (userData.password !== currentPassword) {
+        setCurrentPasswordError("Current password is incorrect");
+        return false;
+      }
+      
+      setCurrentPasswordError("");
+      return true;
+    } catch (error) {
+      setCurrentPasswordError("Error validating current password");
+      return false;
+    }
+  };
+
+  const validateNewPassword = () => {
+    if (!newPassword) {
+      setNewPasswordError("New password is required");
+      return false;
+    }
+    
+    if (newPassword.length < 6) {
+      setNewPasswordError("New password must be at least 6 characters long");
+      return false;
+    }
+    
+    setNewPasswordError("");
+    return true;
+  };
+
+  const validateConfirmPassword = () => {
+    if (!confirmPassword) {
+      setConfirmPasswordError("Please confirm your new password");
+      return false;
+    }
+    
+    if (newPassword !== confirmPassword) {
+      setConfirmPasswordError("Passwords do not match");
+      return false;
+    }
+    
+    setConfirmPasswordError("");
+    return true;
+  };
+
+  const handleChangePassword = async () => {
+    // Clear previous errors
+    setCurrentPasswordError("");
+    setNewPasswordError("");
+    setConfirmPasswordError("");
+    
+    // Validate all fields
+    const isCurrentValid = await validateCurrentPassword();
+    const isNewValid = validateNewPassword();
+    const isConfirmValid = validateConfirmPassword();
+    
+    if (!isCurrentValid || !isNewValid || !isConfirmValid) {
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      console.log("Parent user data:", parentUser);
+      console.log("Parent user ID:", parentUser?.userId);
+      
+      // Update password in Realtime Database under Users node
+      const dbPath = `Users/${parentUser.userId}`;
+      console.log("Updating database at path:", dbPath);
+      console.log("New password:", newPassword);
+      
+      await update(ref(database, dbPath), {
+        password: newPassword
+      });
+      console.log("Database password updated successfully");
+      
+      Alert.alert("Success", "Password updated successfully");
+      setShowPasswordModal(false);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (error) {
+      console.log("Error changing password:", error);
+      console.log("Error code:", error.code);
+      console.log("Error message:", error.message);
+      Alert.alert("Error", `Failed to change password: ${error.message}`);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleShowPasswordModal = () => {
+    setShowPasswordModal(true);
+  };
+
+  const handleClosePasswordModal = () => {
+    setShowPasswordModal(false);
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    // Clear errors
+    setCurrentPasswordError("");
+    setNewPasswordError("");
+    setConfirmPasswordError("");
+  };
+
   if (!parentUser) {
     return (
       <View style={styles.loading}>
@@ -429,7 +560,7 @@ export default function ParentProfile() {
         {/* Account Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
-          <TouchableOpacity style={styles.accountItem}>
+          <TouchableOpacity style={styles.accountItem} onPress={handleShowPasswordModal}>
             <Ionicons name="key-outline" size={20} color="#2563eb" />
             <Text style={styles.accountText}>Change Password</Text>
             <Ionicons name="chevron-forward-outline" size={20} color="#999" />
@@ -520,6 +651,109 @@ export default function ParentProfile() {
           <Ionicons name="camera" size={24} color="#fff" />
         </Animated.View>
       </TouchableOpacity>
+
+      {/* Password Change Modal */}
+      <Modal
+        visible={showPasswordModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={handleClosePasswordModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Change Password</Text>
+              <TouchableOpacity onPress={handleClosePasswordModal}>
+                <Ionicons name="close" size={24} color="#666" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.modalContent}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Current Password</Text>
+                <TextInput
+                  style={[styles.textInput, currentPasswordError ? styles.errorInput : null]}
+                  secureTextEntry={true}
+                  value={currentPassword}
+                  onChangeText={(text) => {
+                    setCurrentPassword(text);
+                    setCurrentPasswordError("");
+                  }}
+                  placeholder="Enter current password"
+                />
+                {currentPasswordError ? (
+                  <Text style={styles.errorText}>{currentPasswordError}</Text>
+                ) : null}
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>New Password</Text>
+                <TextInput
+                  style={[styles.textInput, newPasswordError ? styles.errorInput : null]}
+                  secureTextEntry={true}
+                  value={newPassword}
+                  onChangeText={(text) => {
+                    setNewPassword(text);
+                    setNewPasswordError("");
+                    // Check confirm password if it has value
+                    if (confirmPassword) {
+                      if (text !== confirmPassword) {
+                        setConfirmPasswordError("Passwords do not match");
+                      } else {
+                        setConfirmPasswordError("");
+                      }
+                    }
+                  }}
+                  placeholder="Enter new password (min 6 characters)"
+                />
+                {newPasswordError ? (
+                  <Text style={styles.errorText}>{newPasswordError}</Text>
+                ) : null}
+              </View>
+              
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Confirm New Password</Text>
+                <TextInput
+                  style={[styles.textInput, confirmPasswordError ? styles.errorInput : null]}
+                  secureTextEntry={true}
+                  value={confirmPassword}
+                  onChangeText={(text) => {
+                    setConfirmPassword(text);
+                    setConfirmPasswordError("");
+                    // Check if it matches new password
+                    if (newPassword && text !== newPassword) {
+                      setConfirmPasswordError("Passwords do not match");
+                    }
+                  }}
+                  placeholder="Confirm new password"
+                />
+                {confirmPasswordError ? (
+                  <Text style={styles.errorText}>{confirmPasswordError}</Text>
+                ) : null}
+              </View>
+            </View>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={handleClosePasswordModal}
+                disabled={isChangingPassword}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={handleChangePassword}
+                disabled={isChangingPassword}
+              >
+                <Text style={styles.confirmButtonText}>
+                  {isChangingPassword ? "Saving..." : "Save"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -661,5 +895,95 @@ const styles = StyleSheet.create({
   logoutText: {
     color: "#ff3b30",
     fontWeight: "500",
+  },
+
+  // Password Change Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainer: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    width: "90%",
+    maxWidth: 400,
+    maxHeight: "80%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#111",
+  },
+  modalContent: {
+    padding: 20,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#333",
+    marginBottom: 8,
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: "#f9f9f9",
+  },
+  modalActions: {
+    flexDirection: "row",
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: "#eee",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  cancelButton: {
+    backgroundColor: "#f3f4f6",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+  },
+  confirmButton: {
+    backgroundColor: "#2563eb",
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#374151",
+  },
+  confirmButtonText: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#fff",
+  },
+
+  // Error styles
+  errorInput: {
+    borderColor: "#dc2626",
+    borderWidth: 2,
+  },
+  errorText: {
+    color: "#dc2626",
+    fontSize: 12,
+    marginTop: 4,
   },
 });
