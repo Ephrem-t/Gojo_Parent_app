@@ -22,16 +22,25 @@ export default function Home() {
         const usersSnap = await get(child(dbRef, "Users"));
         const usersData = usersSnap.exists() ? usersSnap.val() : {};
 
+        const schoolAdminSnap = await get(child(dbRef, "School_Admins"));
+        const schoolAdminData = schoolAdminSnap.exists() ? schoolAdminSnap.val() : {};
+
         const postsList = Object.keys(postsData).map((postId) => {
           const post = postsData[postId];
 
           let adminName = "School Admin";
           let adminImage = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-          if (post.adminId && usersData[post.adminId]) {
-            const adminUser = usersData[post.adminId];
-            adminName = adminUser.name || adminUser.username || adminName;
-            adminImage = adminUser.profileImage || adminImage;
+          // Get admin info from School_Admins, then user info from Users
+          if (post.adminId && schoolAdminData[post.adminId]) {
+            const adminInfo = schoolAdminData[post.adminId];
+            const userId = adminInfo.userId;
+            
+            if (userId && usersData[userId]) {
+              const userInfo = usersData[userId];
+              adminName = userInfo.name || userInfo.username || "Unknown User";
+              adminImage = userInfo.profileImage || adminImage;
+            }
           }
 
           return {

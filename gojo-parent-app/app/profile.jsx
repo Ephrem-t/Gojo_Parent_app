@@ -23,7 +23,7 @@ import * as MediaLibrary from "expo-media-library";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
 const { width } = Dimensions.get("window");
-const HEADER_MAX_HEIGHT = 200;
+const HEADER_MAX_HEIGHT = 250;
 const HEADER_MIN_HEIGHT = 60;
 const AVATAR_SIZE = 120;
 const CAMERA_SIZE = 40;
@@ -33,6 +33,7 @@ export default function ParentProfile() {
   const [parentUser, setParentUser] = useState(null);
   const [children, setChildren] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
+  const [showFullProfileImage, setShowFullProfileImage] = useState(true); // Start with full image
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const defaultProfile =
@@ -86,6 +87,24 @@ export default function ParentProfile() {
 
     loadParentData();
   }, []);
+
+  // Handle scroll-based profile image toggle
+  useEffect(() => {
+    const listenerId = scrollY.addListener(({ value }) => {
+      // When any scroll happens (even 1px), show circular image
+      if (value > 0 && showFullProfileImage) {
+        setShowFullProfileImage(false);
+      }
+      // When back to top (0 scroll), show full background image
+      else if (value === 0 && !showFullProfileImage) {
+        setShowFullProfileImage(true);
+      }
+    });
+
+    return () => {
+      scrollY.removeListener(listenerId);
+    };
+  }, [showFullProfileImage]);
 
   const handleChildPress = (child) => {
     router.push(`/userProfile?recordId=${child.studentId}`);
@@ -436,22 +455,37 @@ export default function ParentProfile() {
           { height: headerHeight }
         ]}
       >
+        {/* Background Profile Image - Shows at top (0 scroll) */}
+        <Image
+          source={{ uri: parentUser.profileImage || defaultProfile }}
+          style={[
+            styles.bgProfileImage,
+            {
+              opacity: showFullProfileImage ? 1 : 0,
+            }
+          ]}
+        />
+        
         <Animated.View
           style={{
             transform: [
               { translateY: headerContentTranslate },
               { scale: headerContentScale },
             ],
-            opacity: headerContentOpacity,
+            opacity: showFullProfileImage ? 0 : headerContentOpacity,
             alignItems: "center",
           }}
         >
-          <Image
-            source={{ uri: parentUser.profileImage || defaultProfile }}
-            style={styles.avatar}
-          />
-          <Text style={styles.nameOverlay}>{parentUser.name}</Text>
-          <Text style={styles.usernameOverlay}>@{parentUser.username}</Text>
+          {showFullProfileImage ? null : (
+            <>
+              <Image
+                source={{ uri: parentUser.profileImage || defaultProfile }}
+                style={styles.avatar}
+              />
+              <Text style={styles.nameOverlay}>{parentUser.name}</Text>
+              <Text style={styles.usernameOverlay}>@{parentUser.username}</Text>
+            </>
+          )}
         </Animated.View>
       </Animated.View>
 
@@ -524,6 +558,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 10,
     overflow: "hidden",
+  },
+  bgProfileImage: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
   },
   avatar: {
     width: AVATAR_SIZE,
