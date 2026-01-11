@@ -5,9 +5,7 @@ import {
   ActivityIndicator,
   Animated,
   Dimensions,
-  FlatList,
   Image,
-  Modal,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -15,9 +13,13 @@ import {
   TouchableOpacity,
   View,
   Linking,
+  Share,
+  Alert,
+  Platform,
+  ToastAndroid,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ref, get, child } from "firebase/database";
+import { ref, get, child, push, set } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 /* ---------------- CONSTANTS ---------------- */
@@ -28,13 +30,119 @@ const HEADER_MAX_HEIGHT = Math.max(220, Math.min(300, width * 0.62));
 const HEADER_MIN_HEIGHT = 60;
 const AVATAR_SIZE = Math.max(96, Math.min(140, width * 0.32));
 const CAMERA_SIZE = Math.max(36, Math.min(50, width * 0.12));
+const SKELETON_BASE = "#E6E8EB";
+const SKELETON_HIGHLIGHT = "#F2F4F6";
 
-const GRID_COLS = 3;
-const GRID_GAP = 8;
-const GRID_PADDING = 16;
-const GRID_ITEM_SIZE = Math.floor(
-  (width - GRID_PADDING * 2 - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS
-);
+function ShimmerBlock({ style }) {
+  const animated = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(animated, {
+        toValue: 1,
+        duration: 1400,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [animated]);
+
+  const translateX = animated.interpolate({ inputRange: [0, 1], outputRange: [-120, 240] });
+
+  return (
+    <View style={[{ overflow: "hidden", backgroundColor: SKELETON_BASE, borderRadius: 8 }, style]}>
+      <Animated.View
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          width: 120,
+          opacity: 0.6,
+          transform: [{ translateX }],
+          backgroundColor: SKELETON_HIGHLIGHT,
+        }}
+      />
+    </View>
+  );
+}
+
+function SkeletonProfile() {
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={{ flex: 1, backgroundColor: "#EFEFF4" }}>
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+        <View style={styles.topIcon} />
+        <View style={styles.topTitleStack}>
+          <ShimmerBlock style={{ height: 12, width: Math.min(140, width * 0.4), borderRadius: 6, marginBottom: 6 }} />
+          <ShimmerBlock style={{ height: 10, width: Math.min(90, width * 0.26), borderRadius: 6 }} />
+        </View>
+        <View style={styles.topIcon} />
+      </View>
+
+      <View style={{ height: HEADER_MAX_HEIGHT }}>
+        <ShimmerBlock style={{ flex: 1, borderRadius: 0 }} />
+      </View>
+
+      <View style={{ alignItems: "center", marginTop: -AVATAR_SIZE / 2 }}>
+        <ShimmerBlock style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }} />
+        <ShimmerBlock style={{ height: 14, width: Math.min(180, width * 0.5), borderRadius: 7, marginTop: 12 }} />
+        <ShimmerBlock style={{ height: 10, width: Math.min(120, width * 0.32), borderRadius: 6, marginTop: 8 }} />
+      </View>
+
+      <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
+        {/* Info Card */}
+        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+          <ShimmerBlock style={{ height: 14, width: 120, borderRadius: 7, marginBottom: 10 }} />
+          <ShimmerBlock style={{ height: 10, width: "90%", borderRadius: 6, marginBottom: 8 }} />
+          <ShimmerBlock style={{ height: 10, width: "80%", borderRadius: 6, marginBottom: 8 }} />
+          <ShimmerBlock style={{ height: 10, width: "70%", borderRadius: 6 }} />
+        </View>
+
+        {/* Badges Section */}
+        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+          <ShimmerBlock style={{ height: 14, width: 160, borderRadius: 7, marginBottom: 10 }} />
+          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+            <ShimmerBlock style={{ height: 24, width: 80, borderRadius: 12, marginRight: 8, marginBottom: 8 }} />
+            <ShimmerBlock style={{ height: 24, width: 60, borderRadius: 12, marginRight: 8, marginBottom: 8 }} />
+            <ShimmerBlock style={{ height: 24, width: 70, borderRadius: 12, marginRight: 8, marginBottom: 8 }} />
+          </View>
+        </View>
+
+        {/* Parents Section */}
+        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
+          <ShimmerBlock style={{ height: 14, width: 120, borderRadius: 7, marginBottom: 10 }} />
+          {[...Array(2)].map((_, i) => (
+            <View key={`p-${i}`} style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
+              <ShimmerBlock style={{ width: 48, height: 48, borderRadius: 24, marginRight: 10 }} />
+              <View style={{ flex: 1 }}>
+                <ShimmerBlock style={{ height: 12, width: "60%", borderRadius: 6, marginBottom: 6 }} />
+                <ShimmerBlock style={{ height: 10, width: "40%", borderRadius: 6 }} />
+              </View>
+              <ShimmerBlock style={{ width: 36, height: 36, borderRadius: 18 }} />
+            </View>
+          ))}
+        </View>
+
+        {/* Teachers Section */}
+        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 24 }}>
+          <ShimmerBlock style={{ height: 14, width: 140, borderRadius: 7, marginBottom: 10 }} />
+          {[...Array(2)].map((_, i) => (
+            <View key={`t-${i}`} style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
+              <ShimmerBlock style={{ width: 48, height: 48, borderRadius: 24, marginRight: 10 }} />
+              <View style={{ flex: 1 }}>
+                <ShimmerBlock style={{ height: 12, width: "60%", borderRadius: 6, marginBottom: 6 }} />
+                <ShimmerBlock style={{ height: 10, width: "40%", borderRadius: 6 }} />
+              </View>
+              <ShimmerBlock style={{ width: 36, height: 36, borderRadius: 18 }} />
+            </View>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export default function UserProfile() {
   const router = useRouter();
@@ -48,13 +156,14 @@ export default function UserProfile() {
   const [roleName, setRoleName] = useState(null);
   const [loading, setLoading] = useState(true);
   const [parentUserId, setParentUserId] = useState(null);
-  const [sharedImages, setSharedImages] = useState([]);
-  const [imageModalVisible, setImageModalVisible] = useState(false);
-  const [activeImage, setActiveImage] = useState(null);
+  const [parentRecordId, setParentRecordId] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false); // 3-dot menu
   const [showFullProfileImage, setShowFullProfileImage] = useState(true);
   const [children, setChildren] = useState([]);
   const [parents, setParents] = useState([]);
+  const [teachers, setTeachers] = useState([]);
+  const [badges, setBadges] = useState([]);
+  const [teacherCourses, setTeacherCourses] = useState([]);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -64,6 +173,7 @@ export default function UserProfile() {
     (async () => {
       const pr = await AsyncStorage.getItem("parentId");
       if (!pr || !mounted) return;
+      setParentRecordId(pr);
       const snap = await get(child(ref(database), `Parents/${pr}`));
       if (snap.exists()) setParentUserId(snap.val()?.userId);
     })();
@@ -79,6 +189,7 @@ export default function UserProfile() {
       try {
         let resolvedUserId = paramUserId ?? null;
         let rId = paramRecordId ?? null;
+        let detectedRole = roleName;
 
         if (!resolvedUserId && rId) {
           const roles = ["Students", "Teachers", "School_Admins", "Parents"];
@@ -87,13 +198,14 @@ export default function UserProfile() {
             if (snap.exists()) {
               resolvedUserId = snap.val().userId;
               setRoleData(snap.val());
-              setRoleName(
-                r === "Students" ? "Student" : r === "Teachers" ? "Teacher" : r === "Parents" ? "Parent" : "Admin"
-              );
+              detectedRole = r === "Students" ? "Student" : r === "Teachers" ? "Teacher" : r === "Parents" ? "Parent" : "Admin";
+              setRoleName(detectedRole);
               break;
             }
           }
         }
+
+        const effectiveRole = detectedRole;
 
         if (resolvedUserId) {
           const userSnap = await get(child(ref(database), `Users/${resolvedUserId}`));
@@ -101,7 +213,7 @@ export default function UserProfile() {
         }
 
         // If Parent role detected, load children
-        if ((rId && roleName === "Parent") || (!roleName && rId)) {
+        if ((rId && effectiveRole === "Parent") || (!effectiveRole && rId)) {
           const parentSnap = await get(child(ref(database), `Parents/${rId}`));
           if (parentSnap.exists()) {
             const parentNode = parentSnap.val();
@@ -127,14 +239,22 @@ export default function UserProfile() {
           }
         }
 
-        // If Student role detected, load parents linked to this student via Students/<id>/parents
-        if (rId && roleName === "Student") {
+        // If Student role detected, load parents and teachers linked to this student
+        if (rId && effectiveRole === "Student") {
           const studentSnap = await get(child(ref(database), `Students/${rId}`));
           const usersSnap = await get(child(ref(database), `Users`));
           const usersData = usersSnap.exists() ? usersSnap.val() : {};
           const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+          const coursesSnap = await get(child(ref(database), `Courses`));
+          const assignmentsSnap = await get(child(ref(database), `TeacherAssignments`));
+          const teachersSnap = await get(child(ref(database), `Teachers`));
+          const coursesData = coursesSnap.exists() ? coursesSnap.val() : {};
+          const assignmentsData = assignmentsSnap.exists() ? assignmentsSnap.val() : {};
+          const teachersData = teachersSnap.exists() ? teachersSnap.val() : {};
 
           let parentsArray = [];
+          let teachersArray = [];
+          let badgeArray = [];
           if (studentSnap.exists()) {
             const sData = studentSnap.val();
             const parentMap = sData?.parents || {};
@@ -158,6 +278,57 @@ export default function UserProfile() {
               }
               parentsArray = collected;
             }
+
+            // Build teacher list based on grade/section courses and assignments
+            const grade = sData?.grade;
+            const section = sData?.section;
+            const courseIds = Object.keys(coursesData).filter((cid) => {
+              const c = coursesData[cid];
+              return c?.grade === grade && c?.section === section;
+            });
+
+            if (courseIds.length) {
+              const teacherMap = {};
+              Object.keys(assignmentsData).forEach((aid) => {
+                const assign = assignmentsData[aid];
+                if (!assign?.teacherId || !assign?.courseId) return;
+                if (!courseIds.includes(assign.courseId)) return;
+                const tId = assign.teacherId;
+                if (!teacherMap[tId]) {
+                  teacherMap[tId] = {
+                    teacherId: tId,
+                    subjects: new Set(),
+                  };
+                }
+                const course = coursesData[assign.courseId] || {};
+                if (course?.subject) teacherMap[tId].subjects.add(course.subject);
+              });
+
+              teachersArray = Object.keys(teacherMap).map((tId) => {
+                const tNode = teachersData[tId] || {};
+                const tUser = usersData[tNode.userId] || {};
+                return {
+                  teacherId: tId,
+                  userId: tNode.userId,
+                  name: tUser.name || tUser.username || "Teacher",
+                  profileImage: tUser.profileImage || defaultProfile,
+                  subjects: Array.from(teacherMap[tId].subjects),
+                };
+              });
+            }
+
+            // Collect badges from Students/<id>/badges if present
+            const badgeMap = sData?.badges || {};
+            badgeArray = Object.keys(badgeMap).map((bid) => {
+              const b = badgeMap[bid] || {};
+              return {
+                id: bid,
+                title: b.title || b.name || "Badge",
+                teacherId: b.teacherId || null,
+                color: b.color || "#e0f2fe",
+                issuedAt: b.issuedAt || null,
+              };
+            });
           }
 
           // Fallback: scan Parents if student.parents is missing
@@ -172,6 +343,7 @@ export default function UserProfile() {
                 const pUser = usersData[pNode.userId] || {};
                 acc.push({
                   parentId: pid,
+                  userId: pNode.userId,
                   name: pUser.name || pUser.username || "Parent",
                   profileImage: pUser.profileImage || defaultProfile,
                   relationship: match.relationship || "Parent",
@@ -181,7 +353,41 @@ export default function UserProfile() {
             }, []);
           }
 
-          if (mounted) setParents(parentsArray);
+          if (mounted) {
+            setParents(parentsArray);
+            setTeachers(teachersArray);
+            setBadges(badgeArray);
+          }
+        }
+
+        // If Teacher role detected, load assigned courses and students
+        if (rId && effectiveRole === "Teacher") {
+          const usersSnap = await get(child(ref(database), `Users`));
+          const usersData = usersSnap.exists() ? usersSnap.val() : {};
+          const coursesSnap = await get(child(ref(database), `Courses`));
+          const assignmentsSnap = await get(child(ref(database), `TeacherAssignments`));
+          const coursesData = coursesSnap.exists() ? coursesSnap.val() : {};
+          const assignmentsData = assignmentsSnap.exists() ? assignmentsSnap.val() : {};
+
+          const assignedCourseIds = Object.keys(assignmentsData)
+            .filter((aid) => assignmentsData[aid]?.teacherId === rId)
+            .map((aid) => assignmentsData[aid].courseId);
+
+          const uniqueCourseIds = Array.from(new Set(assignedCourseIds));
+
+          const coursesArray = uniqueCourseIds.map((cid) => {
+            const c = coursesData[cid] || {};
+            return {
+              courseId: cid,
+              subject: c.subject || "Subject",
+              grade: c.grade || "--",
+              section: c.section || "--",
+            };
+          });
+
+          if (mounted) {
+            setTeacherCourses(coursesArray);
+          }
         }
       } catch (e) {
         console.warn(e);
@@ -193,24 +399,6 @@ export default function UserProfile() {
     load();
     return () => (mounted = false);
   }, [paramRecordId, paramUserId]);
-
-  /* ---------------- LOAD SHARED MEDIA ---------------- */
-  useEffect(() => {
-    let mounted = true;
-    const loadShared = async () => {
-      if (!parentUserId || !paramUserId) return;
-      const chatId = [parentUserId, paramUserId].sort().join("_");
-      const snap = await get(child(ref(database), `Chats/${chatId}/messages`));
-      if (!snap.exists()) return;
-      const imgs = Object.values(snap.val())
-        .filter((m) => m?.type === "image")
-        .sort((a, b) => b.timeStamp - a.timeStamp)
-        .slice(0, 30);
-      if (mounted) setSharedImages(imgs);
-    };
-    loadShared();
-    return () => (mounted = false);
-  }, [parentUserId, paramUserId]);
 
   /* ---------------- ANIMATIONS ---------------- */
   const headerHeight = scrollY.interpolate({
@@ -269,10 +457,67 @@ export default function UserProfile() {
     }
   };
 
+  const shareProfile = async () => {
+    try {
+      const name = user?.name || "User";
+      const link = `https://gojo.app/userProfile?recordId=${paramRecordId ?? ""}&userId=${paramUserId ?? ""}`;
+      await Share.share({
+        message: `View ${name}'s profile\n${link}`,
+      });
+    } catch (e) {
+      Alert.alert("Sharing failed", "Unable to share this profile.");
+    } finally {
+      setMenuVisible(false);
+    }
+  };
+
+  const reportUser = async () => {
+    try {
+      const reportRef = push(ref(database, "Reports"));
+      await set(reportRef, {
+        targetUserId: paramUserId || user?.userId || null,
+        targetRecordId: paramRecordId || null,
+        targetName: user?.name || null,
+        targetRole: roleName || null,
+        reporterUserId: parentUserId || null,
+        createdAt: Date.now(),
+        status: "open",
+      });
+      const msg = "Reported. We will review this user.";
+      if (Platform.OS === "android") {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert("Reported", msg);
+      }
+    } catch (e) {
+      const msg = "Could not submit the report.";
+      if (Platform.OS === "android") {
+        ToastAndroid.show(msg, ToastAndroid.SHORT);
+      } else {
+        Alert.alert("Error", msg);
+      }
+    } finally {
+      setMenuVisible(false);
+    }
+  };
+
   const openChat = () => {
     const targetId = paramRecordId ?? paramUserId ?? user?.userId;
     if (targetId) router.push({ pathname: "/chat", params: { userId: targetId } });
   };
+
+  const openChatWith = useCallback(
+    (targetUserId, displayName) => {
+      if (targetUserId) {
+        router.push({ pathname: "/chat", params: { userId: targetUserId } });
+      } else if (displayName) {
+        alert(`No chat available for ${displayName}.`);
+      } else {
+        alert("Chat unavailable for this user.");
+      }
+    },
+    [router]
+  );
 
   const handleBack = useCallback(() => {
     if (router?.canGoBack && router.canGoBack()) {
@@ -284,9 +529,7 @@ export default function UserProfile() {
 
   if (loading) {
     return (
-      <View style={styles.loading}>
-        <ActivityIndicator size="large" color={TG_BLUE} />
-      </View>
+      <SkeletonProfile />
     );
   }
 
@@ -323,25 +566,17 @@ export default function UserProfile() {
             onPress={() => setMenuVisible(false)}
           />
           <View style={styles.dropdownMenu}>
-            <Pressable style={styles.menuItem} onPress={() => alert("Share User")}>
+            <Pressable style={styles.menuItem} onPress={shareProfile}>
               <Ionicons name="share-outline" size={18} color={TG_BLUE} style={{ marginRight: 8 }} />
               <Text style={styles.menuText}>Share</Text>
             </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => alert("Report User")}>
+            <Pressable style={styles.menuItem} onPress={reportUser}>
               <Ionicons name="warning-outline" size={18} color="#FFA500" style={{ marginRight: 8 }} />
               <Text style={styles.menuText}>Report User</Text>
-            </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => alert("Block User")}>
-              <Ionicons name="ban-outline" size={18} color="red" style={{ marginRight: 8 }} />
-              <Text style={[styles.menuText, styles.logoutText]}>Block User</Text>
             </Pressable>
             <Pressable style={styles.menuItem} onPress={handleCall}>
               <Ionicons name="call-outline" size={18} color={TG_BLUE} style={{ marginRight: 8 }} />
               <Text style={styles.menuText}>Call</Text>
-            </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => alert("Other Options")}>
-              <Ionicons name="ellipsis-horizontal-outline" size={18} color="#555" style={{ marginRight: 8 }} />
-              <Text style={styles.menuText}>Other</Text>
             </Pressable>
           </View>
         </>
@@ -389,37 +624,24 @@ export default function UserProfile() {
           )}
         </View>
 
-        {/* Shared Media Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Shared Media ({sharedImages.length})</Text>
-          {sharedImages.length > 0 ? (
-            <FlatList
-              data={sharedImages}
-              numColumns={GRID_COLS}
-              keyExtractor={(i, idx) => idx.toString()}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() => {
-                    setActiveImage(item.imageUrl);
-                    setImageModalVisible(true);
-                  }}
-                  style={{ margin: GRID_GAP / 2 }}
-                >
-                  <Image
-                    source={{ uri: item.imageUrl }}
-                    style={{
-                      width: GRID_ITEM_SIZE,
-                      height: GRID_ITEM_SIZE,
-                      borderRadius: 8,
-                    }}
-                  />
-                </TouchableOpacity>
-              )}
-            />
-          ) : (
-            <Text style={{ marginTop: 8, color: "#888" }}>No shared media</Text>
-          )}
-        </View>
+        {/* Badges Section (Student only) */}
+        {roleName === "Student" && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Collected Badges ({badges.length})</Text>
+            {badges.length > 0 ? (
+              <View style={styles.badgeGrid}>
+                {badges.map((b) => (
+                  <View key={b.id} style={[styles.badgePill, { backgroundColor: b.color || "#e0f2fe" }]}>
+                    <Text style={styles.badgeText}>{b.title}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.childDetails}>No badges yet</Text>
+            )}
+          </View>
+        )}
+
         {/* Children Section (for Parent profiles) */}
         {children.length > 0 && (
           <View style={styles.section}>
@@ -453,18 +675,88 @@ export default function UserProfile() {
               <TouchableOpacity
                 key={p.parentId}
                 style={styles.childCard}
-                onPress={() => router.push(`/userProfile?recordId=${p.parentId}`)}
+                onPress={() => {
+                  if (parentRecordId && p.parentId === parentRecordId) {
+                    router.push("/profile");
+                  } else {
+                    router.push(`/userProfile?recordId=${p.parentId}`);
+                  }
+                }}
               >
                 <Image source={{ uri: p.profileImage }} style={styles.childImage} />
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={styles.childName}>{p.name}</Text>
                   <Text style={styles.childDetails}>Relation: {p.relationship}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  {p.userId ? (
+                    <TouchableOpacity
+                      style={styles.messageBtn}
+                      onPress={() => openChatWith(p.userId, p.name)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Message ${p.name}`}
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={18} color="#1e90ff" />
+                    </TouchableOpacity>
+                  ) : null}
+                  <Ionicons name="chevron-forward" size={20} color="#999" />
+                </View>
               </TouchableOpacity>
             ))}
           </View>
         )}
+        
+        {/* Teachers Section (for Student profiles) */}
+        {teachers.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Teachers</Text>
+            {teachers.map((t) => (
+              <TouchableOpacity
+                key={t.teacherId}
+                style={styles.childCard}
+                onPress={() => router.push(`/userProfile?recordId=${t.teacherId}`)}
+              >
+                <Image source={{ uri: t.profileImage }} style={styles.childImage} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.childName}>{t.name}</Text>
+                  <Text style={styles.childDetails}>
+                    {t.subjects && t.subjects.length ? t.subjects.join(", ") : "Teacher"}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  {t.userId ? (
+                    <TouchableOpacity
+                      style={styles.messageBtn}
+                      onPress={() => openChatWith(t.userId, t.name)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Message ${t.name}`}
+                    >
+                      <Ionicons name="chatbubble-ellipses-outline" size={18} color="#1e90ff" />
+                    </TouchableOpacity>
+                  ) : null}
+                  <Ionicons name="chevron-forward" size={20} color="#999" />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Subjects Section (for Teacher profiles) */}
+        {roleName === "Teacher" && teacherCourses.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Subjects</Text>
+            {teacherCourses.map((c) => (
+              <View key={c.courseId} style={styles.childCard}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.childName}>{c.subject}</Text>
+                  <Text style={styles.childDetails}>Grade {c.grade} - Section {c.section}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* Students Section removed for Teacher profiles per request */}
       </Animated.ScrollView>
 
       {/* Animated Header (Avatar + Name move & shrink together) */}
@@ -504,25 +796,11 @@ export default function UserProfile() {
                 style={styles.avatar}
               />
               <Text style={styles.nameOverlay}>{user?.name}</Text>
-              <View style={styles.statusBadge}>
-                <View style={styles.statusDot} />
-                <Text style={styles.statusText}>Last seen recently</Text>
-              </View>
+              
             </>
           )}
         </Animated.View>
       </Animated.View>
-
-      {/* IMAGE MODAL */}
-      <Modal visible={imageModalVisible} transparent animationType="fade">
-        <View style={styles.modal}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setImageModalVisible(false)}
-          />
-          <Image source={{ uri: activeImage }} style={styles.fullImage} />
-        </View>
-      </Modal>
 
       {/* FLOATING MESSAGE BUTTON */}
       <TouchableOpacity
@@ -639,9 +917,6 @@ const styles = StyleSheet.create({
   infoValue: { color: "#111", fontSize: 14 },
   link: { color: TG_BLUE },
 
-  modal: { flex: 1, backgroundColor: "#000", justifyContent: "center", alignItems: "center" },
-  fullImage: { width: "94%", height: "78%", resizeMode: "contain", borderRadius: 12 },
-
   floatingMessageBtn: {
     position: "absolute",
     bottom: 100,
@@ -723,4 +998,19 @@ const styles = StyleSheet.create({
   childImage: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: "#e5e7eb" },
   childName: { fontSize: 16, fontWeight: "700", color: "#0f172a" },
   childDetails: { fontSize: 13, color: "#6b7280", marginTop: 2 },
+  messageBtn: {
+    marginRight: 10,
+    padding: 6,
+    borderRadius: 999,
+    backgroundColor: "#e0f2fe",
+  },
+  badgeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  badgePill: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(148, 163, 184, 0.4)",
+  },
+  badgeText: { fontSize: 13, fontWeight: "700", color: "#0f172a" },
 });

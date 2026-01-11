@@ -7,15 +7,14 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
+  Dimensions,
   Animated,
   StatusBar,
   Alert,
   TextInput,
   Modal,
   Linking,
-  useWindowDimensions,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get, update } from "firebase/database";
 import { database, storage } from "../constants/firebaseConfig";
@@ -26,6 +25,11 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
+const { width } = Dimensions.get("window");
+const HEADER_MAX_HEIGHT = Math.max(220, Math.min(300, width * 0.62));
+const HEADER_MIN_HEIGHT = 60;
+const AVATAR_SIZE = Math.max(96, Math.min(140, width * 0.32));
+const CAMERA_SIZE = Math.max(36, Math.min(50, width * 0.12));
 const PALETTE = {
   background: "#f5f7fb",
   surface: "#ffffff",
@@ -49,12 +53,6 @@ export default function ParentProfile() {
   const scrollY = useRef(new Animated.Value(0)).current;
   const shimmerAnim = useRef(new Animated.Value(0)).current;
   const [online, setOnline] = useState(null);
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const HEADER_MIN_HEIGHT = 60;
-  const HEADER_MAX_HEIGHT = Math.max(220, Math.min(300, width * 0.62));
-  const AVATAR_SIZE = Math.max(96, Math.min(140, width * 0.32));
-  const CAMERA_SIZE = Math.max(36, Math.min(50, width * 0.12));
   
   // Password change states
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -440,11 +438,7 @@ export default function ParentProfile() {
   };
 
   const handleBack = useCallback(() => {
-    if (router?.canGoBack && router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/");
-    }
+    router.replace("/dashboard/home");
   }, [router]);
 
   const handleCall = useCallback(() => {
@@ -542,7 +536,7 @@ export default function ParentProfile() {
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
       {/* Fixed Top Bar with Back & 3-dot */}
-      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+      <View style={styles.topBar}>
         <TouchableOpacity
           style={styles.topIcon}
           onPress={handleBack}
@@ -723,15 +717,7 @@ export default function ParentProfile() {
             <>
               <Image
                 source={{ uri: parentUser.profileImage || defaultProfile }}
-                style={[
-                  styles.avatarBase,
-                  {
-                    width: AVATAR_SIZE,
-                    height: AVATAR_SIZE,
-                    borderRadius: AVATAR_SIZE / 2,
-                    marginTop: HEADER_MAX_HEIGHT / 2 - AVATAR_SIZE / 2,
-                  },
-                ]}
+                style={styles.avatar}
               />
               <View style={styles.collapsedInfo}>
                 <Text style={styles.nameOverlay}>{parentUser.name}</Text>
@@ -979,12 +965,28 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 13, fontWeight: "700" },
   statusTextOnline: { color: "#0f172a" },
   statusTextOffline: { color: "#475569" },
-  avatarBase: {
+  avatar: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
     borderWidth: 3,
     borderColor: "#fff",
+    marginTop: HEADER_MAX_HEIGHT / 2 - AVATAR_SIZE / 2,
   },
   nameOverlay: { color: "#fff", fontSize: 22, fontWeight: "700", marginTop: 8, letterSpacing: 0.2 },
 
+  cameraIcon: {
+    position: "absolute",
+    top: HEADER_MAX_HEIGHT - CAMERA_SIZE / 2,
+    right: 20,
+    width: CAMERA_SIZE,
+    height: CAMERA_SIZE,
+    borderRadius: CAMERA_SIZE / 2,
+    backgroundColor: PALETTE.accent,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 20,
+  },
 
   section: {
     marginHorizontal: 16,

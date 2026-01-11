@@ -189,7 +189,7 @@ export default function Chat() {
     let mounted = true;
     (async () => {
       try {
-        const roles = ["Students", "Teachers", "School_Admins"];
+        const roles = ["Students", "Teachers", "School_Admins", "Parents"];
         let userId = null;
         let foundRole = null;
         for (let role of roles) {
@@ -200,6 +200,16 @@ export default function Chat() {
             break;
           }
         }
+
+        // If no role record matched, assume receiverParamId is already a Users.userId
+        if (!userId) {
+          const userSnap = await get(child(ref(database), `Users/${receiverParamId}`));
+          if (userSnap.exists()) {
+            userId = receiverParamId;
+            foundRole = null;
+          }
+        }
+
         if (!userId) return;
         if (!mounted) return;
         setReceiverUserId(userId);
