@@ -1,23 +1,24 @@
 // app/profile.jsx
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { addNetworkStateListener, getNetworkStateAsync } from "expo-network";
 import {
   View,
   Text,
   Image,
   TouchableOpacity,
-  ScrollView,
   StyleSheet,
-  Dimensions,
   Animated,
   StatusBar,
   Alert,
   TextInput,
   Modal,
+  Linking,
+  useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get, update } from "firebase/database";
-import { updatePassword } from "firebase/auth";
-import { database, storage, auth } from "../constants/firebaseConfig";
+import { database, storage } from "../constants/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -25,11 +26,19 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 
-const { width } = Dimensions.get("window");
-const HEADER_MAX_HEIGHT = 250;
-const HEADER_MIN_HEIGHT = 60;
-const AVATAR_SIZE = 120;
-const CAMERA_SIZE = 40;
+const PALETTE = {
+  background: "#f5f7fb",
+  surface: "#ffffff",
+  card: "#ffffff",
+  accent: "#2563eb",
+  accentDark: "#1d4ed8",
+  muted: "#6b7280",
+  text: "#0f172a",
+  border: "#e5e7eb",
+  shadow: "rgba(15, 23, 42, 0.08)",
+};
+
+const TERMS_URL = "https://example.com/terms";
 
 export default function ParentProfile() {
   const router = useRouter();
@@ -38,6 +47,14 @@ export default function ParentProfile() {
   const [showMenu, setShowMenu] = useState(false);
   const [showFullProfileImage, setShowFullProfileImage] = useState(true); // Start with full image
   const scrollY = useRef(new Animated.Value(0)).current;
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+  const [online, setOnline] = useState(null);
+  const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const HEADER_MIN_HEIGHT = 60;
+  const HEADER_MAX_HEIGHT = Math.max(220, Math.min(300, width * 0.62));
+  const AVATAR_SIZE = Math.max(96, Math.min(140, width * 0.32));
+  const CAMERA_SIZE = Math.max(36, Math.min(50, width * 0.12));
   
   // Password change states
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -102,6 +119,31 @@ export default function ParentProfile() {
 
     loadParentData();
   }, []);
+
+  useEffect(() => {
+    let listener;
+    (async () => {
+      const state = await getNetworkStateAsync();
+      setOnline(Boolean(state.isConnected && state.isInternetReachable !== false));
+      listener = addNetworkStateListener((s) => {
+        setOnline(Boolean(s.isConnected && s.isInternetReachable !== false));
+      });
+    })();
+    return () => {
+      if (listener && typeof listener.remove === "function") listener.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    const shimmer = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(shimmerAnim, { toValue: 0, duration: 900, useNativeDriver: true }),
+      ])
+    );
+    shimmer.start();
+    return () => shimmer.stop();
+  }, [shimmerAnim]);
 
   // Handle scroll-based profile image toggle
   useEffect(() => {
@@ -192,19 +234,19 @@ export default function ParentProfile() {
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert("Logout", "Are you sure you want to logout?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          await AsyncStorage.removeItem("parentId");
-          router.replace("/");
-        },
-      },
-    ]);
-  };
+  const handleTerms = useCallback(async () => {
+    setShowMenu(false);
+    try {
+      const supported = await Linking.canOpenURL(TERMS_URL);
+      if (supported) {
+        Linking.openURL(TERMS_URL);
+      } else {
+        Alert.alert("Unable to open", "Please view our Terms & Privacy on the website.");
+      }
+    } catch (error) {
+      Alert.alert("Unable to open", "Please view our Terms & Privacy on the website.");
+    }
+  }, []);
 
   const handleEditInfo = () => {
     setShowMenu(false);
@@ -397,13 +439,60 @@ export default function ParentProfile() {
     setConfirmPasswordError("");
   };
 
+  const handleBack = useCallback(() => {
+    if (router?.canGoBack && router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
+    }
+  }, [router]);
+
+  const handleCall = useCallback(() => {
+    const phone = parentUser?.phone || "";
+    if (!phone) {
+      Alert.alert("No phone number", "No phone number available for this profile.");
+      return;
+    }
+    try {
+      const sanitized = phone.toString().trim();
+      Linking.openURL(`tel:${sanitized}`);
+    } catch (e) {
+      Alert.alert("Call failed", "Unable to start a call on this device.");
+    }
+  }, [parentUser?.phone]);
+
   if (!parentUser) {
+    const shimmerStyle = {
+      opacity: shimmerAnim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.85] }),
+    };
+
     return (
-      <View style={styles.loading}>
-        <Text>Loading...</Text>
+      <View style={styles.skeletonContainer}>
+        <Animated.View style={[styles.skelHeader, shimmerStyle]} />
+        <View style={styles.skelProfileRow}>
+          <Animated.View style={[styles.skelAvatar, shimmerStyle]} />
+          <View style={styles.skelProfileText}>
+            <Animated.View style={[styles.skelLine, shimmerStyle, { marginBottom: 10 }]} />
+            <Animated.View style={[styles.skelLineShort, shimmerStyle]} />
+          </View>
+        </View>
+        <View style={styles.skelCard}>
+          <Animated.View style={[styles.skelTitle, shimmerStyle]} />
+          <Animated.View style={[styles.skelLine, shimmerStyle]} />
+          <Animated.View style={[styles.skelLine, shimmerStyle]} />
+          <Animated.View style={[styles.skelLineShort, shimmerStyle]} />
+        </View>
+        <View style={styles.skelCard}>
+          <Animated.View style={[styles.skelTitle, shimmerStyle]} />
+          <Animated.View style={[styles.skelChild, shimmerStyle]} />
+          <Animated.View style={[styles.skelChild, shimmerStyle]} />
+        </View>
       </View>
     );
   }
+
+  const derivedStatus = ((parentUser.status || "").toString().toLowerCase() === "online");
+  const isOnline = online !== null ? online : derivedStatus;
 
   // Header height animation
   const headerHeight = scrollY.interpolate({
@@ -453,17 +542,24 @@ export default function ParentProfile() {
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
       {/* Fixed Top Bar with Back & 3-dot */}
-      <View style={styles.topBar}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
         <TouchableOpacity
           style={styles.topIcon}
-          onPress={() => router.back()}
+          onPress={handleBack}
         >
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
 
-        <Animated.Text style={[styles.smallName, { opacity: smallNameOpacity }]}>
-          {parentUser.name}
-        </Animated.Text>
+        <View style={styles.topTitleStack}>
+          <Animated.Text style={[styles.smallName, { opacity: smallNameOpacity }]}>
+            {parentUser.name}
+          </Animated.Text>
+          {parentUser.status ? (
+            <Animated.Text style={[styles.smallStatus, { opacity: smallNameOpacity }]}>
+              {isOnline ? "Online" : "Offline"}
+            </Animated.Text>
+          ) : null}
+        </View>
 
         <TouchableOpacity style={styles.topIcon} onPress={() => setShowMenu(!showMenu)}>
           <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
@@ -488,8 +584,11 @@ export default function ParentProfile() {
             <TouchableOpacity style={styles.menuItem} onPress={handleSaveProfilePhoto}>
               <Text style={styles.menuText}>Save to Gallery</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
-              <Text style={[styles.menuText, styles.logoutText]}>Logout</Text>
+            <TouchableOpacity style={styles.menuItem} onPress={handleCall}>
+              <Text style={styles.menuText}>Call</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleTerms}>
+              <Text style={styles.menuText}>Terms & Privacy</Text>
             </TouchableOpacity>
           </View>
         </>
@@ -565,16 +664,15 @@ export default function ParentProfile() {
             <Text style={styles.accountText}>Change Password</Text>
             <Ionicons name="chevron-forward-outline" size={20} color="#999" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.accountItem}>
+          <TouchableOpacity style={styles.accountItem} onPress={handleEditInfo}>
             <Ionicons name="mail-outline" size={20} color="#2563eb" />
-            <Text style={styles.accountText}>Update Email / Phone</Text>
+            <Text style={styles.accountText}>Update Email / Info</Text>
             <Ionicons name="chevron-forward-outline" size={20} color="#999" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.accountItem} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color="#dc2626" />
-            <Text style={[styles.accountText, { color: "#dc2626" }]}>
-              Logout
-            </Text>
+          <TouchableOpacity style={styles.accountItem} onPress={handleTerms}>
+            <Ionicons name="document-text-outline" size={20} color="#2563eb" />
+            <Text style={styles.accountText}>Terms & Privacy</Text>
+            <Ionicons name="chevron-forward-outline" size={20} color="#999" />
           </TouchableOpacity>
         </View>
       </Animated.ScrollView>
@@ -596,6 +694,20 @@ export default function ParentProfile() {
             }
           ]}
         />
+
+        {showFullProfileImage ? (
+          <View style={styles.heroOverlayBare}>
+            <Text style={styles.heroName}>{parentUser.name}</Text>
+            {parentUser.status ? (
+              <View style={[styles.statusBadge, isOnline ? styles.statusBadgeOnline : styles.statusBadgeOffline]}>
+                <View style={[styles.statusDot, isOnline ? styles.statusDotOnline : styles.statusDotOffline]} />
+                <Text style={[styles.statusText, isOnline ? styles.statusTextOnline : styles.statusTextOffline]}>
+                  {isOnline ? "Online" : "Offline"}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
         
         <Animated.View
           style={{
@@ -611,10 +723,19 @@ export default function ParentProfile() {
             <>
               <Image
                 source={{ uri: parentUser.profileImage || defaultProfile }}
-                style={styles.avatar}
+                style={[
+                  styles.avatarBase,
+                  {
+                    width: AVATAR_SIZE,
+                    height: AVATAR_SIZE,
+                    borderRadius: AVATAR_SIZE / 2,
+                    marginTop: HEADER_MAX_HEIGHT / 2 - AVATAR_SIZE / 2,
+                  },
+                ]}
               />
-              <Text style={styles.nameOverlay}>{parentUser.name}</Text>
-              <Text style={styles.usernameOverlay}>@{parentUser.username}</Text>
+              <View style={styles.collapsedInfo}>
+                <Text style={styles.nameOverlay}>{parentUser.name}</Text>
+              </View>
             </>
           )}
         </Animated.View>
@@ -759,8 +880,17 @@ export default function ParentProfile() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#EFEFF4" },
-  loading: { flex: 1, justifyContent: "center", alignItems: "center" },
+  container: { flex: 1, backgroundColor: PALETTE.background },
+  skeletonContainer: { flex: 1, padding: 16, backgroundColor: PALETTE.background },
+  skelHeader: { height: 200, borderRadius: 18, backgroundColor: "#e8ecf3", marginBottom: 18 },
+  skelProfileRow: { flexDirection: "row", alignItems: "center", marginBottom: 18 },
+  skelAvatar: { width: 82, height: 82, borderRadius: 41, backgroundColor: "#e8ecf3", marginRight: 14 },
+  skelProfileText: { flex: 1 },
+  skelLine: { height: 16, borderRadius: 10, backgroundColor: "#e8ecf3" },
+  skelLineShort: { height: 12, width: "60%", borderRadius: 10, backgroundColor: "#e8ecf3" },
+  skelCard: { backgroundColor: PALETTE.surface, borderRadius: 14, padding: 18, marginBottom: 16, shadowColor: PALETTE.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.12, shadowRadius: 16, elevation: 6 },
+  skelTitle: { height: 18, width: "40%", borderRadius: 10, backgroundColor: "#e8ecf3", marginBottom: 16 },
+  skelChild: { height: 64, borderRadius: 12, backgroundColor: "#e8ecf3", marginBottom: 12 },
 
   topBar: {
     position: "absolute",
@@ -777,18 +907,20 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.25)",
+    backgroundColor: "rgba(37,99,235,0.25)",
     justifyContent: "center",
     alignItems: "center",
   },
-  smallName: { color: "#fff", fontSize: 18, fontWeight: "600" },
+  smallName: { color: "#fff", fontSize: 18, fontWeight: "700", letterSpacing: 0.3 },
+  smallStatus: { color: "#e2e8f0", fontSize: 12, marginTop: 0 },
+  topTitleStack: { alignItems: "center", justifyContent: "center" },
 
   header: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: "#2AABEE",
+    backgroundColor: PALETTE.accent,
     alignItems: "center",
     zIndex: 10,
     overflow: "hidden",
@@ -802,74 +934,114 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
+  heroOverlayBare: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 10,
+    alignItems: "flex-start",
+  },
+  heroName: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 0.25,
+  },
+  collapsedInfo: {
+    alignItems: "center",
+    marginTop: 6,
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusBadgeOnline: {
+    backgroundColor: "#ffffff",
+    borderColor: "rgba(16,185,129,0.35)",
+  },
+  statusBadgeOffline: {
+    backgroundColor: "#ffffff",
+    borderColor: "rgba(100,116,139,0.35)",
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 5,
+  },
+  statusDotOnline: { backgroundColor: "#10b981" },
+  statusDotOffline: { backgroundColor: "#94a3b8" },
+  statusText: { fontSize: 13, fontWeight: "700" },
+  statusTextOnline: { color: "#0f172a" },
+  statusTextOffline: { color: "#475569" },
+  avatarBase: {
     borderWidth: 3,
     borderColor: "#fff",
-    marginTop: HEADER_MAX_HEIGHT / 2 - AVATAR_SIZE / 2,
   },
-  nameOverlay: { color: "#fff", fontSize: 22, fontWeight: "700", marginTop: 8 },
-  usernameOverlay: { color: "#EAF4FF", fontSize: 14 },
+  nameOverlay: { color: "#fff", fontSize: 22, fontWeight: "700", marginTop: 8, letterSpacing: 0.2 },
 
-  cameraIcon: {
-    position: "absolute",
-    top: HEADER_MAX_HEIGHT - CAMERA_SIZE / 2,
-    right: 20,
-    width: CAMERA_SIZE,
-    height: CAMERA_SIZE,
-    borderRadius: CAMERA_SIZE / 2,
-    backgroundColor: "#2AABEE",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 20,
-  },
 
   section: {
     marginHorizontal: 16,
     marginBottom: 16,
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
+    backgroundColor: PALETTE.card,
+    padding: 18,
+    borderRadius: 14,
+    shadowColor: PALETTE.shadow,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    elevation: 8,
   },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
+  sectionTitle: { fontSize: 17, fontWeight: "700", marginBottom: 14, color: PALETTE.text, letterSpacing: 0.2 },
 
-  infoRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
-  infoLabel: { color: "#888", fontSize: 14 },
-  infoValue: { color: "#111", fontSize: 14 },
+  infoRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 8 },
+  infoLabel: { color: PALETTE.muted, fontSize: 14 },
+  infoValue: { color: PALETTE.text, fontSize: 14, fontWeight: "600" },
 
   childCard: {
     flexDirection: "row",
     alignItems: "center",
     marginVertical: 8,
     padding: 12,
-    backgroundColor: "#F7F7F7",
-    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    shadowColor: PALETTE.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
   },
-  childImage: { width: 50, height: 50, borderRadius: 25 },
-  childName: { fontSize: 16, fontWeight: "600", color: "#111" },
-  childDetails: { fontSize: 14, color: "#555" },
+  childImage: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: PALETTE.border },
+  childName: { fontSize: 16, fontWeight: "700", color: PALETTE.text },
+  childDetails: { fontSize: 13, color: PALETTE.muted, marginTop: 2 },
 
-  accountItem: { flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#eee" },
-  accountText: { fontSize: 16, marginLeft: 12, flex: 1 },
+  accountItem: { flexDirection: "row", alignItems: "center", paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: PALETTE.border },
+  accountText: { fontSize: 16, marginLeft: 12, flex: 1, color: PALETTE.text, fontWeight: "600" },
 
   // Telegram Style Dropdown Menu
   dropdownMenu: {
     position: "absolute",
     top: 28,
     right: 8,
-    backgroundColor: "#fff",
-    borderRadius: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
+    backgroundColor: PALETTE.surface,
+    borderRadius: 10,
+    shadowColor: PALETTE.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 10,
     zIndex: 1000,
     minWidth: 180,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: PALETTE.border,
   },
   menuOverlay: {
     position: "absolute",
@@ -885,15 +1057,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
-    backgroundColor: "#fff",
+    backgroundColor: PALETTE.surface,
   },
   menuText: {
     fontSize: 16,
-    color: "#000",
-    fontWeight: "400",
-  },
-  logoutText: {
-    color: "#ff3b30",
+    color: PALETTE.text,
     fontWeight: "500",
   },
 
@@ -905,7 +1073,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalContainer: {
-    backgroundColor: "#fff",
+    backgroundColor: PALETTE.surface,
     borderRadius: 12,
     width: "90%",
     maxWidth: 400,
@@ -917,12 +1085,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: PALETTE.border,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#111",
+    color: PALETTE.text,
   },
   modalContent: {
     padding: 20,
@@ -938,17 +1106,17 @@ const styles = StyleSheet.create({
   },
   textInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
+    borderColor: PALETTE.border,
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: "#f9f9f9",
+    backgroundColor: "#f8fafc",
   },
   modalActions: {
     flexDirection: "row",
     padding: 20,
     borderTopWidth: 1,
-    borderTopColor: "#eee",
+    borderTopColor: PALETTE.border,
     gap: 12,
   },
   modalButton: {
@@ -958,17 +1126,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cancelButton: {
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "#f8fafc",
     borderWidth: 1,
-    borderColor: "#d1d5db",
+    borderColor: PALETTE.border,
   },
   confirmButton: {
-    backgroundColor: "#2563eb",
+    backgroundColor: PALETTE.accent,
   },
   cancelButtonText: {
     fontSize: 16,
     fontWeight: "500",
-    color: "#374151",
+    color: PALETTE.muted,
   },
   confirmButtonText: {
     fontSize: 16,

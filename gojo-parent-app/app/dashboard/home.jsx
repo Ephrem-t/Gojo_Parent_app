@@ -1,13 +1,50 @@
 // app/dashboard/home.jsx
-import { child, get, ref, update } from "firebase/database";
-import { useEffect, useState, useRef } from "react";
-import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View, Animated, Modal, Alert, Share, Platform, Dimensions } from "react-native";
+import { child, get, ref, update, query, orderByKey, limitToLast, endAt, onValue } from "firebase/database";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { FlatList, StyleSheet, Text, TouchableOpacity, View, Animated, Modal, Alert, Share, Platform, Dimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as FileSystem from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { database } from "../../constants/firebaseConfig";
+import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Clipboard from "expo-clipboard";
+import { Image as ExpoImage } from "expo-image";
+import * as Linking from "expo-linking";
 
 const { width, height } = Dimensions.get("window");
+const STRINGS = {
+  copied: "Copied",
+  failedCopy: "Failed to copy",
+  shared: "Shared",
+  shareCancelled: "Share cancelled",
+  shareFailed: "Share failed",
+  reported: "Reported",
+  saved: "Saved to gallery",
+  saveFailed: "Failed to save photo",
+  loadFailed: "Failed to load posts",
+  notReady: "Please wait while we load your profile.",
+  likeFailed: "Could not update like",
+};
+const DEBUG_LOGS = false;
+const trackEvent = (name, props = {}) => {
+  if (DEBUG_LOGS) {
+    console.log(`[analytics] ${name}`, props);
+  }
+};
+const log = (...args) => {
+  if (DEBUG_LOGS) console.log(...args);
+};
+
+const isValidHttpUrl = (url) => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (_) {
+    return false;
+  }
+};
 
 // 🔹 Double Tap Heart Component (moved outside to prevent recreation)
 const DoubleTapHeart = ({ postId, likes, postUrl, likedPosts, handlePostTap, onDoubleTap }) => {
@@ -49,7 +86,14 @@ const DoubleTapHeart = ({ postId, likes, postUrl, likedPosts, handlePostTap, onD
       onPress={() => handlePostTap(postId, likes)}
       style={styles.imageContainer}
     >
-      {postUrl && <Image source={{ uri: postUrl }} style={styles.postImage} />}
+      {postUrl && (
+        <ExpoImage 
+          source={{ uri: postUrl }} 
+          style={styles.postImage} 
+          contentFit="cover"
+          transition={150}
+        />
+      )}
       
       {/* Heart Animation */}
       {likedPosts[postId] && (
@@ -70,14 +114,26 @@ const DoubleTapHeart = ({ postId, likes, postUrl, likedPosts, handlePostTap, onD
 
 export default function Home() {
   const [posts, setPosts] = useState([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [oldestKey, setOldestKey] = useState(null);
   const [tick, setTick] = useState(0); // used to trigger re-render every minute
   const [loading, setLoading] = useState(true);
   const [likedPosts, setLikedPosts] = useState({}); // Track liked posts for animation
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedPost, setSelectedPost] = useState(null);
+  const router = useRouter();
+  const [toast, setToast] = useState({ visible: false, message: "" });
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+
+  const showToast = useCallback((message) => {
+      setToast({ visible: true, message });
+      Animated.sequence([Animated.timing(toastOpacity, { toValue: 1, duration: 150, useNativeDriver: true }), Animated.delay(1200), Animated.timing(toastOpacity, { toValue: 0, duration: 200, useNativeDriver: true })]).start(() => setToast({ visible: false, message: "" }));
+  }, [toastOpacity]);
 
   // Shimmer animation
-  const shimmerAnim = new Animated.Value(0);
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
   
   useEffect(() => {
     const shimmer = Animated.loop(
@@ -99,64 +155,165 @@ export default function Home() {
     return () => shimmer.stop();
   }, []);
 
-  const parentUserId = "parent_user_id_here";
+  const [parentUserId, setParentUserId] = useState(null);
 
-  // 🔹 Fetch posts from Firebase
+  // Load parent user id used for likes
   useEffect(() => {
-    const fetchPosts = async () => {
-      setLoading(true);
+    let mounted = true;
+    (async () => {
       try {
-        const dbRef = ref(database);
-        const postsSnap = await get(child(dbRef, "Posts"));
-        if (!postsSnap.exists()) return;
-        const postsData = postsSnap.val();
-
-        const usersSnap = await get(child(dbRef, "Users"));
-        const usersData = usersSnap.exists() ? usersSnap.val() : {};
-
-        const schoolAdminSnap = await get(child(dbRef, "School_Admins"));
-        const schoolAdminData = schoolAdminSnap.exists() ? schoolAdminSnap.val() : {};
-
-        const postsList = Object.keys(postsData).map((postId) => {
-          const post = postsData[postId];
-
-          let adminName = "School Admin";
-          let adminImage = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
-
-          // Get admin info from School_Admins, then user info from Users
-          if (post.adminId && schoolAdminData[post.adminId]) {
-            const adminInfo = schoolAdminData[post.adminId];
-            const userId = adminInfo.userId;
-            
-            if (userId && usersData[userId]) {
-              const userInfo = usersData[userId];
-              adminName = userInfo.name || userInfo.username || "Unknown User";
-              adminImage = userInfo.profileImage || adminImage;
-            }
-          }
-
-          return {
-            id: postId,
-            message: post.message || "",
-            postUrl: post.postUrl || null,
-            time: post.time || "",
-            likes: post.likes || {},
-            likeCount: post.likeCount || 0,
-            adminName,
-            adminImage,
-          };
-        });
-
-        setPosts(postsList.reverse());
-      } catch (error) {
-        console.log("Error loading posts:", error);
-      } finally {
-        setLoading(false);
+        const parentRecordId = await AsyncStorage.getItem("parentId");
+        if (!parentRecordId || !mounted) return;
+        const prSnap = await get(child(ref(database), `Parents/${parentRecordId}`));
+        if (prSnap.exists()) {
+          const uid = prSnap.val()?.userId;
+          if (mounted) setParentUserId(uid);
+        }
+      } catch (e) {
+        console.log("Error loading parent user id:", e);
       }
-    };
-
-    fetchPosts();
+    })();
+    return () => { mounted = false; };
   }, []);
+
+  const PAGE_SIZE = 10;
+
+  const mapPosts = useCallback((postsData, usersData, schoolAdminData) => {
+    if (!postsData) return [];
+    return Object.keys(postsData).map((postId) => {
+      const post = postsData[postId] || {};
+
+      let adminName = "School Admin";
+      let adminImage = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+      let adminRecordId = post.adminId || null;
+      let adminUserId = null;
+
+      if (adminRecordId && schoolAdminData[adminRecordId]) {
+        const adminInfo = schoolAdminData[adminRecordId];
+        adminUserId = adminInfo.userId;
+        if (adminUserId && usersData[adminUserId]) {
+          const userInfo = usersData[adminUserId];
+          adminName = userInfo.name || userInfo.username || adminName;
+          adminImage = userInfo.profileImage || adminImage;
+        }
+      }
+
+      if (!adminUserId && post.userId && usersData[post.userId]) {
+        adminUserId = post.userId;
+        const userInfo = usersData[adminUserId];
+        adminName = userInfo?.name || userInfo?.username || adminName;
+        adminImage = userInfo?.profileImage || adminImage;
+      }
+
+      return {
+        id: postId,
+        message: post.message || "",
+        postUrl: post.postUrl || null,
+        time: post.time || "",
+        likes: post.likes || {},
+        likeCount: post.likeCount || 0,
+        adminName,
+        adminImage,
+        adminId: adminRecordId,
+        userId: adminUserId,
+      };
+    });
+  }, []);
+
+  const fetchPostsBatch = useCallback(async ({ reset = false, olderThanKey = null } = {}) => {
+    if (loadingMore && !reset) return;
+    if (!reset) setLoadingMore(true);
+    else setRefreshing(true);
+    if (reset) setHasMore(true);
+    try {
+      const postsRef = child(ref(database), "Posts");
+      let postsQuery = query(postsRef, orderByKey(), limitToLast(PAGE_SIZE + (olderThanKey ? 1 : 0)));
+      if (olderThanKey) {
+        postsQuery = query(postsRef, orderByKey(), endAt(olderThanKey), limitToLast(PAGE_SIZE + 1));
+      }
+
+      const postsSnap = await get(postsQuery);
+        if (!postsSnap.exists()) {
+          if (reset) setPosts([]);
+          setHasMore(false);
+          return;
+        }
+      const postsData = postsSnap.val();
+      const keys = Object.keys(postsData).sort(); // ascending keys
+
+      let slicedKeys = keys;
+      if (olderThanKey) {
+        const dupIndex = slicedKeys.indexOf(olderThanKey);
+        if (dupIndex !== -1) slicedKeys = slicedKeys.slice(0, dupIndex); // drop the duplicate oldest key
+      }
+
+      // take last PAGE_SIZE from the filtered keys
+      const pageKeys = slicedKeys.slice(-PAGE_SIZE);
+      const trimmedPosts = pageKeys.reduce((acc, k) => ({ ...acc, [k]: postsData[k] }), {});
+
+      const usersSnap = await get(child(ref(database), "Users"));
+      const usersData = usersSnap.exists() ? usersSnap.val() : {};
+
+      const schoolAdminSnap = await get(child(ref(database), "School_Admins"));
+      const schoolAdminData = schoolAdminSnap.exists() ? schoolAdminSnap.val() : {};
+
+      const mapped = mapPosts(trimmedPosts, usersData, schoolAdminData).sort((a, b) => (a.time || 0) - (b.time || 0));
+      const newOldest = mapped.length ? mapped[0].id : oldestKey;
+
+      setPosts((prev) => {
+        const combined = reset ? mapped : [...prev, ...mapped];
+        const dedup = combined.reduce((acc, item) => {
+          acc.map[item.id] = item;
+          acc.list.push(item.id);
+          return acc;
+        }, { map: {}, list: [] });
+        const unique = Object.values(dedup.map).sort((a, b) => (b.time || 0) - (a.time || 0));
+        return unique;
+      });
+
+      setOldestKey(newOldest || oldestKey);
+      setHasMore(mapped.length >= PAGE_SIZE);
+    } catch (error) {
+      log("Error loading posts:", error);
+      showToast(STRINGS.loadFailed);
+    } finally {
+      if (reset) setRefreshing(false);
+      if (!reset) setLoadingMore(false);
+      setLoading(false);
+    }
+  }, [PAGE_SIZE, loadingMore, mapPosts, oldestKey, showToast]);
+
+  useEffect(() => {
+    fetchPostsBatch({ reset: true });
+  }, [fetchPostsBatch]);
+
+  // Live updates for latest page
+  useEffect(() => {
+    const postsRef = child(ref(database), "Posts");
+    const liveQuery = query(postsRef, orderByKey(), limitToLast(PAGE_SIZE));
+    const unsubscribe = onValue(liveQuery, async (snap) => {
+      if (!snap.exists()) return;
+      try {
+        const postsData = snap.val();
+        const usersSnap = await get(child(ref(database), "Users"));
+        const usersData = usersSnap.exists() ? usersSnap.val() : {};
+        const schoolAdminSnap = await get(child(ref(database), "School_Admins"));
+        const schoolAdminData = schoolAdminSnap.exists() ? schoolAdminSnap.val() : {};
+        const mapped = mapPosts(postsData, usersData, schoolAdminData).sort((a, b) => (b.time || 0) - (a.time || 0));
+        setPosts((prev) => {
+          const merged = [...mapped, ...prev];
+          const dedup = merged.reduce((acc, item) => {
+            acc[item.id] = item;
+            return acc;
+          }, {});
+          return Object.values(dedup).sort((a, b) => (b.time || 0) - (a.time || 0));
+        });
+      } catch (e) {
+        log("Live update error:", e);
+      }
+    });
+    return () => unsubscribe();
+  }, [PAGE_SIZE, mapPosts]);
 
   // 🔹 Update tick every 1 minute for live time updates
   useEffect(() => {
@@ -165,27 +322,39 @@ export default function Home() {
   }, []);
 
   // ❤️ Like / Unlike post
-  const handleLike = async (postId, likes) => {
+  const handleLike = useCallback(async (postId, likes) => {
+    if (!parentUserId) {
+      Alert.alert("Not ready", STRINGS.notReady);
+      return;
+    }
     const updatedLikes = { ...likes };
+    const willLike = !updatedLikes[parentUserId];
     if (updatedLikes[parentUserId]) delete updatedLikes[parentUserId];
     else updatedLikes[parentUserId] = true;
 
-    await update(ref(database, `Posts/${postId}`), {
-      likes: updatedLikes,
-      likeCount: Object.keys(updatedLikes).length,
-    });
+    try {
+      await update(ref(database, `Posts/${postId}`), {
+        likes: updatedLikes,
+        likeCount: Object.keys(updatedLikes).length,
+      });
 
-    setPosts((prev) =>
-      prev.map((p) =>
-        p.id === postId
-          ? { ...p, likes: updatedLikes, likeCount: Object.keys(updatedLikes).length }
-          : p
-      )
-    );
-  };
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, likes: updatedLikes, likeCount: Object.keys(updatedLikes).length }
+            : p
+        )
+      );
+
+      trackEvent(willLike ? "post_liked" : "post_unliked", { postId });
+    } catch (error) {
+      log("Error updating like", error);
+      showToast(STRINGS.likeFailed);
+    }
+  }, [parentUserId, showToast]);
 
   // 🔹 Handle double tap to like
-  const handleDoubleTap = (postId, likes) => {
+  const handleDoubleTap = useCallback((postId, likes) => {
     // Trigger heart animation
     setLikedPosts(prev => ({ ...prev, [postId]: true }));
     
@@ -198,57 +367,68 @@ export default function Home() {
     if (!likes[parentUserId]) {
       handleLike(postId, likes);
     }
-  };
+    trackEvent("post_double_tap", { postId });
+  }, [parentUserId, handleLike]);
 
   // 🔹 Handle menu actions
-  const handleMenuPress = (post) => {
+  const handleMenuPress = useCallback((post) => {
     setSelectedPost(post);
     setMenuVisible(true);
-  };
-
-  const handleReport = () => {
+  }, []);
+  const handleReport = useCallback(() => {
     Alert.alert(
       "Report Post",
       "Are you sure you want to report this post?",
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Report", onPress: () => console.log("Post reported") },
+        { text: "Cancel", style: "cancel", onPress: () => setMenuVisible(false) },
+        { text: "Report", onPress: () => { log("Post reported"); trackEvent("post_reported", { postId: selectedPost?.id }); showToast(STRINGS.reported); setMenuVisible(false); } },
       ]
     );
-    setMenuVisible(false);
-  };
+  }, [selectedPost, showToast]);
 
-  const handleShare = async () => {
+  const handleShare = useCallback(async () => {
     try {
-      await Share.share({
-        message: `Check out this post by ${selectedPost.adminName}: ${selectedPost.message}`,
-        url: selectedPost.postUrl,
+      if (!selectedPost?.id) {
+        showToast(STRINGS.shareFailed);
+        return;
+      }
+      const deepLink = Linking.createURL(`/post/${selectedPost?.id || ""}`);
+      const shareUrl = isValidHttpUrl(selectedPost?.postUrl) ? selectedPost?.postUrl : deepLink;
+      const result = await Share.share({
+        message: `Check out this post by ${selectedPost?.adminName || "Admin"}: ${selectedPost?.message || ""}\n${shareUrl}`,
+        url: shareUrl,
       });
+      if (result?.action === Share.sharedAction) {
+        showToast(STRINGS.shared);
+        trackEvent("post_shared", { postId: selectedPost.id, hasImage: Boolean(selectedPost.postUrl) });
+      } else {
+        showToast(STRINGS.shareCancelled);
+        trackEvent("post_share_cancelled", { postId: selectedPost.id });
+      }
     } catch (error) {
-      console.log("Error sharing:", error);
+      log("Error sharing:", error);
+      showToast(STRINGS.shareFailed);
     }
     setMenuVisible(false);
-  };
+  }, [selectedPost, showToast]);
 
-  const handleDownload = async () => {
+  const handleDownload = useCallback(async () => {
     try {
-      console.log("Starting save profile photo...");
-      console.log("Profile image URL:", selectedPost?.adminImage);
-      
-      if (!selectedPost?.adminImage) {
-        Alert.alert("Error", "No profile photo to save");
+      log("Starting save profile photo...");
+      const primaryImage = isValidHttpUrl(selectedPost?.postUrl) ? selectedPost.postUrl : null;
+      const fallbackImage = isValidHttpUrl(selectedPost?.adminImage) ? selectedPost.adminImage : null;
+      const imageUrl = primaryImage || fallbackImage;
+      log("Selected image URL:", imageUrl);
+
+      if (!imageUrl) {
+        Alert.alert("Error", "No image available to save");
         return;
       }
 
-      // Check if it's the default placeholder image
-      if (selectedPost.adminImage === "https://cdn-icons-png.flaticon.com/512/847/847969.png") {
-        Alert.alert("Info", "This is a default profile image. Downloading the default image.");
-      }
-
-      console.log("Requesting media library permissions...");
+      log("Requesting media library permissions...");
       // Request media library permissions
       const { status } = await MediaLibrary.requestPermissionsAsync();
-      console.log("Permission status:", status);
+      log("Permission status:", status);
       
       if (status === 'denied') {
         Alert.alert("Permission Required", "Please allow access to save photos to your gallery in Settings");
@@ -258,7 +438,7 @@ export default function Home() {
       if (status !== 'granted') {
         // Try requesting again for undetermined status
         const { status: newStatus } = await MediaLibrary.requestPermissionsAsync();
-        console.log("Second permission request status:", newStatus);
+        log("Second permission request status:", newStatus);
         
         if (newStatus !== 'granted') {
           Alert.alert("Permission Required", "Please allow access to save photos to your gallery");
@@ -266,56 +446,69 @@ export default function Home() {
         }
       }
 
-      console.log("Creating download...");
+      log("Creating download...");
       // Download image using the same approach as profile.jsx
-      const fileName = `profile_photo_${selectedPost.id}_${Date.now()}.jpg`;
-      console.log("Filename:", fileName);
+      const fileName = `post_image_${selectedPost.id}_${Date.now()}.jpg`;
+      log("Filename:", fileName);
       
       const fileUri = FileSystem.cacheDirectory + fileName;
-      console.log("Download path:", fileUri);
+      log("Download path:", fileUri);
       
-      const downloadObject = FileSystem.downloadAsync(selectedPost.adminImage, fileUri);
-      console.log("Download started:", downloadObject);
+      const downloadObject = FileSystem.downloadAsync(imageUrl, fileUri);
+      log("Download started:", downloadObject);
       
       const { uri } = await downloadObject;
-      console.log("Downloaded to:", uri);
+      log("Downloaded to:", uri);
       
-      console.log("Creating asset...");
+      log("Creating asset...");
       // Save to device gallery
       const asset = await MediaLibrary.createAssetAsync(uri);
-      console.log("Asset created:", asset);
+      log("Asset created:", asset);
       
-      console.log("Creating album...");
+      log("Creating album...");
       await MediaLibrary.createAlbumAsync('Gojo Profiles', asset, false);
-      console.log("Album created");
-      
-      Alert.alert("Success", "Profile photo saved to your phone's gallery!");
+      log("Album created");
+      showToast(STRINGS.saved);
+      trackEvent("post_image_saved", { postId: selectedPost?.id, hasPostImage: Boolean(primaryImage) });
       setMenuVisible(false);
     } catch (error) {
-      console.log("Error saving photo:", error);
-      console.log("Error details:", JSON.stringify(error, null, 2));
-      Alert.alert("Error", `Failed to save profile photo: ${error.message || error}`);
+      log("Error saving photo:", error);
+      log("Error details:", JSON.stringify(error, null, 2));
+      showToast(STRINGS.saveFailed);
+      trackEvent("post_image_save_failed", { postId: selectedPost?.id });
       setMenuVisible(false);
     }
-  };
+  }, [selectedPost, showToast]);
 
-  const handleCopyLink = () => {
-    Alert.alert(
-      "Copy Link",
-      "Link copied to clipboard!",
-      [{ text: "OK", onPress: () => setMenuVisible(false) }]
-    );
-  };
+  const handleCopyLink = useCallback(async () => {
+    try {
+      if (!selectedPost?.id) {
+        showToast(STRINGS.failedCopy);
+        return;
+      }
+      const deepLink = Linking.createURL(`/post/${selectedPost?.id || ""}`);
+      const url = isValidHttpUrl(selectedPost?.postUrl) ? selectedPost?.postUrl : deepLink;
+      const fallbackMessage = `Check out this post by ${selectedPost?.adminName || "Admin"}: ${selectedPost?.message || ""}`;
+      await Clipboard.setStringAsync(url || fallbackMessage);
+      showToast(STRINGS.copied);
+      trackEvent("post_link_copied", { postId: selectedPost.id });
+    } catch (e) {
+      showToast(STRINGS.failedCopy);
+      trackEvent("post_link_copy_failed", { postId: selectedPost?.id });
+    } finally {
+      setMenuVisible(false);
+    }
+  }, [selectedPost, showToast]);
 
-  const handleCloseMenu = () => {
+  const handleCloseMenu = useCallback(() => {
     setMenuVisible(false);
     setSelectedPost(null);
-  };
+  }, []);
 
   // 🔹 Track tap timing for double tap detection
   const [lastTap, setLastTap] = useState({});
   
-  const handlePostTap = (postId, likes) => {
+  const handlePostTap = useCallback((postId, likes) => {
     const now = Date.now();
     const lastTapTime = lastTap[postId] || 0;
     
@@ -327,7 +520,7 @@ export default function Home() {
       // Double tap detected
       handleDoubleTap(postId, likes);
     }
-  };
+  }, [lastTap, handleDoubleTap]);
 
   // 🔹 Relative time helper
   const getRelativeTime = (postTime) => {
@@ -344,7 +537,7 @@ export default function Home() {
   };
 
   // 🔹 Render skeleton loading
-  const renderSkeleton = () => (
+  const renderSkeleton = useCallback(() => (
     <View style={styles.postCard}>
       {/* Header skeleton */}
       <View style={styles.header}>
@@ -456,21 +649,42 @@ export default function Home() {
         />
       </View>
     </View>
-  );
+  ), [shimmerAnim]);
 
   // 🔹 Render each post
-  const renderPost = ({ item }) => {
+  const renderPost = useCallback(({ item }) => {
     return (
       <View style={styles.postCard}>
         {/* Header */}
         <View style={styles.header}>
-          <Image source={{ uri: item.adminImage }} style={styles.avatar} />
-          <View style={styles.headerInfo}>
-            <Text style={styles.adminName}>{item.adminName}</Text>
-            <Text style={styles.time}>{getRelativeTime(item.time)}</Text>
-          </View>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            style={{ flexDirection: "row", alignItems: "center", flex: 1 }}
+            accessibilityRole="button"
+            accessibilityLabel={`View profile for ${item.adminName}`}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => {
+              if (item.adminId || item.userId) {
+                router.push({ pathname: "/userProfile", params: { recordId: item.adminId, userId: item.userId } });
+              }
+            }}
+          >
+            <ExpoImage 
+              source={{ uri: item.adminImage }} 
+              style={styles.avatar} 
+              contentFit="cover"
+              transition={150}
+            />
+            <View style={styles.headerInfo}>
+              <Text style={styles.adminName}>{item.adminName}</Text>
+              <Text style={styles.time}>{getRelativeTime(item.time)}</Text>
+            </View>
+          </TouchableOpacity>
           <TouchableOpacity 
             style={styles.menuButton}
+            accessibilityRole="button"
+            accessibilityLabel="Open post menu"
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             onPress={() => handleMenuPress(item)}
           >
             <Ionicons name="ellipsis-vertical" size={20} color="#000" />
@@ -492,7 +706,13 @@ export default function Home() {
 
         {/* Like section */}
         <View style={styles.likeRow}>
-          <TouchableOpacity onPress={() => handleLike(item.id, item.likes)}>
+          <TouchableOpacity 
+            onPress={() => handleLike(item.id, item.likes)} 
+            disabled={!parentUserId}
+            accessibilityRole="button"
+            accessibilityLabel={item.likes[parentUserId] ? "Unlike" : "Like"}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Text style={styles.likeBtn}>
               {item.likes[parentUserId] ? "❤️ Liked" : "🤍 Like"}
             </Text>
@@ -501,17 +721,30 @@ export default function Home() {
         </View>
       </View>
     );
-  };
+  }, [handleLike, handleMenuPress, handlePostTap, handleDoubleTap, likedPosts, parentUserId]);
 
   return (
     <View style={styles.container}>
       <FlatList
         data={loading ? Array(5).fill({}) : posts}
-        keyExtractor={(item, index) => loading ? `skeleton-${index}` : item.id}
+        keyExtractor={(item, index) => loading ? `skeleton-${index}` : (item?.id || index.toString())}
         renderItem={loading ? renderSkeleton : renderPost}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={!loading && <Text style={styles.emptyText}>No posts available</Text>}
         contentContainerStyle={styles.listContent}
+        initialNumToRender={6}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        removeClippedSubviews={true}
+        refreshing={refreshing}
+        onRefresh={() => fetchPostsBatch({ reset: true })}
+        onEndReached={() => {
+          if (hasMore && !loadingMore && oldestKey) {
+            fetchPostsBatch({ olderThanKey: oldestKey });
+          }
+        }}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={loadingMore ? <Text style={styles.loadingMore}>Loading more...</Text> : null}
       />
       
       {/* Menu Modal */}
@@ -550,6 +783,11 @@ export default function Home() {
           </View>
         </TouchableOpacity>
       </Modal>
+      {toast.visible && (
+        <Animated.View style={[styles.toast, { opacity: toastOpacity }]}> 
+          <Text style={styles.toastText}>{toast.message}</Text>
+        </Animated.View>
+      )}
     </View>
   );
 }
@@ -641,6 +879,11 @@ const styles = StyleSheet.create({
     marginTop: height * 0.15, // 15% of screen height
     fontSize: width * 0.04, // Responsive font size
     color: "gray",
+  },
+  loadingMore: {
+    textAlign: 'center',
+    paddingVertical: width * 0.04,
+    color: 'gray',
   },
   // Skeleton loading styles
   skeleton: {
@@ -737,5 +980,21 @@ const styles = StyleSheet.create({
   menuCancel: {
     borderTopWidth: width * 0.02, // Responsive border width
     borderTopColor: '#f0f0f0',
+  },
+  toast: {
+    position: 'absolute',
+    bottom: width * 0.08,
+    left: width * 0.05,
+    right: width * 0.05,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    paddingVertical: width * 0.03,
+    paddingHorizontal: width * 0.04,
+    borderRadius: width * 0.03,
+    alignItems: 'center',
+  },
+  toastText: {
+    color: '#fff',
+    fontSize: width * 0.035,
+    fontWeight: '500',
   },
 });

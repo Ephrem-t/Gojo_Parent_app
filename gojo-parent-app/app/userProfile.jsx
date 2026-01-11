@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -14,20 +14,20 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Linking,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get, child } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
 /* ---------------- CONSTANTS ---------------- */
 const TG_BLUE = "#2AABEE";
 const { width } = Dimensions.get("window");
 
-const HEADER_MAX_HEIGHT = 200;
+const HEADER_MAX_HEIGHT = Math.max(220, Math.min(300, width * 0.62));
 const HEADER_MIN_HEIGHT = 60;
-const AVATAR_SIZE = 120;
-const CAMERA_SIZE = 40;
+const AVATAR_SIZE = Math.max(96, Math.min(140, width * 0.32));
+const CAMERA_SIZE = Math.max(36, Math.min(50, width * 0.12));
 
 const GRID_COLS = 3;
 const GRID_GAP = 8;
@@ -52,6 +52,9 @@ export default function UserProfile() {
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [activeImage, setActiveImage] = useState(null);
   const [menuVisible, setMenuVisible] = useState(false); // 3-dot menu
+  const [showFullProfileImage, setShowFullProfileImage] = useState(true);
+  const [children, setChildren] = useState([]);
+  const [parents, setParents] = useState([]);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -78,14 +81,14 @@ export default function UserProfile() {
         let rId = paramRecordId ?? null;
 
         if (!resolvedUserId && rId) {
-          const roles = ["Students", "Teachers", "School_Admins"];
+          const roles = ["Students", "Teachers", "School_Admins", "Parents"];
           for (const r of roles) {
             const snap = await get(child(ref(database), `${r}/${rId}`));
             if (snap.exists()) {
               resolvedUserId = snap.val().userId;
               setRoleData(snap.val());
               setRoleName(
-                r === "Students" ? "Student" : r === "Teachers" ? "Teacher" : "Admin"
+                r === "Students" ? "Student" : r === "Teachers" ? "Teacher" : r === "Parents" ? "Parent" : "Admin"
               );
               break;
             }
@@ -95,6 +98,90 @@ export default function UserProfile() {
         if (resolvedUserId) {
           const userSnap = await get(child(ref(database), `Users/${resolvedUserId}`));
           if (mounted) setUser(userSnap.val());
+        }
+
+        // If Parent role detected, load children
+        if ((rId && roleName === "Parent") || (!roleName && rId)) {
+          const parentSnap = await get(child(ref(database), `Parents/${rId}`));
+          if (parentSnap.exists()) {
+            const parentNode = parentSnap.val();
+            const usersSnap = await get(child(ref(database), `Users`));
+            const studentsSnap = await get(child(ref(database), `Students`));
+            const usersData = usersSnap.exists() ? usersSnap.val() : {};
+            const studentsData = studentsSnap.exists() ? studentsSnap.val() : {};
+            const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+            const childrenArray = parentNode.children
+              ? Object.values(parentNode.children).map((childLink) => {
+                  const student = studentsData[childLink.studentId];
+                  const studentUser = usersData[student?.userId] || {};
+                  return {
+                    ...childLink,
+                    name: studentUser.name || "Student Name",
+                    profileImage: studentUser.profileImage || defaultProfile,
+                    grade: student?.grade || "--",
+                    section: student?.section || "--",
+                  };
+                })
+              : [];
+            if (mounted) setChildren(childrenArray);
+          }
+        }
+
+        // If Student role detected, load parents linked to this student via Students/<id>/parents
+        if (rId && roleName === "Student") {
+          const studentSnap = await get(child(ref(database), `Students/${rId}`));
+          const usersSnap = await get(child(ref(database), `Users`));
+          const usersData = usersSnap.exists() ? usersSnap.val() : {};
+          const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+
+          let parentsArray = [];
+          if (studentSnap.exists()) {
+            const sData = studentSnap.val();
+            const parentMap = sData?.parents || {};
+            const parentIds = Object.keys(parentMap);
+            if (parentIds.length) {
+              // Fetch each parent to get relationship and user details
+              const collected = [];
+              for (const pid of parentIds) {
+                const pSnap = await get(child(ref(database), `Parents/${pid}`));
+                if (pSnap.exists()) {
+                  const pNode = pSnap.val();
+                  const pUser = usersData[pNode.userId] || {};
+                  const relationship = parentMap[pid]?.relationship || "Parent";
+                  collected.push({
+                    parentId: pid,
+                    name: pUser.name || pUser.username || "Parent",
+                    profileImage: pUser.profileImage || defaultProfile,
+                    relationship,
+                  });
+                }
+              }
+              parentsArray = collected;
+            }
+          }
+
+          // Fallback: scan Parents if student.parents is missing
+          if (!parentsArray.length) {
+            const parentsSnap = await get(child(ref(database), `Parents`));
+            const parentsData = parentsSnap.exists() ? parentsSnap.val() : {};
+            parentsArray = Object.keys(parentsData).reduce((acc, pid) => {
+              const pNode = parentsData[pid];
+              const links = pNode?.children ? Object.values(pNode.children) : [];
+              const match = links.find((link) => link?.studentId === rId);
+              if (match) {
+                const pUser = usersData[pNode.userId] || {};
+                acc.push({
+                  parentId: pid,
+                  name: pUser.name || pUser.username || "Parent",
+                  profileImage: pUser.profileImage || defaultProfile,
+                  relationship: match.relationship || "Parent",
+                });
+              }
+              return acc;
+            }, []);
+          }
+
+          if (mounted) setParents(parentsArray);
         }
       } catch (e) {
         console.warn(e);
@@ -156,10 +243,44 @@ export default function UserProfile() {
     extrapolate: "clamp",
   });
 
+  // Toggle header modes based on scroll position
+  useEffect(() => {
+    const listenerId = scrollY.addListener(({ value }) => {
+      if (value > 0 && showFullProfileImage) {
+        setShowFullProfileImage(false);
+      } else if (value === 0 && !showFullProfileImage) {
+        setShowFullProfileImage(true);
+      }
+    });
+    return () => scrollY.removeListener(listenerId);
+  }, [showFullProfileImage, scrollY]);
+
+  const handleCall = () => {
+    const phone = user?.phone || "";
+    if (!phone) {
+      alert("No phone number available for this user.");
+      return;
+    }
+    try {
+      const sanitized = phone.toString().trim();
+      Linking.openURL(`tel:${sanitized}`);
+    } catch (_) {
+      alert("Unable to start a call on this device.");
+    }
+  };
+
   const openChat = () => {
     const targetId = paramRecordId ?? paramUserId ?? user?.userId;
     if (targetId) router.push({ pathname: "/chat", params: { userId: targetId } });
   };
+
+  const handleBack = useCallback(() => {
+    if (router?.canGoBack && router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
+    }
+  }, [router]);
 
   if (loading) {
     return (
@@ -174,14 +295,19 @@ export default function UserProfile() {
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
       {/* Fixed Top Bar with Back & 3-dot */}
-      <View style={styles.topBar}>
-        <TouchableOpacity style={styles.topIcon} onPress={() => router.back()}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+        <TouchableOpacity style={styles.topIcon} onPress={handleBack}>
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
 
-        <Animated.Text style={[styles.smallName, { opacity: smallNameOpacity }]}>
-          {user?.name}
-        </Animated.Text>
+        <View style={styles.topTitleStack}>
+          <Animated.Text style={[styles.smallName, { opacity: smallNameOpacity }]}>
+            {user?.name}
+          </Animated.Text>
+          <Animated.Text style={[styles.smallStatus, { opacity: smallNameOpacity }]}>
+            Last seen recently
+          </Animated.Text>
+        </View>
 
         <TouchableOpacity style={styles.topIcon} onPress={() => setMenuVisible(!menuVisible)}>
           <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
@@ -209,7 +335,7 @@ export default function UserProfile() {
               <Ionicons name="ban-outline" size={18} color="red" style={{ marginRight: 8 }} />
               <Text style={[styles.menuText, styles.logoutText]}>Block User</Text>
             </Pressable>
-            <Pressable style={styles.menuItem} onPress={() => alert("Call User")}>
+            <Pressable style={styles.menuItem} onPress={handleCall}>
               <Ionicons name="call-outline" size={18} color={TG_BLUE} style={{ marginRight: 8 }} />
               <Text style={styles.menuText}>Call</Text>
             </Pressable>
@@ -294,31 +420,96 @@ export default function UserProfile() {
             <Text style={{ marginTop: 8, color: "#888" }}>No shared media</Text>
           )}
         </View>
+        {/* Children Section (for Parent profiles) */}
+        {children.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Children</Text>
+            {children.map((child) => (
+              <TouchableOpacity 
+                key={child.studentId}
+                style={styles.childCard}
+                onPress={() => router.push(`/userProfile?recordId=${child.studentId}`)}
+              >
+                <Image source={{ uri: child.profileImage }} style={styles.childImage} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.childName}>{child.name}</Text>
+                  <Text style={styles.childDetails}>
+                    Grade {child.grade} - Section {child.section}
+                  </Text>
+                  <Text style={styles.childDetails}>
+                    Relation: {child.relationship}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+        {/* Parents Section (for Student profiles) */}
+        {parents.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Parents</Text>
+            {parents.map((p) => (
+              <TouchableOpacity
+                key={p.parentId}
+                style={styles.childCard}
+                onPress={() => router.push(`/userProfile?recordId=${p.parentId}`)}
+              >
+                <Image source={{ uri: p.profileImage }} style={styles.childImage} />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.childName}>{p.name}</Text>
+                  <Text style={styles.childDetails}>Relation: {p.relationship}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#999" />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </Animated.ScrollView>
 
       {/* Animated Header (Avatar + Name move & shrink together) */}
       <Animated.View
-        style={[
-          styles.header,
-          { height: headerHeight }
-        ]}
+        style={[styles.header, { height: headerHeight }]}
       >
+        {/* Background Profile Image - Shows at top (0 scroll) */}
+        <Image
+          source={{ uri: user?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
+          style={[styles.bgProfileImage, { opacity: showFullProfileImage ? 1 : 0 }]}
+        />
+
+        {showFullProfileImage ? (
+          <View style={styles.heroOverlayBare}>
+            <Text style={styles.heroName}>{user?.name}</Text>
+            <View style={styles.statusBadge}>
+              <View style={styles.statusDot} />
+              <Text style={styles.statusText}>Last seen recently</Text>
+            </View>
+          </View>
+        ) : null}
+
         <Animated.View
           style={{
             transform: [
               { translateY: headerContentTranslate },
               { scale: headerContentScale },
             ],
-            opacity: headerContentOpacity,
+            opacity: showFullProfileImage ? 0 : headerContentOpacity,
             alignItems: "center",
           }}
         >
-          <Image
-            source={{ uri: user?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
-            style={styles.avatar}
-          />
-          <Text style={styles.nameOverlay}>{user?.name}</Text>
-          <Text style={styles.usernameOverlay}>@{user?.username}</Text>
+          {showFullProfileImage ? null : (
+            <>
+              <Image
+                source={{ uri: user?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
+                style={styles.avatar}
+              />
+              <Text style={styles.nameOverlay}>{user?.name}</Text>
+              <View style={styles.statusBadge}>
+                <View style={styles.statusDot} />
+                <Text style={styles.statusText}>Last seen recently</Text>
+              </View>
+            </>
+          )}
         </Animated.View>
       </Animated.View>
 
@@ -369,6 +560,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   smallName: { color: "#fff", fontSize: 18, fontWeight: "600" },
+  smallStatus: { color: "#e2e8f0", fontSize: 12 },
+  topTitleStack: { alignItems: "center", justifyContent: "center" },
 
   header: {
     position: "absolute",
@@ -379,6 +572,47 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 10,
     overflow: "hidden",
+  },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    backgroundColor: "#ffffff",
+    borderColor: "rgba(100,116,139,0.35)",
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    marginRight: 5,
+    backgroundColor: "#94a3b8",
+  },
+  statusText: { fontSize: 13, fontWeight: "700", color: "#475569" },
+  bgProfileImage: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "100%",
+  },
+  heroOverlayBare: {
+    position: "absolute",
+    left: 20,
+    right: 20,
+    bottom: 10,
+    alignItems: "flex-start",
+  },
+  heroName: {
+    color: "#fff",
+    fontSize: 24,
+    fontWeight: "800",
+    letterSpacing: 0.25,
   },
   avatar: {
     width: AVATAR_SIZE,
@@ -470,4 +704,23 @@ const styles = StyleSheet.create({
     color: "#ff3b30",
     fontWeight: "500",
   },
+  // Children card styles (match profile.jsx aesthetics)
+  childCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 8,
+    padding: 12,
+    backgroundColor: "#f8fafc",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    shadowColor: "rgba(15, 23, 42, 0.08)",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  childImage: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: "#e5e7eb" },
+  childName: { fontSize: 16, fontWeight: "700", color: "#0f172a" },
+  childDetails: { fontSize: 13, color: "#6b7280", marginTop: 2 },
 });

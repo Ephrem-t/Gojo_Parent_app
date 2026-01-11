@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@babel/parser": "^7.28.5",
+    "@react-native-community/netinfo": "^11.4.1",
     "@react-navigation/bottom-tabs": "^7.9.0"
   }
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -20,6 +20,14 @@ export default function EditMyInfo() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const handleBack = useCallback(() => {
+    if (router?.canGoBack && router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
+    }
+  }, [router]);
   
   const [userInfo, setUserInfo] = useState({
     name: "",
@@ -45,7 +53,7 @@ export default function EditMyInfo() {
       
       if (!parentId) {
         Alert.alert("Error", "User not found");
-        router.back();
+        handleBack();
         return;
       }
 
@@ -133,7 +141,7 @@ export default function EditMyInfo() {
           await update(userRef, userInfo);
           
           Alert.alert("Success", "Your information has been updated successfully");
-          router.back();
+          handleBack();
         } else {
           Alert.alert("Error", "User ID not found");
         }
@@ -170,7 +178,7 @@ export default function EditMyInfo() {
       
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Edit My Info</Text>

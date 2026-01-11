@@ -36,7 +36,9 @@ npm install firebase
 
 npm install expo-clipboard
 npm install expo-file-system expo-media-library
-
+npm install @react-native-community/netinfo
+npm install expo-network
+npm ls react-native-safe-area-context; Pop-Location
 
  npm install
 
