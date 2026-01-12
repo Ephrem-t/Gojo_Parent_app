@@ -154,6 +154,7 @@ export default function Chat() {
   const [showEmoji, setShowEmoji] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   // modal / actions
   const [actionModalVisible, setActionModalVisible] = useState(false);
@@ -161,6 +162,7 @@ export default function Chat() {
 
   const flatListRef = useRef();
   const messagesListenerRef = useRef(null);
+  const initialBottomRef = useRef(insets.bottom);
 
   // composer height to offset FlatList padding so messages aren't hidden by floating composer
   const [composerHeight, setComposerHeight] = useState(64);
@@ -310,18 +312,34 @@ export default function Chat() {
     return () => clearTimeout(t);
   }, [groupedMessages]);
 
-  // keyboard listeners to animate floating composer using translateY (negative keyboard height)
+  // keyboard listeners to animate floating composer using translateY (keyboard height minus safe area)
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
 
     const onShow = (e) => {
-      const kbHeight = e?.endCoordinates?.height ?? (Platform.OS === "android" ? e?.end?.height ?? 300 : 300);
+      // Android already resizes the view height with the keyboard, so skip manual lift there to avoid double shifting
+      if (Platform.OS === "android") {
+        Animated.timing(animatedTranslateY, {
+          toValue: 0,
+          duration: e?.duration ?? 200,
+          useNativeDriver: true,
+        }).start();
+        setKeyboardVisible(true);
+        if (showEmoji) setShowEmoji(false);
+        return;
+      }
+
+      const kbHeight = e?.endCoordinates?.height ?? 300;
+      const pad = 6;
+      const lift = Math.max(0, kbHeight - (insets.bottom || 0) - pad);
       Animated.timing(animatedTranslateY, {
-        toValue: -kbHeight,
+        toValue: -lift,
         duration: e?.duration ?? 250,
         useNativeDriver: true,
       }).start();
+      setKeyboardVisible(true);
+      if (showEmoji) setShowEmoji(false);
     };
     const onHide = (e) => {
       Animated.timing(animatedTranslateY, {
@@ -329,6 +347,7 @@ export default function Chat() {
         duration: e?.duration ?? 200,
         useNativeDriver: true,
       }).start();
+      setKeyboardVisible(false);
     };
 
     const subShow = Keyboard.addListener(showEvent, onShow);
@@ -338,8 +357,7 @@ export default function Chat() {
       subShow.remove();
       subHide.remove();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [animatedTranslateY, insets.bottom, showEmoji]);
 
   // action modal handlers
   const openActionModal = (msg) => {
@@ -660,8 +678,11 @@ export default function Chat() {
     return receiverProfile?.status || "last seen recently";
   };
 
-  // base bottom offset (keeps composer near bottom safe area). Reduced to sit lower.
-  const baseBottom = insets.bottom + 4;
+  // Base bottom offset: keep composer position while trimming excess scroll padding
+  const safeBottom = keyboardVisible ? insets.bottom : initialBottomRef.current;
+  // Drop the composer as low as possible while keeping it outside the scroll area
+  const baseBottom = Math.max(safeBottom - 90, -15);
+  const listBottomPadding = composerHeight + baseBottom + (showEmoji ? 240 : 18);
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "right", "left", "bottom"]}>
@@ -718,7 +739,8 @@ export default function Chat() {
               inverted
               keyExtractor={(item) => item.id ?? item.messageId}
               renderItem={renderGroupedItem}
-              contentContainerStyle={{ padding: 12, paddingBottom: composerHeight + insets.bottom + 8 }}
+              style={{ paddingTop: 32 }}
+              contentContainerStyle={{ padding: 12, paddingBottom: listBottomPadding }}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               keyboardDismissMode="on-drag"

@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "652990af-62ad-49db-a3c0-1812582ee7e7"
+      }
+    },
+    "android": {
+      "package": "com.eramota.gojo_parent_app"
+    }
+  }
+}
