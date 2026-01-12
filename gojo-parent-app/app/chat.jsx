@@ -20,6 +20,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   ActivityIndicator,
+  InteractionManager,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import EmojiSelector from "react-native-emoji-selector";
@@ -66,6 +67,9 @@ const formatDateHeader = (timestamp) => {
   return date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
 };
 
+// escape regex for safe splitting
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // --- Message Bubble (Telegram style) ---
 const MessageBubble = ({
   item,
@@ -74,10 +78,51 @@ const MessageBubble = ({
   repliedMsg,
   onPressReplyPreview,
   showTail,
+  highlightQuery,
+  isCurrentMatch,
 }) => {
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (isCurrentMatch) {
+      pulse.setValue(0);
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 140, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 260, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [isCurrentMatch, pulse]);
   const bubbleStyle = isSender ? styles.tgSenderBubble : styles.tgReceiverBubble;
   const textColor = isSender ? "#fff" : "#000";
   const timeColor = isSender ? "#dfefff" : "#6b6b6b";
+
+  const q = (highlightQuery || "").trim();
+  const hasQuery = !!q && !item.deleted && item.type === "text" && (item.text || "").toLowerCase().includes(q.toLowerCase());
+
+  const renderHighlightedText = () => {
+    if (!hasQuery) {
+      return (
+        <Text style={[styles.tgMessageText, { color: textColor }]}>
+          {item.text} {item.edited && <Text style={styles.editedHint}>(edited)</Text>}
+        </Text>
+      );
+    }
+    const regex = new RegExp(`(${escapeRegExp(q)})`, "ig");
+    const segments = (item.text || "").split(regex);
+    return (
+      <Text style={[styles.tgMessageText, { color: textColor }]}
+       >
+        {segments.map((seg, idx) => {
+          const match = seg.toLowerCase() === q.toLowerCase();
+          return (
+            <Text key={`seg-${idx}`} style={match ? styles.highlightText : null}>
+              {seg}
+            </Text>
+          );
+        })}
+        {item.edited && <Text style={styles.editedHint}>(edited)</Text>}
+      </Text>
+    );
+  };
 
   return (
     <View style={[styles.tgRow, isSender ? { justifyContent: "flex-end" } : { justifyContent: "flex-start" }]}>
@@ -87,7 +132,13 @@ const MessageBubble = ({
         onLongPress={() => onLongPress(item)}
         style={{ maxWidth: BUBBLE_MAX_WIDTH }}
       >
-        <View style={[bubbleStyle, showTail ? (isSender ? styles.tgSenderTail : styles.tgReceiverTail) : null]}>
+        <View style={[bubbleStyle, showTail ? (isSender ? styles.tgSenderTail : styles.tgReceiverTail) : null, isCurrentMatch ? styles.currentMatchOutline : null]}>
+          {isCurrentMatch && (
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.currentMatchPulse, { opacity: pulse }]}
+            />
+          )}
           {repliedMsg && (
             <TouchableOpacity onPress={() => onPressReplyPreview(repliedMsg)} activeOpacity={0.8}>
               <View style={styles.replyPreview}>
@@ -102,9 +153,7 @@ const MessageBubble = ({
           {item.deleted ? (
             <Text style={[styles.deletedText, { color: textColor }]}>This message was deleted</Text>
           ) : item.type === "text" ? (
-            <Text style={[styles.tgMessageText, { color: textColor }]}>
-              {item.text} {item.edited && <Text style={styles.editedHint}>(edited)</Text>}
-            </Text>
+            renderHighlightedText()
           ) : (
             <Image source={{ uri: item.imageUrl }} style={styles.tgImage} />
           )}
@@ -148,6 +197,7 @@ export default function Chat() {
   // messages
   const [messages, setMessages] = useState([]);
   const [groupedMessages, setGroupedMessages] = useState([]); // includes date separators
+  const [messagesLoading, setMessagesLoading] = useState(true);
 
   // input & UI
   const [newMessage, setNewMessage] = useState("");
@@ -155,6 +205,12 @@ export default function Chat() {
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  // in-chat search
+  const [searchMode, setSearchMode] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+  const [matched, setMatched] = useState([]);
+  const [currentMatchId, setCurrentMatchId] = useState(null);
 
   // modal / actions
   const [actionModalVisible, setActionModalVisible] = useState(false);
@@ -163,6 +219,9 @@ export default function Chat() {
   const flatListRef = useRef();
   const messagesListenerRef = useRef(null);
   const initialBottomRef = useRef(insets.bottom);
+
+  // Skeleton shimmer for initial messages load
+  const chatSkeletonAnim = useRef(new Animated.Value(0)).current;
 
   // composer height to offset FlatList padding so messages aren't hidden by floating composer
   const [composerHeight, setComposerHeight] = useState(64);
@@ -244,6 +303,7 @@ export default function Chat() {
         .map(([k, v]) => ({ ...v, messageId: k }))
         .sort((a, b) => a.timeStamp - b.timeStamp);
       setMessages(arr);
+      setMessagesLoading(false);
     });
 
     messagesListenerRef.current = () => off(messagesRef, "value", unsubscribe);
@@ -269,6 +329,21 @@ export default function Chat() {
     });
     setGroupedMessages(grouped);
   }, [messages]);
+
+  // Approximate layout maps for stable index jumps on Android
+  const APPROX_MSG_HEIGHT = 90;
+  const APPROX_DATE_HEIGHT = 28;
+  const reversedData = useMemo(() => groupedMessages.slice().reverse(), [groupedMessages]);
+  const approxLayout = useMemo(() => {
+    const heights = reversedData.map((it) => (it.type === "date" ? APPROX_DATE_HEIGHT : APPROX_MSG_HEIGHT));
+    const offsets = new Array(heights.length);
+    let acc = 0;
+    for (let i = 0; i < heights.length; i++) {
+      offsets[i] = acc;
+      acc += heights[i];
+    }
+    return { heights, offsets };
+  }, [reversedData]);
 
   // mark as seen + clear unread when messages loaded and chat is open
   useEffect(() => {
@@ -311,6 +386,67 @@ export default function Chat() {
     }, 100);
     return () => clearTimeout(t);
   }, [groupedMessages]);
+
+  // compute matches for in-chat search
+  useEffect(() => {
+    const q = (searchQuery || "").trim().toLowerCase();
+    if (!q) {
+      setMatched([]);
+      setMatchIndex(0);
+      setCurrentMatchId(null);
+      return;
+    }
+    const arr = messages.filter((m) => !m.deleted && m.type === "text" && (m.text || "").toLowerCase().includes(q));
+    setMatched(arr);
+    setMatchIndex(0);
+    if (arr.length) requestAnimationFrame(() => jumpToIndex(0));
+  }, [searchQuery, messages]);
+
+  // shimmer loop for chat skeleton
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(chatSkeletonAnim, { toValue: 1, duration: 1100, useNativeDriver: true }),
+        Animated.timing(chatSkeletonAnim, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [chatSkeletonAnim]);
+  // Keep current match id in sync when matchIndex changes
+  useEffect(() => {
+    if (!matched.length) return;
+    const m = matched[matchIndex];
+    if (m && m.messageId !== currentMatchId) {
+      setCurrentMatchId(m.messageId);
+      requestAnimationFrame(() => scrollToMessage(m));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchIndex]);
+
+  const jumpToIndex = (idx) => {
+    if (!matched.length) return;
+    const m = matched[idx];
+    if (!m) return;
+    setCurrentMatchId(m.messageId);
+    requestAnimationFrame(() => scrollToMessage(m));
+  };
+  const jumpNext = () => {
+    if (!matched.length) return;
+    setMatchIndex((i) => {
+      const ni = (i + 1) % matched.length;
+      setTimeout(() => jumpToIndex(ni), 0);
+      return ni;
+    });
+  };
+  const jumpPrev = () => {
+    if (!matched.length) return;
+    setMatchIndex((i) => {
+      const ni = (i - 1 + matched.length) % matched.length;
+      setTimeout(() => jumpToIndex(ni), 0);
+      return ni;
+    });
+  };
 
   // keyboard listeners to animate floating composer using translateY (keyboard height minus safe area)
   useEffect(() => {
@@ -631,12 +767,16 @@ export default function Chat() {
     if (!msg || !groupedMessages?.length) return;
     const idx = groupedMessages.findIndex((g) => g.type === "message" && g.messageId === msg.messageId);
     if (idx === -1) return;
-    const targetIndex = groupedMessages.length - 1 - idx; // because FlatList is inverted
-    try {
-      flatListRef.current?.scrollToIndex({ index: targetIndex, animated: true });
-    } catch (e) {
-      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
-    }
+    // Data is reversed for the inverted FlatList; map to rendered index
+    const targetIndex = groupedMessages.length - 1 - idx;
+    InteractionManager.runAfterInteractions(() => {
+      try {
+        flatListRef.current?.scrollToIndex({ index: targetIndex, animated: true, viewPosition: 0.5 });
+      } catch (e) {
+        const estimate = approxLayout?.offsets?.[targetIndex] ?? Math.max(0, targetIndex * 90);
+        flatListRef.current?.scrollToOffset({ offset: estimate, animated: true });
+      }
+    });
   };
 
   const renderGroupedItem = ({ item }) => {
@@ -670,8 +810,24 @@ export default function Chat() {
           scrollToMessage(m);
         }}
         showTail={showTail}
+        highlightQuery={searchQuery}
+        isCurrentMatch={currentMatchId === item.messageId}
       />
     );
+  };
+
+  const renderChatSkeletons = () => {
+    const shimmerX = chatSkeletonAnim.interpolate({ inputRange: [0, 1], outputRange: [-120, 240] });
+    const items = Array.from({ length: 8 }).map((_, i) => (
+      <View key={`cs-${i}`} style={styles.chatSkeletonRow}>
+        <View style={[styles.chatSkeletonBubble, i % 2 === 0 ? styles.chatSkeletonLeft : styles.chatSkeletonRight]}>
+          <View style={styles.chatSkeletonLineWide} />
+          <View style={styles.chatSkeletonLine} />
+          <Animated.View style={[styles.chatSkeletonShimmer, { transform: [{ translateX: shimmerX }] }]} />
+        </View>
+      </View>
+    ));
+    return <View style={{ paddingHorizontal: 4, paddingTop: 16, paddingBottom: listBottomPadding }}>{items}</View>;
   };
 
   const headerSubtitle = () => {
@@ -693,35 +849,81 @@ export default function Chat() {
         </TouchableOpacity>
 
         <View style={styles.headerCenter}>
-          {/* Avatar + name are now tappable to open the profile */}
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.headerAvatarRow}
-            onPress={() =>
-              router.push({
-                pathname: "/userProfile",
-                params: { recordId: receiverParamId, userId: receiverUserId },
-              })
-            }
-          >
-            <Image
-              source={{ uri: receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
-              style={styles.headerAvatar}
-            />
-            <View style={{ marginLeft: 10 }}>
-              <Text style={styles.headerTitle}>{receiverProfile?.name || "User"}</Text>
-              <Text style={styles.headerSubtitle}>{headerSubtitle()}</Text>
+          {searchMode ? (
+            <View style={styles.headerSearchWrap}>
+              <Ionicons name="search" size={16} color="#64748b" style={{ marginRight: 6 }} />
+              <TextInput
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder="Search"
+                placeholderTextColor="#94a3b8"
+                style={styles.headerSearchInput}
+                returnKeyType="search"
+                onSubmitEditing={jumpNext}
+                autoFocus
+              />
+              {!!matched.length && (
+                <Text style={styles.chatSearchCount}>{matchIndex + 1}/{matched.length}</Text>
+              )}
             </View>
-          </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.headerAvatarRow}
+              onPress={() => {
+                const roleName = receiverRole === "Students"
+                  ? "Student"
+                  : receiverRole === "Teachers"
+                  ? "Teacher"
+                  : receiverRole === "Parents"
+                  ? "Parent"
+                  : receiverRole === "School_Admins"
+                  ? "Admin"
+                  : undefined;
+                router.push({
+                  pathname: "/userProfile",
+                  params: {
+                    recordId: receiverParamId,
+                    userId: receiverUserId,
+                    roleName,
+                  },
+                });
+              }}
+            >
+              <Image
+                source={{ uri: receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
+                style={styles.headerAvatar}
+              />
+              <View style={{ marginLeft: 10 }}>
+                <Text style={styles.headerTitle}>{receiverProfile?.name || "User"}</Text>
+                <Text style={styles.headerSubtitle}>{headerSubtitle()}</Text>
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Ionicons name="search" size={20} color="#222" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconBtn}>
-            <Ionicons name="ellipsis-vertical" size={20} color="#222" />
-          </TouchableOpacity>
+          {searchMode ? (
+            <>
+              <TouchableOpacity style={styles.iconBtn} onPress={jumpPrev} disabled={!matched.length}>
+                <Ionicons name="chevron-up" size={18} color={matched.length ? "#0f172a" : "#cbd5e1"} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={jumpNext} disabled={!matched.length}>
+                <Ionicons name="chevron-down" size={18} color={matched.length ? "#0f172a" : "#cbd5e1"} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => { setSearchMode(false); setSearchQuery(""); setMatched([]); setMatchIndex(0); }}>
+                <Ionicons name="close" size={20} color="#222" />
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <TouchableOpacity style={styles.iconBtn} onPress={() => {
+                setSearchMode(true);
+              }}>
+                <Ionicons name="search" size={20} color="#222" />
+              </TouchableOpacity>
+            </>
+          )}
         </View>
       </View>
 
@@ -733,18 +935,35 @@ export default function Chat() {
         <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
           <View style={{ flex: 1 }}>
             {/* Messages list */}
-            <FlatList
-              ref={flatListRef}
-              data={groupedMessages.slice().reverse()}
-              inverted
-              keyExtractor={(item) => item.id ?? item.messageId}
-              renderItem={renderGroupedItem}
-              style={{ paddingTop: 32 }}
-              contentContainerStyle={{ padding: 12, paddingBottom: listBottomPadding }}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-            />
+            {messagesLoading ? (
+              renderChatSkeletons()
+            ) : (
+              <FlatList
+                ref={flatListRef}
+                data={reversedData}
+                inverted
+                keyExtractor={(item) => item.id ?? item.messageId}
+                renderItem={renderGroupedItem}
+                style={{ paddingTop: 32 }}
+                contentContainerStyle={{ paddingHorizontal: -10, paddingBottom: listBottomPadding }}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                getItemLayout={(data, index) => {
+                  const length = approxLayout.heights[index] ?? 90;
+                  const offset = approxLayout.offsets[index] ?? index * 90;
+                  return { length, offset, index };
+                }}
+                onScrollToIndexFailed={(info) => {
+                  // Retry jump when virtualization has not measured the target row yet
+                  const estimate = approxLayout.offsets[info.index] ?? Math.max(0, (info.averageItemLength || 90) * info.index);
+                  flatListRef.current?.scrollToOffset({ offset: estimate, animated: true });
+                  setTimeout(() => {
+                    flatListRef.current?.scrollToIndex({ index: info.index, animated: true, viewPosition: 0.5 });
+                  }, 60);
+                }}
+              />
+            )}
 
             {/* Reply preview (above floating composer) */}
             {replyingTo && (
@@ -872,6 +1091,15 @@ const styles = StyleSheet.create({
   headerSubtitle: { fontSize: 12, color: "#777" },
   headerRight: { flexDirection: "row", alignItems: "center" },
   iconBtn: { paddingHorizontal: 8, paddingVertical: 6 },
+  headerSearchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#f1f5f9",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  headerSearchInput: { flex: 1, fontSize: 14, color: "#0f172a", paddingVertical: 0 },
 
   // Telegram-style bubbles
   tgRow: { marginVertical: 6, flexDirection: "row", alignItems: "flex-end" },
@@ -940,6 +1168,44 @@ const styles = StyleSheet.create({
     right: 12,
     zIndex: 50,
   },
+  // highlight of matched text
+  highlightText: {
+    backgroundColor: "#ffec99",
+    color: "#111",
+    borderRadius: 3,
+    paddingHorizontal: 2,
+  },
+  currentMatchOutline: {
+    borderWidth: 1,
+    borderColor: "#f59e0b",
+  },
+  currentMatchPulse: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    borderRadius: 14,
+  },
+  chatSkeletonRow: { flexDirection: "row", marginBottom: 14, paddingHorizontal: 8 },
+  chatSkeletonBubble: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: 18,
+    backgroundColor: "#f1f5f9",
+    padding: 14,
+    position: "relative",
+    overflow: "hidden",
+  },
+  chatSkeletonLeft: { marginRight: 30 },
+  chatSkeletonRight: { marginLeft: 30 },
+  chatSkeletonLineWide: { height: 12, borderRadius: 8, backgroundColor: "#e5e7eb", width: "70%", marginBottom: 10 },
+  chatSkeletonLine: { height: 10, borderRadius: 8, backgroundColor: "#e5e7eb", width: "46%" },
+  chatSkeletonShimmer: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: -120,
+    width: 160,
+    backgroundColor: "rgba(255,255,255,0.6)",
+  },
   floatingInner: {
     backgroundColor: "#fff",
     borderRadius: 28,
@@ -960,6 +1226,23 @@ const styles = StyleSheet.create({
   sendButton: { backgroundColor: "#1f8ef1", borderRadius: 20, padding: 10, marginLeft: 8 },
 
   inputContainer: { flexDirection: "row", alignItems: "center" },
+  // in-chat search bar
+  chatSearchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginHorizontal: 12,
+    marginTop: 8,
+    marginBottom: 4,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  chatSearchInput: { flex: 1, color: "#0f172a", paddingVertical: 0, fontSize: 14 },
+  chatSearchBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+  chatSearchCount: { color: "#475569", fontSize: 12, marginHorizontal: 6 },
 });
 
 // modal styles

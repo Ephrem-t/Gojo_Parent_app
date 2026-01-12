@@ -149,11 +149,11 @@ export default function UserProfile() {
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
 
-  const { recordId: paramRecordId, userId: paramUserId } = params ?? {};
+  const { recordId: paramRecordId, userId: paramUserId, roleName: paramRoleName } = params ?? {};
 
   const [user, setUser] = useState(null);
   const [roleData, setRoleData] = useState(null);
-  const [roleName, setRoleName] = useState(null);
+  const [roleName, setRoleName] = useState(paramRoleName ?? null);
   const [loading, setLoading] = useState(true);
   const [parentUserId, setParentUserId] = useState(null);
   const [parentRecordId, setParentRecordId] = useState(null);

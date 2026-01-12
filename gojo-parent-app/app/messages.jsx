@@ -100,6 +100,7 @@ export default function Messages() {
   const [unreadTotals, setUnreadTotals] = useState({ son: 0, teacher: 0, admin: 0 });
   const [search, setSearch] = useState("");
   const isSearching = search.trim().length > 0;
+  const [pinnedKeys, setPinnedKeys] = useState(new Set());
   const listenersRef = useRef([]); // store detach functions
   const unreadTotalsListenersRef = useRef([]);
   const unreadSegmentCountsRef = useRef({ son: {}, teacher: {}, admin: {} });
@@ -118,6 +119,7 @@ export default function Messages() {
 
   // request id to avoid race conditions
   const currentFetchIdRef = useRef(0);
+  const PINNED_KEY = "pinnedChats_v1";
 
   // Load parentRecordId from AsyncStorage and resolve parentUserId
   useEffect(() => {
@@ -140,6 +142,31 @@ export default function Messages() {
     };
     loadParentId();
   }, []);
+
+  // Load pinned chats from storage
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(PINNED_KEY);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) setPinnedKeys(new Set(arr));
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const makeChatKey = useCallback((it) => `${it.role}:${it.roleId}`, []);
+  const isPinned = useCallback((it) => pinnedKeys.has(makeChatKey(it)), [pinnedKeys, makeChatKey]);
+  const togglePin = useCallback(async (it) => {
+    try {
+      const key = makeChatKey(it);
+      const next = new Set(pinnedKeys);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      setPinnedKeys(next);
+      await AsyncStorage.setItem(PINNED_KEY, JSON.stringify(Array.from(next)));
+    } catch (e) {}
+  }, [pinnedKeys, makeChatKey]);
 
   // Fetch static data from Firebase once
   useEffect(() => {
@@ -226,8 +253,12 @@ export default function Messages() {
 
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
   const skelTranslateX = skeletonAnim.interpolate({ inputRange: [0, 1], outputRange: [-120, SCREEN_WIDTH] });
-  const isSkeletonActive = isInitialLoad || (isFetchingLast && listData.length === 0);
+  const isSkeletonActive =
+    isInitialLoad ||
+    (isFetchingLast && listData.length === 0) ||
+    (isRefreshing && listData.length === 0);
   const showRefreshOverlay = isRefreshing && listData.length > 0;
+  const showLoadingOverlay = isFetchingLast && listData.length > 0;
 
   const attachUnreadTotalsListeners = useCallback(() => {
     unreadTotalsListenersRef.current.forEach((u) => {
@@ -540,7 +571,7 @@ export default function Messages() {
     }
   };
 
-  const MessageRow = memo(({ item }) => {
+  const MessageRow = memo(({ item, pinned, onTogglePin }) => {
     const lm = item.lastMessage;
     const previewBase = lm ? (lm.text || (lm.type === "image" ? "📷 Image" : "")) : "";
     const previewPrefix = lm && lm.senderId === parentUserId ? "You: " : "";
@@ -571,6 +602,10 @@ export default function Messages() {
             item.name || "Chat",
             undefined,
             [
+              {
+                text: pinned ? "Unpin" : "Pin",
+                onPress: onTogglePin,
+              },
               {
                 text: "Mark as read",
                 onPress: () => markChatAsRead(item.receiverUserId),
@@ -627,6 +662,9 @@ export default function Messages() {
                   <Text style={styles.unreadText}>{item.unreadCount > 99 ? "99+" : item.unreadCount}</Text>
                 </View>
               )}
+              <TouchableOpacity onPress={onTogglePin} style={styles.pinBtn} accessibilityLabel={pinned ? "Unpin chat" : "Pin chat"}>
+                <Ionicons name={pinned ? "star" : "star-outline"} size={16} color={pinned ? "#f59e0b" : "#94a3b8"} />
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -656,11 +694,12 @@ export default function Messages() {
       a.profileImage === b.profileImage &&
       a.sectionText === b.sectionText &&
       a.grade === b.grade &&
-      a.section === b.section
+      a.section === b.section &&
+      prev.pinned === next.pinned
     );
   });
 
-  const renderItem = useCallback(({ item }) => <MessageRow item={item} />, [parentUserId]);
+  const renderItem = useCallback(({ item }) => <MessageRow item={item} pinned={isPinned(item)} onTogglePin={() => togglePin(item)} />, [parentUserId, isPinned, togglePin]);
 
   // Build union list for search across all roles
   const buildCombinedBaseList = () => {
@@ -742,9 +781,33 @@ export default function Messages() {
     return <View style={{ paddingHorizontal: listPadH, paddingTop: 6 }}>{items}</View>;
   };
 
-  const filteredData = listData.filter((item) =>
-    (item.name || "").toLowerCase().includes(search.trim().toLowerCase())
-  );
+  const displayList = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? listData.filter((it) => {
+          const name = (it.name || "").toLowerCase();
+          const section = (it.sectionText || "").toLowerCase();
+          const cls = it.role === "student" ? `grade ${it.grade} section ${it.section}`.toLowerCase() : "";
+          const last = (it.lastMessage?.text || (it.lastMessage?.type === "image" ? "image" : "")).toLowerCase();
+          return name.includes(q) || section.includes(q) || cls.includes(q) || last.includes(q);
+        })
+      : listData.slice();
+
+    // sort pinned first, then by timeStamp desc, then unread desc, then name
+    filtered.sort((a, b) => {
+      const ap = isPinned(a) ? 1 : 0;
+      const bp = isPinned(b) ? 1 : 0;
+      if (ap !== bp) return bp - ap;
+      const at = a.timeStamp ?? a.lastMessage?.timeStamp ?? 0;
+      const bt = b.timeStamp ?? b.lastMessage?.timeStamp ?? 0;
+      if (at !== bt) return bt - at;
+      const au = a.unreadCount ?? 0;
+      const bu = b.unreadCount ?? 0;
+      if (au !== bu) return bu - au;
+      return (a.name || "").localeCompare(b.name || "");
+    });
+    return filtered;
+  }, [listData, search, isPinned]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -864,7 +927,7 @@ export default function Messages() {
       ) : (
         <View style={{ flex: 1 }}>
           <FlatList
-            data={listData}
+            data={displayList}
             keyExtractor={(item) => String(item.roleId)}
             renderItem={renderItem}
             contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: listPadH, paddingTop: 6 }}
@@ -904,7 +967,7 @@ export default function Messages() {
               handleFilterChange(selectedFilter).finally(() => setIsRefreshing(false));
             }}
           />
-          {showRefreshOverlay && (
+          {(showRefreshOverlay || showLoadingOverlay) && (
             <View style={styles.refreshOverlay} pointerEvents="none">
               {renderListSkeletons()}
             </View>
@@ -1051,6 +1114,7 @@ const styles = StyleSheet.create({
   previewRow: { flexDirection: "row", alignItems: "center", marginTop: 8 },
   previewText: { color: "#6b7280", flex: 1, fontSize: 13 },
   previewTextUnread: { color: "#0f172a", fontWeight: "600" },
+  pinBtn: { marginTop: 6, paddingVertical: 4, paddingHorizontal: 6 },
   searchWrap: {
     flexDirection: "row",
     alignItems: "center",
