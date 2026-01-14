@@ -72,7 +72,8 @@ function SkeletonProfile() {
     <View style={{ flex: 1, backgroundColor: "#EFEFF4" }}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+      <View style={[styles.topBar, { top: insets.top + 8 }]}> 
+        {/* Remove shimmer for back icon and 3-dot menu */}
         <View style={styles.topIcon} />
         <View style={styles.topTitleStack}>
           <ShimmerBlock style={{ height: 12, width: Math.min(140, width * 0.4), borderRadius: 6, marginBottom: 6 }} />

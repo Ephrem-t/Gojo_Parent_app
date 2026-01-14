@@ -30,6 +30,7 @@ export default function ClassMark() {
   const [cache, setCache] = useState({});
   const [expanded, setExpanded] = useState({}); // 🔽 expand state
   const [loading, setLoading] = useState(true);
+  const [selectedSemester, setSelectedSemester] = useState('semester1');
 
   const shimmerAnim = useRef(new Animated.Value(-120)).current;
   const detailsAnim = useRef({}).current;
@@ -197,10 +198,11 @@ export default function ClassMark() {
         const assign = Object.values(data.assignments).find(
           (a) => a.courseId === course.courseId
         );
+        const teacherId = assign ? assign.teacherId : null;
         const teacherName = assign
           ? data.users[data.teachers[assign.teacherId]?.userId]?.name || "N/A"
           : "N/A";
-        return { ...course, teacherName };
+        return { ...course, teacherName, teacherId };
       });
 
     setCourses(courseList);
@@ -274,39 +276,42 @@ export default function ClassMark() {
     </View>
   );
 
-  const SkeletonHeader = () => (
-    <View>
-      <View style={styles.headerLeft}>
-        <View style={styles.skeletonAvatar}>
-          <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={[styles.skeletonBox, { width: "70%", height: 18 }]}>
+  // Attendance-style header skeleton shimmer
+  const SkeletonHeader = () => {
+    return (
+      <View style={[styles.header, { padding: headerPadding, borderRadius: headerRadius, minHeight: headerMinH }]}> 
+        <View style={styles.headerLeft}>
+          <View style={styles.skeletonAvatar}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
-          <View style={styles.chipRow}>
-            <View style={styles.skeletonChip}>
+          <View style={styles.headerText}>
+            <View style={[styles.skeletonBox, { width: "70%", height: 18, marginBottom: 10 }]}> 
               <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
             </View>
-            <View style={styles.skeletonChip}>
-              <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
+            <View style={styles.chipRow}>
+              <View style={[styles.skeletonChip, { height: 22, width: 90, borderRadius: 12, marginRight: 8, marginBottom: 6 }]}> 
+                <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
+              </View>
+              <View style={[styles.skeletonChip, { height: 22, width: 90, borderRadius: 12, marginBottom: 6 }]}> 
+                <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
+              </View>
             </View>
           </View>
         </View>
+        <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}> 
+          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12, marginRight: 8 }]}> 
+            <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
+          </View>
+          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12, marginRight: 8 }]}> 
+            <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
+          </View>
+          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12 }]}> 
+            <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
+          </View>
+        </View>
       </View>
-      <View style={styles.headerMetricsRow}>
-        <View style={styles.skeletonPill}>
-          <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
-        </View>
-        <View style={styles.skeletonPill}>
-          <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
-        </View>
-        <View style={styles.skeletonPill}>
-          <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
-        </View>
-      </View>
-    </View>
-  );
+    );
+  };
 
   const SkeletonCard = () => (
     <View style={[styles.card, { padding: cardPad, borderRadius: cardRadius }]}>
@@ -374,6 +379,25 @@ export default function ClassMark() {
                   </View>
                   <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV }]}>
                     <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale) }]}>Section {childUser?.section ?? "--"}</Text>
+                  </View>
+                  {/* Semester Picker (always Semester 1 and 2) */}
+                  <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV, flexDirection: 'row', alignItems: 'center', marginLeft: 6 }]}> 
+                    <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale), color: '#2563eb', fontWeight: 'bold', marginRight: 6 }]}>Semester:</Text>
+                    {['semester1', 'semester2'].map(sem => (
+                      <TouchableOpacity
+                        key={sem}
+                        style={{
+                          backgroundColor: selectedSemester === sem ? '#2563eb' : '#e5e7eb',
+                          paddingHorizontal: 10,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                          marginHorizontal: 2,
+                        }}
+                        onPress={() => setSelectedSemester(sem)}
+                      >
+                        <Text style={{ color: selectedSemester === sem ? '#fff' : '#1e293b', fontWeight: '700', fontSize: Math.round(13 * fontScale) }}>{sem === 'semester1' ? '1' : '2'}</Text>
+                      </TouchableOpacity>
+                    ))}
                   </View>
                 </View>
               </View>
@@ -505,14 +529,22 @@ export default function ClassMark() {
       {/* ================= BODY ================= */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 16, paddingBottom: 16 }}>
         {courses.map((course) => {
-          const studentMarks =
-            marks?.[course.courseId]?.[childUser?.studentId];
-          if (!studentMarks) return null;
+          const courseMarks = marks?.[course.courseId] || {};
+          const studentId = childUser?.studentId;
+          const studentMarks = courseMarks[studentId] || {};
+          const semMarks = studentMarks[selectedSemester];
+          if (!semMarks) return null;
 
-          const { score, max } = calcTotal(studentMarks.assessments);
-          const percent = max > 0 ? Math.round((score / max) * 100) : 0;
-          const assessmentCount = Object.values(studentMarks.assessments || {}).length;
-
+          // Calculate totals for header (only selected semester)
+          let totalScore = 0, totalMax = 0, totalCount = 0;
+          if (semMarks.assessments) {
+            Object.values(semMarks.assessments).forEach((a) => {
+              totalScore += a.score || 0;
+              totalMax += a.max || 0;
+              totalCount += 1;
+            });
+          }
+          const percent = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
           const isOpen = expanded[course.courseId];
 
           return (
@@ -525,15 +557,35 @@ export default function ClassMark() {
                 <View style={styles.courseHeader}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.courseName, { fontSize: Math.round(16 * fontScale) }]}>{course.name}</Text>
-                    <Text style={[styles.teacher, { fontSize: Math.round(13 * fontScale) }]}>{course.teacherName}</Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (course.teacherId) {
+                          // Find the teacher's userId from cache (like chat.jsx)
+                          const teacherUserId = cache.teachers && cache.teachers[course.teacherId]?.userId;
+                          router.push({
+                            pathname: '/userProfile',
+                            params: {
+                              recordId: course.teacherId, // Teachers/<teacherId>
+                              userId: teacherUserId,
+                              roleName: 'Teacher',
+                            },
+                          });
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.teacher, { fontSize: Math.round(13 * fontScale) }]}> 
+                        {course.teacherName}
+                      </Text>
+                    </TouchableOpacity>
                     <View style={styles.courseMetaRow}>
                       <View style={styles.metaPill}>
                         <Ionicons name="book-outline" size={metaIconSize} color="#1d4ed8" style={styles.metaIcon} />
-                        <Text style={[styles.metaText, { fontSize: Math.round(12 * fontScale) }]}>{assessmentCount} assessments</Text>
+                        <Text style={[styles.metaText, { fontSize: Math.round(12 * fontScale) }]}>{totalCount} marks</Text>
                       </View>
                       <View style={styles.metaPill}>
                         <Ionicons name="trophy-outline" size={metaIconSize} color="#ea580c" style={styles.metaIcon} />
-                        <Text style={[styles.metaText, { fontSize: Math.round(12 * fontScale) }]}>Total {score}/{max}</Text>
+                        <Text style={[styles.metaText, { fontSize: Math.round(12 * fontScale) }]}>Total {totalScore}/{totalMax}</Text>
                       </View>
                     </View>
                   </View>
@@ -558,15 +610,23 @@ export default function ClassMark() {
               </TouchableOpacity>
 
               {/* 🔽 DETAILS */}
-              {isOpen &&
-                Object.values(studentMarks.assessments || {}).map((a, index) => (
-                  <View key={index} style={styles.row}>
-                    <Text style={[styles.assessName, { fontSize: Math.round(14 * fontScale) }]}>{a.name}</Text>
-                    <Text style={[styles.assessScore, { fontSize: Math.round(14 * fontScale) }]}>
-                      {a.score}/{a.max}
-                    </Text>
-                  </View>
-                ))}
+              {isOpen && (
+                <View key={selectedSemester} style={{ marginTop: 8 }}>
+                  <Text style={{ fontWeight: 'bold', marginBottom: 6 }}>
+                    {selectedSemester === 'semester1' ? 'SEMESTER 1' : 'SEMESTER 2'}
+                  </Text>
+                  {semMarks.assessments ? (
+                    Object.entries(semMarks.assessments).map(([assessKey, assess]) => (
+                      <View key={assessKey} style={styles.row}>
+                        <Text style={[styles.assessName, { fontSize: Math.round(14 * fontScale) }]}>{assess.name}</Text>
+                        <Text style={[styles.assessScore, { fontSize: Math.round(14 * fontScale) }]}>{assess.score} / {assess.max}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={{ color: '#888', fontStyle: 'italic' }}>No assessments found</Text>
+                  )}
+                </View>
+              )}
             </View>
           );
         })}

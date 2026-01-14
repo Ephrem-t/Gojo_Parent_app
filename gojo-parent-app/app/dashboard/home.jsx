@@ -239,16 +239,17 @@ export default function Home() {
           return;
         }
       const postsData = postsSnap.val();
-      const keys = Object.keys(postsData).sort(); // ascending keys
+      // Sort keys descending so newest posts come first
+      const keys = Object.keys(postsData).sort().reverse();
 
       let slicedKeys = keys;
       if (olderThanKey) {
         const dupIndex = slicedKeys.indexOf(olderThanKey);
-        if (dupIndex !== -1) slicedKeys = slicedKeys.slice(0, dupIndex); // drop the duplicate oldest key
+        if (dupIndex !== -1) slicedKeys = slicedKeys.slice(dupIndex + 1); // drop the duplicate newest key
       }
 
-      // take last PAGE_SIZE from the filtered keys
-      const pageKeys = slicedKeys.slice(-PAGE_SIZE);
+      // take first PAGE_SIZE from the filtered keys (since reversed)
+      const pageKeys = slicedKeys.slice(0, PAGE_SIZE);
       const trimmedPosts = pageKeys.reduce((acc, k) => ({ ...acc, [k]: postsData[k] }), {});
 
       const usersSnap = await get(child(ref(database), "Users"));
@@ -834,23 +835,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#ddd",
   },
   adminName: {
-    fontSize: width * 0.04, // Instagram-style font size
-    fontWeight: "bold", // Bold name
-    color: "#000",
-    fontFamily: Platform.OS === 'ios' ? 'SF Pro Display' : 'Roboto',
+    fontSize: width * 0.045, // Responsive name size
+    fontWeight: "bold",
+    color: "#050505",
+    marginBottom: width * 0.01,
   },
   time: {
-    fontSize: width * 0.025, // Instagram-style time font
-    color: "#8e8e8e", // Instagram gray color
-    fontFamily: Platform.OS === 'ios' ? 'SF Pro Text' : 'Roboto',
+    fontSize: width * 0.032, // Responsive time font
+    color: "#65676b",
+    fontWeight: "400",
+    marginBottom: width * 0.01,
   },
   postText: {
-    fontSize: width * 0.036, // Instagram-style post font
-    marginVertical: width * 0.015,
-    lineHeight: width * 0.045, // Instagram line height
-    color: "#000",
-    fontFamily: Platform.OS === 'ios' ? 'SF Pro Text' : 'Roboto',
-    fontWeight: "400", // Instagram regular weight
+    fontSize: width * 0.035, // Responsive post font size
+    marginVertical: width * 0.012,
+    lineHeight: width * 0.06, // Responsive line height
+    color: "#050505",
+    fontWeight: "400",
   },
   postImage: {
     width: "100%",

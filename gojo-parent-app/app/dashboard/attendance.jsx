@@ -17,8 +17,10 @@ import { ref, get } from "firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import moment from "moment";
 import { database } from "../../constants/firebaseConfig";
+import { useRouter } from "expo-router";
 
 export default function Attendance() {
+  const router = useRouter();
   const [parentId, setParentId] = useState(null);
   const [children, setChildren] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -131,8 +133,10 @@ export default function Attendance() {
       .filter((c) => c.grade === student.grade && (c.section || "") === student.section)
       .map((course) => {
         const assign = Object.values(data.assignments).find((a) => a.courseId === course.courseId);
+        const teacherId = assign ? assign.teacherId : null;
         const teacherName = assign ? data.users[data.teachers[assign.teacherId]?.userId]?.name || "N/A" : "N/A";
-        return { ...course, teacherName };
+        const teacherUserId = teacherId ? data.teachers[teacherId]?.userId : null;
+        return { ...course, teacherName, teacherId, teacherUserId };
       });
 
     setCourses(courseList);
@@ -458,7 +462,26 @@ export default function Attendance() {
               >
                 <View style={styles.courseHeader}>
                   <Text style={styles.courseName}>{c.name}</Text>
-                  <Text style={styles.teacher}>👨‍🏫 {c.teacherName}</Text>
+                  <Text style={styles.teacher}>
+                    👨‍🏫 
+                    <Text
+                      style={{ }}
+                      onPress={() => {
+                        if (c.teacherId) {
+                          router.push({
+                            pathname: '/userProfile',
+                            params: {
+                              recordId: c.teacherId,
+                              userId: c.teacherUserId,
+                              roleName: 'Teacher',
+                            },
+                          });
+                        }
+                      }}
+                    >
+                      {c.teacherName}
+                    </Text>
+                  </Text>
                 </View>
 
                 <View style={styles.courseBadgeRow}>
@@ -678,7 +701,7 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   tabsWrapper: {
-    backgroundColor: "#f3f4f6",
+    backgroundColor: "transparent", // Make tab selector background transparent
     paddingTop: 6,
     paddingBottom: 6,
     zIndex: 5,
@@ -691,7 +714,7 @@ const styles = StyleSheet.create({
   tab: { paddingVertical: 10, alignItems: "center" },
   tabActive: {},
   tabText: { fontSize: 13, fontWeight: "700", color: "#475569", letterSpacing: 0.3 },
-  tabTextActive: { color: "#0f172a" },
+  tabTextActive: { color: "#2563eb", fontWeight: "bold", textShadowColor: "#fff", textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
   tabIndicator: {
     position: "absolute",
     top: 4,

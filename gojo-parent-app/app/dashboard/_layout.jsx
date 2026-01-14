@@ -4,6 +4,8 @@ import { Tabs, useRouter } from "expo-router";
 import { ref, onValue, off } from "firebase/database";
 import { useEffect, useState, useRef } from "react";
 import { ActivityIndicator, Image, Text, TouchableOpacity, View, StyleSheet, Animated } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
 import { database } from "../../constants/firebaseConfig";
 
 export default function DashboardLayout() {
@@ -79,7 +81,7 @@ export default function DashboardLayout() {
           userListenerRef.current = () => off(ref(database, `Users/${actualUserId}`), "value", userListener);
         });
       } catch (err) {
-        console.log("Profile load error:", err);
+        // console.log removed for production
         setProfileImage("https://cdn-icons-png.flaticon.com/512/847/847969.png");
         setLoading(false);
       }
@@ -163,21 +165,23 @@ export default function DashboardLayout() {
   }, [parentUserId]);
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: true,
-        headerStyle: { backgroundColor: "#fff", shadowColor: "transparent", borderBottomWidth: 0 },
-        headerTitleAlign: "left",
-        tabBarActiveTintColor: "#1e90ff",
-        tabBarInactiveTintColor: "gray",
-        tabBarStyle: { 
-          height: 70,
-          paddingBottom: 20,
-          backgroundColor: "#fff",
-        },
-        tabBarItemStyle: { flex: 1, justifyContent: "center" },
-        tabBarLabelStyle: { display: "none" },
-      }}
+    <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
+      <StatusBar style="light" backgroundColor="#000" />
+      <Tabs
+        screenOptions={{
+          headerShown: true,
+          headerStyle: { backgroundColor: "#fff", shadowColor: "transparent", borderBottomWidth: 0 },
+          headerTitleAlign: "left",
+          tabBarActiveTintColor: "#1e90ff",
+          tabBarInactiveTintColor: "gray",
+          tabBarStyle: { 
+            height: 56, // default Material height
+            paddingBottom: 6, // minimal padding
+            backgroundColor: "#fff",
+          },
+          tabBarItemStyle: { flex: 1, justifyContent: "center" },
+          tabBarLabelStyle: { display: "none" },
+        }}
     >
       <Tabs.Screen
         name="home"
@@ -227,7 +231,8 @@ export default function DashboardLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
         }}
       />
-    </Tabs>
+      </Tabs>
+    </SafeAreaView>
   );
 }
 

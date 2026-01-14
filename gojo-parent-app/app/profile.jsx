@@ -906,7 +906,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: PALETTE.accent,
+    backgroundColor: PALETTE.accent, // Blue color for header
     alignItems: "center",
     zIndex: 10,
     overflow: "hidden",
@@ -929,9 +929,10 @@ const styles = StyleSheet.create({
   },
   heroName: {
     color: "#fff",
-    fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: 0.25,
+    fontSize: 16, // Decreased font size for header name
+    fontWeight: "700",
+    letterSpacing: 0.15,
+    textAlign: "center",
   },
   collapsedInfo: {
     alignItems: "center",
@@ -962,7 +963,7 @@ const styles = StyleSheet.create({
   },
   statusDotOnline: { backgroundColor: "#10b981" },
   statusDotOffline: { backgroundColor: "#94a3b8" },
-  statusText: { fontSize: 13, fontWeight: "700" },
+  statusText: { fontSize: 11, fontWeight: "600", textAlign: "center" },
   statusTextOnline: { color: "#0f172a" },
   statusTextOffline: { color: "#475569" },
   avatar: {
@@ -973,7 +974,7 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
     marginTop: HEADER_MAX_HEIGHT / 2 - AVATAR_SIZE / 2,
   },
-  nameOverlay: { color: "#fff", fontSize: 22, fontWeight: "700", marginTop: 8, letterSpacing: 0.2 },
+  nameOverlay: { color: "#fff", fontSize: 15, fontWeight: "700", marginTop: 4, letterSpacing: 0.15, textAlign: "center" },
 
   cameraIcon: {
     position: "absolute",

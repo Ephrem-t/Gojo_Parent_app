@@ -41,11 +41,31 @@ Root
 │
 ├─ ClassMarks
 │   ├─ <courseId1>
-│   │    ├─ <studentKey1>
-│   │    │    ├─ mark20: number
-│   │    │    ├─ mark30: number
-│   │    │    └─ mark50: number
-│   │    └─ <studentKey2>
+│   │    ├─ <semester1>
+│   │        ├─ <studentKey1>
+│   │        │    ├─ mark20: number
+│   │        │    ├─ mark30: number
+│   │        │    └─ mark50: number
+│   │        └─ <studentKey2>
+│   │    ├─ <semester2>
+│   │        ├─ <studentKey1>
+│   │        │    ├─ mark20: number
+│   │        │    ├─ mark30: number
+│   │        │    └─ mark50: number
+│   │        └─ <studentKey2>
+│   ├─ <courseId2>
+│   │    ├─ <semester1>
+│   │        ├─ <studentKey1>
+│   │        │    ├─ mark20: number
+│   │        │    ├─ mark30: number
+│   │        │    └─ mark50: number
+│   │        └─ <studentKey2>
+│   │    ├─ <semester2>
+│   │        ├─ <studentKey1>
+│   │        │    ├─ mark20: number
+│   │        │    ├─ mark30: number
+│   │        │    └─ mark50: number
+│   │        └─ <studentKey2>
 │   └─ ...
 │
 ├─ Posts
@@ -120,25 +140,42 @@ ClassMarks
  └── course_math_9A
      └── student_123
          ├── teacherName: "Mr. Bekele"
-         ├── assessments:
-         │   ├── a1:
-         │   │   ├── name: "Quiz 1"
-         │   │   ├── score: 7
-         │   │   ├── max: 10
-         │   ├── a2:
-         │   │   ├── name: "Test 1"
-         │   │   ├── score: 28
-         │   │   ├── max: 30
-         │   ├── a3:
-         │   │   ├── name: "Assignment"
-         │   │   ├── score: 5
-         │   │   ├── max: 5
-         │   └── a4:
-         │       ├── name: "Final Exam"
-         │       ├── score: 44
-         │       ├── max: 50
-
-
+         ├── semester1:
+         │    ├── assessments:
+         │       ├── a1:
+         │       │   ├── name: "Quiz 1"
+         │       │   ├── score: 7
+         │       │   ├── max: 10
+         │       ├── a2:
+         │       │   ├── name: "Test 1"
+         │       │   ├── score: 28
+         │       │   ├── max: 30
+         │       ├── a3:
+         │       │   ├── name: "Assignment"
+         │       │   ├── score: 5
+         │       │   ├── max: 5
+         │       └── a4:
+         │           ├── name: "Final Exam"
+         │           ├── score: 44
+         │           ├── max: 50
+         ├── semester2:
+         │    ├── assessments:
+         │       ├── a1:
+         │       │   ├── name: "Quiz 1"
+         │       │   ├── score: 7
+         │       │   ├── max: 10
+         │       ├── a2:
+         │       │   ├── name: "Test 1"
+         │       │   ├── score: 28
+         │       │   ├── max: 30
+         │       ├── a3:
+         │       │   ├── name: "Assignment"
+         │       │   ├── score: 5
+         │       │   ├── max: 5
+         │       └── a4:
+         │           ├── name: "Final Exam"
+         │           ├── score: 44
+         │           ├── max: 50
 
 
 
