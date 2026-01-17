@@ -39,7 +39,7 @@ export default function Attendance() {
   const dropdownTrans = useRef(new Animated.Value(-10)).current;
   const skeletonAnim = useRef(new Animated.Value(0)).current;
   const tabAnim = useRef(new Animated.Value(0)).current;
-
+  const [tabWidthState, setTabWidthState] = useState(0);
   const tabOptions = ["daily", "weekly", "monthly"];
 
   const { width, height } = useWindowDimensions();
@@ -389,37 +389,47 @@ export default function Attendance() {
           </View>
         </LinearGradient>
 
-        {/* TABS (sticky) */}
+        {/* TABS (sticky, pill style) */}
         <View style={styles.tabsWrapper}>
-          <View style={[styles.tabs, { height: 44 }]}>
-            <Animated.View
-              style={[
-                styles.tabIndicator,
-                {
-                  width: tabWidth - 12,
-                  transform: [
-                    {
-                      translateX: tabAnim.interpolate({
-                        inputRange: [0, tabOptions.length - 1],
-                        outputRange: [6, tabWidth * (tabOptions.length - 1) + 6],
-                      }),
-                    },
-                  ],
-                },
-              ]}
-            />
-            {tabOptions.map((t) => (
-              <TouchableOpacity
-                key={t}
-                style={[styles.tab, { width: tabWidth }]}
-                onPress={() => setTab(t)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
-                  {t.toUpperCase()}
-                </Text>
-              </TouchableOpacity>
-            ))}
+          <View
+            style={[styles.filterTabs, { height: 44 }]}
+            onLayout={e => setTabWidthState(e.nativeEvent.layout.width)}
+          >
+            {tabWidthState > 0 && (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.filterIndicator,
+                  {
+                    width: tabWidthState / tabOptions.length,
+                    transform: [
+                      {
+                        translateX: Animated.multiply(
+                          tabAnim,
+                          tabWidthState / tabOptions.length || 0
+                        ),
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
+            {tabOptions.map((t) => {
+              const active = tab === t;
+              return (
+                <TouchableOpacity
+                  key={t}
+                  style={styles.filterTab}
+                  onPress={() => setTab(t)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select ${t}`}
+                  accessibilityState={{ selected: active }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{t.charAt(0).toUpperCase() + t.slice(1)}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -711,21 +721,37 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
   },
-  tab: { paddingVertical: 10, alignItems: "center" },
-  tabActive: {},
-  tabText: { fontSize: 13, fontWeight: "700", color: "#475569", letterSpacing: 0.3 },
-  tabTextActive: { color: "#2563eb", fontWeight: "bold", textShadowColor: "#fff", textShadowOffset: {width: 0, height: 1}, textShadowRadius: 2 },
-  tabIndicator: {
-    position: "absolute",
-    top: 4,
-    bottom: 4,
-    left: 0,
-    backgroundColor: "#fff",
-    borderRadius: 12,
+  filterTabs: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#dce3f5",
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
     elevation: 2,
     shadowColor: "#0f172a",
     shadowOpacity: 0.06,
     shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    marginHorizontal: 16,
+    marginBottom: 8,
+  },
+  filterTab: { flex: 1, paddingVertical: 10, alignItems: "center", backgroundColor: "transparent" },
+  filterText: { fontWeight: "700", fontSize: 13, color: "#475569", letterSpacing: 0.3 },
+  filterTextActive: { color: "#0f172a" },
+  filterIndicator: {
+    position: "absolute",
+    top: 4,
+    bottom: 4,
+    left: 0,
+    backgroundColor: "rgba(37,99,235,0.18)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(37,99,235,0.45)",
+    elevation: 2,
+    shadowColor: "#2563eb",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
   },
   body: { paddingHorizontal: 16, marginTop: 16 },

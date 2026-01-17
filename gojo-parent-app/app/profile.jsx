@@ -45,6 +45,11 @@ const PALETTE = {
 const TERMS_URL = "https://example.com/terms";
 
 export default function ParentProfile() {
+    const handleLogout = async () => {
+      setShowMenu(false);
+      await AsyncStorage.clear();
+      router.replace('/'); // or router.replace('/login') if you have a login route
+    };
   const router = useRouter();
   const [parentUser, setParentUser] = useState(null);
   const [children, setChildren] = useState([]);
@@ -584,6 +589,9 @@ export default function ParentProfile() {
             <TouchableOpacity style={styles.menuItem} onPress={handleTerms}>
               <Text style={styles.menuText}>Terms & Privacy</Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={handleLogout}>
+              <Text style={[styles.menuText, { color: '#e53935', fontWeight: 'bold' }]}>Logout</Text>
+            </TouchableOpacity>
           </View>
         </>
       )}
@@ -668,6 +676,27 @@ export default function ParentProfile() {
             <Text style={styles.accountText}>Terms & Privacy</Text>
             <Ionicons name="chevron-forward-outline" size={20} color="#999" />
           </TouchableOpacity>
+          {/* Contact Developer Section */}
+          <View style={{ marginTop: 18 }}>
+            <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>Contact Developer</Text>
+            <View style={{ gap: 10 }}>
+              <TouchableOpacity style={styles.accountItem} onPress={() => Linking.openURL('https://t.me/gojo_edu')}>
+                <Image source={{ uri: 'https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg' }} style={{ width: 22, height: 22, marginRight: 8 }} />
+                <Text style={styles.accountText}>Telegram</Text>
+                <Ionicons name="chevron-forward-outline" size={20} color="#999" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.accountItem} onPress={() => Linking.openURL('mailto:developer@email.com')}>
+                <Ionicons name="mail" size={22} color="#EA4335" />
+                <Text style={styles.accountText}>Email</Text>
+                <Ionicons name="chevron-forward-outline" size={20} color="#999" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.accountItem} onPress={() => Linking.openURL('https://www.linkedin.com/in/yourlinkedin/')}>
+                <Ionicons name="logo-linkedin" size={22} color="#0077B5" />
+                <Text style={styles.accountText}>LinkedIn</Text>
+                <Ionicons name="chevron-forward-outline" size={20} color="#999" />
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Animated.ScrollView>
 

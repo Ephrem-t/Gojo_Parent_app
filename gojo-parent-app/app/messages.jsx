@@ -96,7 +96,7 @@ export default function Messages() {
   const [filterWidth, setFilterWidth] = useState(0);
   const filterOptions = ["son", "teacher", "admin"];
   const filterAnim = useRef(new Animated.Value(0)).current;
-  const skeletonAnim = useRef(new Animated.Value(0)).current;
+  // const skeletonAnim = useRef(new Animated.Value(0)).current;
   const [unreadTotals, setUnreadTotals] = useState({ son: 0, teacher: 0, admin: 0 });
   const [search, setSearch] = useState("");
   const isSearching = search.trim().length > 0;
@@ -239,26 +239,13 @@ export default function Messages() {
     }).start();
   }, [selectedFilter, filterAnim]);
 
-  // Shimmer animation for skeletons
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(skeletonAnim, { toValue: 1, duration: 1100, useNativeDriver: true }),
-        Animated.timing(skeletonAnim, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [skeletonAnim]);
+  // Skeleton shimmer effect removed
 
   const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-  const skelTranslateX = skeletonAnim.interpolate({ inputRange: [0, 1], outputRange: [-120, SCREEN_WIDTH] });
-  const isSkeletonActive =
-    isInitialLoad ||
-    (isFetchingLast && listData.length === 0) ||
-    (isRefreshing && listData.length === 0);
-  const showRefreshOverlay = isRefreshing && listData.length > 0;
-  const showLoadingOverlay = isFetchingLast && listData.length > 0;
+  // Skeleton shimmer effect removed
+  const isSkeletonActive = false;
+  const showRefreshOverlay = false;
+  const showLoadingOverlay = false;
 
   const attachUnreadTotalsListeners = useCallback(() => {
     unreadTotalsListenersRef.current.forEach((u) => {
@@ -505,6 +492,7 @@ export default function Messages() {
             name: user?.name || admin?.name || "Admin",
             profileImage: user?.profileImage || admin.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png",
             role: "admin",
+            title: admin.title || "Admin",
           };
         })
         .filter(Boolean);
@@ -640,35 +628,58 @@ export default function Messages() {
               <Text style={styles.name} numberOfLines={1}>
                 {item.name}
               </Text>
-              <View style={styles.metaRow}>
-                <View style={styles.rolePill}>
-                  <Text style={styles.rolePillText}>{item.role === "student" ? "Student" : item.role === "teacher" ? "Teacher" : "Admin"}</Text>
+                <View style={[styles.metaRow, { gap: 8 }]}> 
+                  {item.role === "student" && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={styles.rolePill}>
+                          <Text style={styles.rolePillText}>Student</Text>
+                        </View>
+                        <Text style={styles.metaText}>{`Grade ${item.grade} · Sec ${item.section}`}</Text>
+                      </View>
+                      <TouchableOpacity onPress={onTogglePin} style={[styles.pinBtn, { marginLeft: 12 }]} accessibilityLabel={pinned ? "Unpin chat" : "Pin chat"}>
+                        <Ionicons name={pinned ? "star" : "star-outline"} size={16} color={pinned ? "#f59e0b" : "#94a3b8"} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {item.role === "teacher" && item.sectionText && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={styles.rolePill}>
+                          <Text style={styles.rolePillText}>Teacher</Text>
+                        </View>
+                        <Text style={styles.metaText}>{item.sectionText}</Text>
+                      </View>
+                      <TouchableOpacity onPress={onTogglePin} style={[styles.pinBtn, { marginLeft: 12 }]} accessibilityLabel={pinned ? "Unpin chat" : "Pin chat"}>
+                        <Ionicons name={pinned ? "star" : "star-outline"} size={16} color={pinned ? "#f59e0b" : "#94a3b8"} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {item.role === "admin" && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={styles.rolePill}>
+                          <Text style={styles.rolePillText}>{item.title}</Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity onPress={onTogglePin} style={[styles.pinBtn, { marginLeft: 12 }]} accessibilityLabel={pinned ? "Unpin chat" : "Pin chat"}>
+                        <Ionicons name={pinned ? "star" : "star-outline"} size={16} color={pinned ? "#f59e0b" : "#94a3b8"} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
-                {item.role === "student" && (
-                  <Text style={styles.metaText}>{`Grade ${item.grade} · Sec ${item.section}`}</Text>
-                )}
-                {item.role === "teacher" && item.sectionText && (
-                  <Text style={styles.metaText}>{item.sectionText}</Text>
-                )}
-              </View>
             </View>
 
-            <View style={styles.rightCol}>
+            <View style={[styles.rightCol, { flexDirection: 'row', alignItems: 'center', gap: 8 }]}> 
               <Text style={styles.timeText}>
                 {item.lastMessage ? formatTimeRelative(item.lastMessage.timeStamp) : ""}
               </Text>
-              {isUnread && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadText}>{item.unreadCount > 99 ? "99+" : item.unreadCount}</Text>
-                </View>
-              )}
-              <TouchableOpacity onPress={onTogglePin} style={styles.pinBtn} accessibilityLabel={pinned ? "Unpin chat" : "Pin chat"}>
-                <Ionicons name={pinned ? "star" : "star-outline"} size={16} color={pinned ? "#f59e0b" : "#94a3b8"} />
-              </TouchableOpacity>
+              {/* Notification badge removed from rightCol, now only shown in previewRow */}
+              {/* Star (pin) icon removed from rightCol, only shown next to grade */}
             </View>
           </View>
 
-          <View style={styles.previewRow}>
+          <View style={[styles.previewRow, { gap: 8 }]}> 
             {showSenderTick && <Ionicons name={tickName} size={14} color={tickColor} style={{ marginRight: 6 }} />}
             <Text
               numberOfLines={1}
@@ -677,6 +688,11 @@ export default function Messages() {
             >
               {previewText || "Start a conversation"}
             </Text>
+            {isUnread && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadText}>{item.unreadCount > 99 ? "99+" : item.unreadCount}</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -758,28 +774,8 @@ export default function Messages() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, allUsers, students, teachers, parents, courses, assignments, schoolAdmins, parentUserId]);
 
-  // Render skeleton list rows matching actual card dimensions
-  const renderListSkeletons = () => {
-    const CARD_H = cardHeight; // sync with getItemLayout length
-    const CARD_MARGIN = 10;
-    const headerApprox = 68 + 12 + 44 + 12 + 48; // topBar + spacing + filter + spacing + search
-    const available = Math.max(0, SCREEN_HEIGHT - headerApprox - 80);
-    const perRow = CARD_H + CARD_MARGIN;
-    const count = Math.max(6, Math.ceil(available / perRow));
-
-    const items = Array.from({ length: count }).map((_, i) => (
-      <View key={`sk-${i}`} style={[styles.skeletonCard, { minHeight: CARD_H, padding: cardPadding }]}>
-        <View style={styles.skeletonAvatar} />
-        <View style={{ flex: 1 }}>
-          <View style={styles.skeletonLineWide} />
-          <View style={styles.skeletonLine} />
-        </View>
-        <View style={styles.skeletonDot} />
-        <Animated.View style={[styles.shimmer, { transform: [{ translateX: skelTranslateX }] }]} />
-      </View>
-    ));
-    return <View style={{ paddingHorizontal: listPadH, paddingTop: 6 }}>{items}</View>;
-  };
+  // Skeleton shimmer effect removed
+  const renderListSkeletons = () => null;
 
   const displayList = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -890,7 +886,11 @@ export default function Messages() {
               {filterOptions.map((f) => {
                 const active = selectedFilter === f;
                 const count = unreadTotals[f] || 0;
-                const a11yLabel = `Filter ${f}. ${count > 0 ? `${count} unread` : "no unread"}. ${active ? "Selected" : ""}`;
+                let display = f;
+                if (f === "son") display = "Child";
+                else if (f === "admin") display = "Management";
+                else display = f.charAt(0).toUpperCase() + f.slice(1);
+                const a11yLabel = `Filter ${display}. ${count > 0 ? `${count} unread` : "no unread"}. ${active ? "Selected" : ""}`;
                 return (
                   <TouchableOpacity
                     key={f}
@@ -905,7 +905,7 @@ export default function Messages() {
                     activeOpacity={0.85}
                   >
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Text style={[styles.filterText, active && styles.filterTextActive]}>{f.toUpperCase()}</Text>
+                      <Text style={[styles.filterText, active && styles.filterTextActive]}>{display}</Text>
                       {count > 0 && (
                         <View style={[styles.filterBadge, count > 99 && styles.filterBadgeWide]}>
                           <Text style={styles.filterBadgeText}>{count > 99 ? "99+" : count}</Text>
@@ -920,60 +920,47 @@ export default function Messages() {
         )}
       </View>
 
-      {isSkeletonActive ? (
-        <View style={{ paddingHorizontal: listPadH, paddingTop: 6 }}>
-          {renderListSkeletons()}
-        </View>
-      ) : (
-        <View style={{ flex: 1 }}>
-          <FlatList
-            data={displayList}
-            keyExtractor={(item) => String(item.roleId)}
-            renderItem={renderItem}
-            contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: listPadH, paddingTop: 6 }}
-            showsVerticalScrollIndicator={false}
-            getItemLayout={(data, index) => ({ length: cardHeight, offset: cardHeight * index, index })}
-            initialNumToRender={12}
-            maxToRenderPerBatch={12}
-            updateCellsBatchingPeriod={50}
-            windowSize={7}
-            removeClippedSubviews
-            ListEmptyComponent={
-              !isSkeletonActive && (
-                <View style={styles.emptyBox}>
-                  <Text style={styles.emptyText}>{search.trim() ? "No matches found" : "No users found"}</Text>
-                  <TouchableOpacity
-                    style={styles.emptyCta}
-                    onPress={() => router.replace("/dashboard/home")}
-                    accessibilityRole="button"
-                    accessibilityLabel="Go to dashboard"
-                  >
-                    <Text style={styles.emptyCtaText}>Go to Dashboard</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.emptyCtaGhost}
-                    onPress={() => handleFilterChange(selectedFilter)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Refresh list"
-                  >
-                    <Text style={styles.emptyCtaGhostText}>Refresh</Text>
-                  </TouchableOpacity>
-                </View>
-              )
-            }
-            refreshing={isRefreshing}
-            onRefresh={() => {
-              setIsRefreshing(true);
-              handleFilterChange(selectedFilter).finally(() => setIsRefreshing(false));
-            }}
-          />
-          {(showRefreshOverlay || showLoadingOverlay) && (
-            <View style={styles.refreshOverlay} pointerEvents="none">
-              {renderListSkeletons()}
+      <View style={{ flex: 1 }}>
+        <FlatList
+          data={displayList}
+          keyExtractor={(item) => String(item.roleId)}
+          renderItem={renderItem}
+          contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: listPadH, paddingTop: 6 }}
+          showsVerticalScrollIndicator={false}
+          getItemLayout={(data, index) => ({ length: cardHeight, offset: cardHeight * index, index })}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          updateCellsBatchingPeriod={50}
+          windowSize={7}
+          removeClippedSubviews
+          ListEmptyComponent={
+            <View style={styles.emptyBox}>
+              <Text style={styles.emptyText}>{search.trim() ? "No matches found" : "No users found"}</Text>
+              <TouchableOpacity
+                style={styles.emptyCta}
+                onPress={() => router.replace("/dashboard/home")}
+                accessibilityRole="button"
+                accessibilityLabel="Go to dashboard"
+              >
+                <Text style={styles.emptyCtaText}>Go to Dashboard</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.emptyCtaGhost}
+                onPress={() => handleFilterChange(selectedFilter)}
+                accessibilityRole="button"
+                accessibilityLabel="Refresh list"
+              >
+                <Text style={styles.emptyCtaGhostText}>Refresh</Text>
+              </TouchableOpacity>
             </View>
-          )}
-        </View>
-      )}
+          }
+          refreshing={isRefreshing}
+          onRefresh={() => {
+            setIsRefreshing(true);
+            handleFilterChange(selectedFilter).finally(() => setIsRefreshing(false));
+          }}
+        />
+      </View>
     </SafeAreaView>
   );
 }

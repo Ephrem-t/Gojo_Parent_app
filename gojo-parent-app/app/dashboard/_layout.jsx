@@ -1,7 +1,7 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, FontAwesome6 } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Tabs, useRouter } from "expo-router";
-import { ref, onValue, off } from "firebase/database";
+import { ref, onValue, off, get } from "firebase/database";
 import { useEffect, useState, useRef } from "react";
 import { ActivityIndicator, Image, Text, TouchableOpacity, View, StyleSheet, Animated } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -9,6 +9,26 @@ import { StatusBar } from "expo-status-bar";
 import { database } from "../../constants/firebaseConfig";
 
 export default function DashboardLayout() {
+    const [schoolName, setSchoolName] = useState("");
+    useEffect(() => {
+      const fetchSchoolName = async () => {
+        try {
+          // Get school node key dynamically, fallback to 'Guda Miju'
+          const schoolNodeKey = await AsyncStorage.getItem("schoolNodeKey") || "Guda Miju";
+          console.log("School node key used for fetching:", schoolNodeKey);
+          const schoolSnap = await get(ref(database, `schools/${schoolNodeKey}/info`));
+          if (schoolSnap.exists()) {
+            setSchoolName(schoolSnap.val().name || "School");
+          } else {
+            setSchoolName("School");
+          }
+        } catch (err) {
+          console.log("Error fetching school name:", err);
+          setSchoolName("School");
+        }
+      };
+      fetchSchoolName();
+    }, []);
   const router = useRouter();
   const [profileImage, setProfileImage] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -229,6 +249,18 @@ export default function DashboardLayout() {
         options={{
           title: "Attendance",
           tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
+        }}
+      />
+
+      <Tabs.Screen
+        name="school"
+        options={{
+          title: schoolName || "School",
+          headerTitle: () => (
+            <Text style={{ fontSize: 20, color: '#222', marginLeft: 8 }} numberOfLines={1} ellipsizeMode="tail">{schoolName || "School"}</Text>
+          ),
+          // Reduce the icon size for the school tab
+          tabBarIcon: ({ color, size }) => <FontAwesome6 name="building-columns" size={size * 0.86} color={color} />,
         }}
       />
       </Tabs>

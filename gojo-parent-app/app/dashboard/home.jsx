@@ -300,15 +300,13 @@ export default function Home() {
         const usersData = usersSnap.exists() ? usersSnap.val() : {};
         const schoolAdminSnap = await get(child(ref(database), "School_Admins"));
         const schoolAdminData = schoolAdminSnap.exists() ? schoolAdminSnap.val() : {};
-        const mapped = mapPosts(postsData, usersData, schoolAdminData).sort((a, b) => (b.time || 0) - (a.time || 0));
-        setPosts((prev) => {
-          const merged = [...mapped, ...prev];
-          const dedup = merged.reduce((acc, item) => {
-            acc[item.id] = item;
-            return acc;
-          }, {});
-          return Object.values(dedup).sort((a, b) => (b.time || 0) - (a.time || 0));
-        });
+          const mapped = mapPosts(postsData, usersData, schoolAdminData);
+          setPosts((prev) => {
+            // Only update posts that have changed, keep order
+            const prevMap = prev.reduce((acc, item) => { acc[item.id] = item; return acc; }, {});
+            const mappedMap = mapped.reduce((acc, item) => { acc[item.id] = item; return acc; }, {});
+            return prev.map((item) => mappedMap[item.id] ? { ...item, ...mappedMap[item.id] } : item);
+          });
       } catch (e) {
         log("Live update error:", e);
       }

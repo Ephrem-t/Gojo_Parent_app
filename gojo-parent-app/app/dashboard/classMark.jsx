@@ -21,6 +21,7 @@ import { database } from "../../constants/firebaseConfig";
 
 export default function ClassMark() {
   const [parentId, setParentId] = useState(null);
+  const [rank, setRank] = useState(null);
   const [children, setChildren] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [childUser, setChildUser] = useState(null);
@@ -30,7 +31,7 @@ export default function ClassMark() {
   const [cache, setCache] = useState({});
   const [expanded, setExpanded] = useState({}); // 🔽 expand state
   const [loading, setLoading] = useState(true);
-  const [selectedSemester, setSelectedSemester] = useState('semester1');
+  const [selectedSemester, setSelectedSemester] = useState('semester2');
 
   const shimmerAnim = useRef(new Animated.Value(-120)).current;
   const detailsAnim = useRef({}).current;
@@ -142,6 +143,7 @@ export default function ClassMark() {
         marksSnap,
         teachersSnap,
         assignSnap,
+        rankSnap,
       ] = await Promise.all([
         get(ref(database, "Parents")),
         get(ref(database, "Students")),
@@ -150,6 +152,7 @@ export default function ClassMark() {
         get(ref(database, "ClassMarks")),
         get(ref(database, "Teachers")),
         get(ref(database, "TeacherAssignments")),
+        get(ref(database, "Ranks")), // Fetch rank data
       ]);
 
       const data = {
@@ -160,15 +163,21 @@ export default function ClassMark() {
         marks: marksSnap.val() || {},
         teachers: teachersSnap.val() || {},
         assignments: assignSnap.val() || {},
+        ranks: rankSnap.val() || {},
       };
 
       setCache(data);
 
+      // Set rank for current parent/child if available
       const parent = data.parents[parentId];
       const kids = parent?.children ? Object.values(parent.children) : [];
       setChildren(kids);
 
-      if (kids.length > 0) loadChild(kids[0], 0, data);
+      if (kids.length > 0) {
+        const studentId = kids[0].studentId;
+        setRank(data.ranks[studentId] || null);
+        loadChild(kids[0], 0, data);
+      }
       setLoading(false);
     };
 
@@ -259,7 +268,7 @@ export default function ClassMark() {
   const overallPercent = overallMax > 0 ? Math.round((overallScore / overallMax) * 100) : 0;
   const averagePoint = assessmentsCount > 0 ? Math.round(overallScore / assessmentsCount) : 0;
   const percentilePoint = overallPercent; // placeholder until real percentile data
-  const overallRank = "--"; // placeholder until backend provides rank
+  const overallRank = rank !== null ? rank : "--";
 
   const renderShimmerBar = (width = "82%") => (
     <View style={styles.skeletonRow}>
@@ -412,19 +421,41 @@ export default function ClassMark() {
               )}
             </TouchableOpacity>
 
-            <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}>
-              <View style={[styles.metricPillPrimary, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
-                <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Rank</Text>
-                <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{overallRank}</Text>
-              </View>
-              <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
-                <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Avg Point</Text>
-                <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{averagePoint}</Text>
-              </View>
-              <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
-                <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Percentile</Text>
-                <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{percentilePoint}%</Text>
-              </View>
+            <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}> 
+              {/* Show Rank, Avg Point, Percentile for selected semester */}
+              {(() => {
+                let semScore = 0, semMax = 0, semCount = 0;
+                // Placeholder for rank logic
+                let rank = '--';
+                courses.forEach((course) => {
+                  const studentMarks = marks?.[course.courseId]?.[childUser?.studentId];
+                  const semMarks = studentMarks?.[selectedSemester];
+                  if (!semMarks?.assessments) return;
+                  Object.values(semMarks.assessments).forEach((a) => {
+                    semScore += a.score || 0;
+                    semMax += a.max || 0;
+                    semCount += 1;
+                  });
+                });
+                const avg = semCount > 0 ? Math.round(semScore / semCount) : 0;
+                const perc = semMax > 0 ? Math.round((semScore / semMax) * 100) : 0;
+                // TODO: Replace with real rank logic if available
+                rank = '--';
+                return <>
+                  <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
+                    <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Rank</Text>
+                    <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{rank}</Text>
+                  </View>
+                  <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
+                    <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Avg Point</Text>
+                    <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{isNaN(avg) ? 0 : avg}</Text>
+                  </View>
+                  <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
+                    <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Percentile</Text>
+                    <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{isNaN(perc) ? 0 : perc}%</Text>
+                  </View>
+                </>;
+              })()}
             </View>
           </>
         )}

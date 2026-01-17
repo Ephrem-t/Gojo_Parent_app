@@ -3,10 +3,18 @@ import { useRouter } from "expo-router";
 import { child, get, ref } from "firebase/database";
 import { useState } from "react";
 import { Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { database } from "../constants/firebaseConfig";
 
 export default function Login() {
+    // Logout handler (call this from your logout button/menu)
+    const handleLogout = async () => {
+      await AsyncStorage.removeItem("userId");
+      await AsyncStorage.removeItem("parentId");
+      await AsyncStorage.removeItem("lastLogin");
+      router.replace("/");
+    };
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
@@ -77,7 +85,7 @@ export default function Login() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top", "right", "left", "bottom"]}>
       <Text style={styles.title}>Gojo Parent Login</Text>
 
       <TextInput
@@ -99,16 +107,17 @@ export default function Login() {
       <TouchableOpacity style={styles.button} onPress={handleLogin}>
         <Text style={styles.buttonText}>Login</Text>
       </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: "center",
+    
     padding: 20,
     backgroundColor: "#fff",
+    marginTop: 120,// adjust as needed
   },
   title: {
     fontSize: 24,

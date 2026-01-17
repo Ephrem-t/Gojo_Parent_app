@@ -182,7 +182,13 @@ const MessageBubble = ({
 // --- Main Chat component ---
 export default function Chat() {
   const router = useRouter();
-  const { userId: receiverParamId } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const receiverParamId = params.userId;
+  const receiverName = params.name;
+  const receiverEmail = params.email;
+  const receiverPhone = params.phone;
+  const receiverProfileImage = params.profileImage;
+  const receiverTitle = params.title;
   const insets = useSafeAreaInsets();
 
   // ids
@@ -218,7 +224,6 @@ export default function Chat() {
 
   const flatListRef = useRef();
   const messagesListenerRef = useRef(null);
-  const initialBottomRef = useRef(insets.bottom);
 
   // Skeleton shimmer for initial messages load
   const chatSkeletonAnim = useRef(new Animated.Value(0)).current;
@@ -831,101 +836,128 @@ export default function Chat() {
   };
 
   const headerSubtitle = () => {
-    return receiverProfile?.status || "last seen recently";
+    if (receiverTitle) return receiverTitle;
+    if (receiverProfile?.status) return receiverProfile.status;
+    return "last seen recently";
   };
 
   // Base bottom offset: keep composer position while trimming excess scroll padding
-  const safeBottom = keyboardVisible ? insets.bottom : initialBottomRef.current;
-  // Drop the composer as low as possible while keeping it outside the scroll area
-  const baseBottom = Math.max(safeBottom - 90, -15);
-  const listBottomPadding = composerHeight + baseBottom + (showEmoji ? 240 : 18);
+  // Always use the latest insets.bottom for safe area protection
+  const safeBottom = insets.bottom;
+  // Place composer directly above the safe area (no negative offset)
+  // Move composer down a little (10px below safe area)
+  const baseBottom = Math.max(safeBottom - 50, 0);
+  // Reduce bottom padding to make message scroll area longer
+  // Let messages scroll under the safe area and composer (like Telegram)
+  // Add a small bottom padding so messages don't go fully behind the navigation bar
+  // Ensure last message is always visible above the composer and navigation bar
+  // Move up the message list: reduce bottom padding so last message sits closer to composer
+  // Ensure last message is never overlapped by the composer: add extra bottom padding
+  // Move the message list area up more by increasing extra bottom padding
+  // Move up the bottom of the message list: only pad by composerHeight
+  // Make the last message touch the composer exactly
+  // Add extra gap between last message and composer
+  const EXTRA_GAP = 40; // Adjust this value for a longer gap
+  const listBottomPadding = composerHeight + (showEmoji ? 240 : 0) + EXTRA_GAP;
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "right", "left", "bottom"]}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.headerLeft}>
-          <Ionicons name="arrow-back" size={24} color="#000" />
-        </TouchableOpacity>
+      {messagesLoading ? (
+        <View style={styles.header}>
+          <Animated.View style={[styles.headerSkeleton, { overflow: "hidden" }]}> 
+            <Animated.View 
+              style={[styles.headerSkeletonShimmer, { 
+                transform: [{ translateX: chatSkeletonAnim.interpolate({ inputRange: [0, 1], outputRange: [-120, 240] }) }],
+              }]} 
+            />
+          </Animated.View>
+        </View>
+      ) : (
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerLeft}>
+            <Ionicons name="arrow-back" size={24} color="#000" />
+          </TouchableOpacity>
 
-        <View style={styles.headerCenter}>
-          {searchMode ? (
-            <View style={styles.headerSearchWrap}>
-              <Ionicons name="search" size={16} color="#64748b" style={{ marginRight: 6 }} />
-              <TextInput
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                placeholder="Search"
-                placeholderTextColor="#94a3b8"
-                style={styles.headerSearchInput}
-                returnKeyType="search"
-                onSubmitEditing={jumpNext}
-                autoFocus
-              />
-              {!!matched.length && (
-                <Text style={styles.chatSearchCount}>{matchIndex + 1}/{matched.length}</Text>
-              )}
-            </View>
-          ) : (
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={styles.headerAvatarRow}
-              onPress={() => {
-                const roleName = receiverRole === "Students"
-                  ? "Student"
-                  : receiverRole === "Teachers"
-                  ? "Teacher"
-                  : receiverRole === "Parents"
-                  ? "Parent"
-                  : receiverRole === "School_Admins"
-                  ? "Admin"
-                  : undefined;
-                router.push({
-                  pathname: "/userProfile",
-                  params: {
-                    recordId: receiverParamId,
-                    userId: receiverUserId,
-                    roleName,
-                  },
-                });
-              }}
-            >
-              <Image
-                source={{ uri: receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
-                style={styles.headerAvatar}
-              />
-              <View style={{ marginLeft: 10 }}>
-                <Text style={styles.headerTitle}>{receiverProfile?.name || "User"}</Text>
-                <Text style={styles.headerSubtitle}>{headerSubtitle()}</Text>
+          <View style={styles.headerCenter}>
+            {searchMode ? (
+              <View style={styles.headerSearchWrap}>
+                <Ionicons name="search" size={16} color="#64748b" style={{ marginRight: 6 }} />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="Search"
+                  placeholderTextColor="#94a3b8"
+                  style={styles.headerSearchInput}
+                  returnKeyType="search"
+                  onSubmitEditing={jumpNext}
+                  autoFocus
+                />
+                {!!matched.length && (
+                  <Text style={styles.chatSearchCount}>{matchIndex + 1}/{matched.length}</Text>
+                )}
               </View>
-            </TouchableOpacity>
-          )}
-        </View>
+            ) : (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.headerAvatarRow}
+                onPress={() => {
+                  const roleName = receiverRole === "Students"
+                    ? "Student"
+                    : receiverRole === "Teachers"
+                    ? "Teacher"
+                    : receiverRole === "Parents"
+                    ? "Parent"
+                    : receiverRole === "School_Admins"
+                    ? "Admin"
+                    : undefined;
+                  router.push({
+                    pathname: "/userProfile",
+                    params: {
+                      recordId: receiverParamId,
+                      userId: receiverUserId,
+                      roleName,
+                    },
+                  });
+                }}
+              >
+                <Image
+                  source={{ uri: receiverProfileImage || receiverProfile?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
+                  style={styles.headerAvatar}
+                />
+                <View style={{ marginLeft: 10 }}>
+                  <Text style={styles.headerTitle}>{receiverName || receiverProfile?.name || "User"}</Text>
+                  <Text style={styles.headerSubtitle}>{headerSubtitle()}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
 
-        <View style={styles.headerRight}>
-          {searchMode ? (
-            <>
-              <TouchableOpacity style={styles.iconBtn} onPress={jumpPrev} disabled={!matched.length}>
-                <Ionicons name="chevron-up" size={18} color={matched.length ? "#0f172a" : "#cbd5e1"} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={jumpNext} disabled={!matched.length}>
-                <Ionicons name="chevron-down" size={18} color={matched.length ? "#0f172a" : "#cbd5e1"} />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => { setSearchMode(false); setSearchQuery(""); setMatched([]); setMatchIndex(0); }}>
-                <Ionicons name="close" size={20} color="#222" />
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <TouchableOpacity style={styles.iconBtn} onPress={() => {
-                setSearchMode(true);
-              }}>
-                <Ionicons name="search" size={20} color="#222" />
-              </TouchableOpacity>
-            </>
-          )}
+          <View style={styles.headerRight}>
+            {searchMode ? (
+              <>
+                <TouchableOpacity style={styles.iconBtn} onPress={jumpPrev} disabled={!matched.length}>
+                  <Ionicons name="chevron-up" size={18} color={matched.length ? "#0f172a" : "#cbd5e1"} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.iconBtn} onPress={jumpNext} disabled={!matched.length}>
+                  <Ionicons name="chevron-down" size={18} color={matched.length ? "#0f172a" : "#cbd5e1"} />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => { setSearchMode(false); setSearchQuery(""); setMatched([]); setMatchIndex(0); }}>
+                  <Ionicons name="close" size={20} color="#222" />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.iconBtn} onPress={() => {
+                  setSearchMode(true);
+                }}>
+                  <Ionicons name="search" size={20} color="#222" />
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
         </View>
-      </View>
+      )}
 
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -945,7 +977,7 @@ export default function Chat() {
                 keyExtractor={(item) => item.id ?? item.messageId}
                 renderItem={renderGroupedItem}
                 style={{ paddingTop: 32 }}
-                contentContainerStyle={{ paddingHorizontal: -10, paddingBottom: listBottomPadding }}
+                contentContainerStyle={{ paddingHorizontal: -10, paddingTop: 32, paddingBottom: listBottomPadding }}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
@@ -1210,7 +1242,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderRadius: 28,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 4, // decreased from 8
     flexDirection: "row",
     alignItems: "center",
     shadowColor: "#000",
@@ -1220,8 +1252,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   composerLeft: { padding: 6 },
-  inputWrapFloating: { flex: 1, marginHorizontal: 6, backgroundColor: "#f2f6fb", borderRadius: 20, paddingHorizontal: 12, paddingVertical: Platform.OS === "ios" ? 8 : 6, maxHeight: 140 },
-  textInput: { fontSize: 16, padding: 0, color: "#111", minHeight: 36, maxHeight: 120 },
+  inputWrapFloating: { flex: 1, marginHorizontal: 6, backgroundColor: "#f2f6fb", borderRadius: 20, paddingHorizontal: 12, paddingVertical: Platform.OS === "ios" ? 4 : 3, maxHeight: 140 },
+  textInput: { fontSize: 16, padding: 0, color: "#111", minHeight: 28, maxHeight: 80 },
   composerRight: { flexDirection: "row", alignItems: "center" },
   sendButton: { backgroundColor: "#1f8ef1", borderRadius: 20, padding: 10, marginLeft: 8 },
 

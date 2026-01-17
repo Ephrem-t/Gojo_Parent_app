@@ -221,3 +221,25 @@ Chats
 
 
 
+├─ ClassMark
+│   ├─ <studentId1>
+│   │    ├─ semester1
+│   │    │    ├─ avgPoint: number
+│   │    │    ├─ percentile: number
+│   │    │    ├─ rank: number
+│   │    │    ├─ subjects
+│   │    │    │    ├─ <subjectId>
+│   │    │    │    │    ├─ mark: number
+│   │    │    │    │    ├─ grade: string
+│   │    │    │    │    └─ ...
+│   │    ├─ semester2
+│   │    │    ├─ avgPoint: number
+│   │    │    ├─ percentile: number
+│   │    │    ├─ rank: number
+│   │    │    ├─ subjects
+│   │    │    │    ├─ <subjectId>
+│   │    │    │    │    ├─ mark: number
+│   │    │    │    │    ├─ grade: string
+│   │    │    │    │    └─ ...
+│   ├─ <studentId2>
+│   └─ ...

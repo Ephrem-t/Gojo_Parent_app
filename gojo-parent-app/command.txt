@@ -86,3 +86,15 @@ npm install moment
 
 expo install expo-linear-gradient
 npx expo install expo-linear-gradient
+
+
+
+
+
+
+
+
+
+
+
+npx eas build -p android --profile preview
