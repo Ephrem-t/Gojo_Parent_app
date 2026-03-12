@@ -29,9 +29,10 @@ export default function ClassMark() {
   const [marks, setMarks] = useState({});
   const [showList, setShowList] = useState(false);
   const [cache, setCache] = useState({});
-  const [expanded, setExpanded] = useState({}); // 🔽 expand state
+  const [expanded, setExpanded] = useState({});
   const [loading, setLoading] = useState(true);
-  const [selectedSemester, setSelectedSemester] = useState('semester2');
+  const [selectedSemester, setSelectedSemester] = useState("semester2");
+  const [selectedQuarter, setSelectedQuarter] = useState(null);
 
   const shimmerAnim = useRef(new Animated.Value(-120)).current;
   const detailsAnim = useRef({}).current;
@@ -39,7 +40,6 @@ export default function ClassMark() {
   const dropdownOpacity = useRef(new Animated.Value(0)).current;
   const dropdownTrans = useRef(new Animated.Value(-10)).current;
 
-  // Responsive breakpoints
   const { width, height } = useWindowDimensions();
   const isSmall = width < 360;
   const isMedium = width >= 360 && width < 400;
@@ -70,14 +70,12 @@ export default function ClassMark() {
   const defaultProfile =
     "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-  /* ---------------- LOAD PARENT ID ---------------- */
   useEffect(() => {
     AsyncStorage.getItem("parentId").then((id) => {
       if (id) setParentId(id);
     });
   }, []);
 
-  // Shimmer animation loop
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
@@ -98,7 +96,6 @@ export default function ClassMark() {
     return () => loop.stop();
   }, [shimmerAnim]);
 
-  // Animate backdrop and dropdown on open
   useEffect(() => {
     if (showList) {
       backdropOpacity.setValue(0);
@@ -129,7 +126,6 @@ export default function ClassMark() {
     }
   }, [showList]);
 
-  /* ---------------- LOAD ALL DATA ---------------- */
   useEffect(() => {
     if (!parentId) return;
 
@@ -152,7 +148,7 @@ export default function ClassMark() {
         get(ref(database, "ClassMarks")),
         get(ref(database, "Teachers")),
         get(ref(database, "TeacherAssignments")),
-        get(ref(database, "Ranks")), // Fetch rank data
+        get(ref(database, "Ranks")),
       ]);
 
       const data = {
@@ -168,7 +164,6 @@ export default function ClassMark() {
 
       setCache(data);
 
-      // Set rank for current parent/child if available
       const parent = data.parents[parentId];
       const kids = parent?.children ? Object.values(parent.children) : [];
       setChildren(kids);
@@ -184,7 +179,6 @@ export default function ClassMark() {
     loadData();
   }, [parentId]);
 
-  /* ---------------- LOAD CHILD ---------------- */
   const loadChild = (child, index, data) => {
     const student = data.students[child.studentId];
     if (!student) return;
@@ -216,25 +210,11 @@ export default function ClassMark() {
 
     setCourses(courseList);
     setMarks(data.marks || {});
-    setExpanded({}); // reset expand on child change
+    setExpanded({});
     setCurrentIndex(index);
     setShowList(false);
   };
 
-  /* ---------------- TOTAL MARK ---------------- */
-  const calcTotal = (assessments) => {
-    let score = 0;
-    let max = 0;
-
-    Object.values(assessments || {}).forEach((a) => {
-      score += a.score || 0;
-      max += a.max || 0;
-    });
-
-    return { score, max };
-  };
-
-  /* ---------------- TOGGLE EXPAND ---------------- */
   const toggleExpand = (courseId) => {
     setExpanded((prev) => {
       const nextOpen = !prev[courseId];
@@ -252,69 +232,89 @@ export default function ClassMark() {
     });
   };
 
-  // ---------------- OVERALL METRICS (header) ----------------
+  // ✅ dynamic quarter keys from DB for selected semester (only what exists)
+  const availableQuarterKeys = (() => {
+    if (!childUser?.studentId) return [];
+    const qSet = new Set();
+
+    courses.forEach((course) => {
+      const studentMarks = marks?.[course.courseId]?.[childUser.studentId];
+      const semNode = studentMarks?.[selectedSemester];
+      if (!semNode || typeof semNode !== "object") return;
+
+      Object.keys(semNode).forEach((k) => {
+        const val = semNode[k];
+        if (val && typeof val === "object" && val.assessments) {
+          qSet.add(k);
+        }
+      });
+    });
+
+    return Array.from(qSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  })();
+
+  // keep selected quarter valid whenever semester/data changes
+  useEffect(() => {
+    if (availableQuarterKeys.length === 0) {
+      setSelectedQuarter(null);
+      return;
+    }
+    if (!selectedQuarter || !availableQuarterKeys.includes(selectedQuarter)) {
+      setSelectedQuarter(availableQuarterKeys[0]);
+    }
+  }, [selectedSemester, childUser?.studentId, marks, courses.length]);
+
   let overallScore = 0;
   let overallMax = 0;
   let assessmentsCount = 0;
+
   courses.forEach((course) => {
     const studentMarks = marks?.[course.courseId]?.[childUser?.studentId];
-    if (!studentMarks?.assessments) return;
-    Object.values(studentMarks.assessments).forEach((a) => {
+    const quarterMarks = selectedQuarter
+      ? studentMarks?.[selectedSemester]?.[selectedQuarter]
+      : null;
+    if (!quarterMarks?.assessments) return;
+
+    Object.values(quarterMarks.assessments).forEach((a) => {
       overallScore += a.score || 0;
       overallMax += a.max || 0;
       assessmentsCount += 1;
     });
   });
+
   const overallPercent = overallMax > 0 ? Math.round((overallScore / overallMax) * 100) : 0;
   const averagePoint = assessmentsCount > 0 ? Math.round(overallScore / assessmentsCount) : 0;
-  const percentilePoint = overallPercent; // placeholder until real percentile data
   const overallRank = rank !== null ? rank : "--";
 
-  const renderShimmerBar = (width = "82%") => (
-    <View style={styles.skeletonRow}>
-      <View style={[styles.skeletonBox, { width }]}> 
-        <Animated.View
-          style={[
-            styles.shimmer,
-            {
-              transform: [{ translateX: shimmerAnim }],
-            },
-          ]}
-        />
-      </View>
-    </View>
-  );
-
-  // Attendance-style header skeleton shimmer
   const SkeletonHeader = () => {
     return (
-      <View style={[styles.header, { padding: headerPadding, borderRadius: headerRadius, minHeight: headerMinH }]}> 
+      <View style={[styles.header, { padding: headerPadding, borderRadius: headerRadius, minHeight: headerMinH }]}>
         <View style={styles.headerLeft}>
           <View style={styles.skeletonAvatar}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
           <View style={styles.headerText}>
-            <View style={[styles.skeletonBox, { width: "70%", height: 18, marginBottom: 10 }]}> 
+            <View style={[styles.skeletonBox, { width: "70%", height: 18, marginBottom: 10 }]}>
               <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
             </View>
             <View style={styles.chipRow}>
-              <View style={[styles.skeletonChip, { height: 22, width: 90, borderRadius: 12, marginRight: 8, marginBottom: 6 }]}> 
+              <View style={[styles.skeletonChip, { height: 22, width: 90, borderRadius: 12, marginRight: 8, marginBottom: 6 }]}>
                 <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
               </View>
-              <View style={[styles.skeletonChip, { height: 22, width: 90, borderRadius: 12, marginBottom: 6 }]}> 
+              <View style={[styles.skeletonChip, { height: 22, width: 90, borderRadius: 12, marginBottom: 6 }]}>
                 <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
               </View>
             </View>
           </View>
         </View>
-        <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}> 
-          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12, marginRight: 8 }]}> 
+        <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}>
+          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12, marginRight: 8 }]}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
-          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12, marginRight: 8 }]}> 
+          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12, marginRight: 8 }]}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
-          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12 }]}> 
+          <View style={[styles.skeletonPill, { height: 60, flex: 1, borderRadius: 12 }]}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
         </View>
@@ -326,29 +326,29 @@ export default function ClassMark() {
     <View style={[styles.card, { padding: cardPad, borderRadius: cardRadius }]}>
       <View style={styles.courseHeader}>
         <View style={{ flex: 1 }}>
-          <View style={[styles.skeletonBox, { width: "55%", height: 16 }]}> 
+          <View style={[styles.skeletonBox, { width: "55%", height: 16 }]}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
-          <View style={[styles.skeletonBox, { width: "40%", height: 12, marginTop: 8 }]}> 
+          <View style={[styles.skeletonBox, { width: "40%", height: 12, marginTop: 8 }]}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
           <View style={styles.courseMetaRow}>
-            <View style={[styles.skeletonChip, { width: 120, height: 24 }]}> 
+            <View style={[styles.skeletonChip, { width: 120, height: 24 }]}>
               <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
             </View>
-            <View style={[styles.skeletonChip, { width: 140, height: 24 }]}> 
+            <View style={[styles.skeletonChip, { width: 140, height: 24 }]}>
               <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
             </View>
           </View>
         </View>
         <View style={styles.percentPill}>
-          <View style={[styles.skeletonBox, { width: 60, height: 28 }]}> 
+          <View style={[styles.skeletonBox, { width: 60, height: 28 }]}>
             <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
           </View>
         </View>
       </View>
-      <View style={[styles.progressTrack, { height: progressHeight }]}> 
-        <View style={[styles.skeletonBox, { height: "100%", width: "100%" }]}> 
+      <View style={[styles.progressTrack, { height: progressHeight }]}>
+        <View style={[styles.skeletonBox, { height: "100%", width: "100%" }]}>
           <Animated.View style={[styles.shimmer, { transform: [{ translateX: shimmerAnim }] }]} />
         </View>
       </View>
@@ -357,7 +357,6 @@ export default function ClassMark() {
 
   return (
     <View style={styles.container}>
-      {/* ================= HEADER ================= */}
       <LinearGradient
         colors={["#f7f9fc", "#eef3ff"]}
         start={{ x: 0, y: 0 }}
@@ -389,14 +388,17 @@ export default function ClassMark() {
                   <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV }]}>
                     <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale) }]}>Section {childUser?.section ?? "--"}</Text>
                   </View>
-                  {/* Semester Picker (always Semester 1 and 2) */}
-                  <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV, flexDirection: 'row', alignItems: 'center', marginLeft: 6 }]}> 
-                    <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale), color: '#2563eb', fontWeight: 'bold', marginRight: 6 }]}>Semester:</Text>
-                    {['semester1', 'semester2'].map(sem => (
+
+                  {/* semester selector */}
+                  <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV, flexDirection: "row", alignItems: "center", marginLeft: 6 }]}>
+                    <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale), color: "#2563eb", fontWeight: "bold", marginRight: 6 }]}>
+                      Semester:
+                    </Text>
+                    {["semester1", "semester2"].map((sem) => (
                       <TouchableOpacity
                         key={sem}
                         style={{
-                          backgroundColor: selectedSemester === sem ? '#2563eb' : '#e5e7eb',
+                          backgroundColor: selectedSemester === sem ? "#2563eb" : "#e5e7eb",
                           paddingHorizontal: 10,
                           paddingVertical: 3,
                           borderRadius: 12,
@@ -404,9 +406,39 @@ export default function ClassMark() {
                         }}
                         onPress={() => setSelectedSemester(sem)}
                       >
-                        <Text style={{ color: selectedSemester === sem ? '#fff' : '#1e293b', fontWeight: '700', fontSize: Math.round(13 * fontScale) }}>{sem === 'semester1' ? '1' : '2'}</Text>
+                        <Text style={{ color: selectedSemester === sem ? "#fff" : "#1e293b", fontWeight: "700", fontSize: Math.round(13 * fontScale) }}>
+                          {sem === "semester1" ? "1" : "2"}
+                        </Text>
                       </TouchableOpacity>
                     ))}
+                  </View>
+
+                  {/* ✅ dynamic quarter selector based on DB */}
+                  <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV, flexDirection: "row", alignItems: "center", marginLeft: 6 }]}>
+                    <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale), color: "#ea580c", fontWeight: "bold", marginRight: 6 }]}>
+                      Quarter:
+                    </Text>
+                    {availableQuarterKeys.length === 0 ? (
+                      <Text style={{ color: "#64748b", fontWeight: "600", fontSize: Math.round(12 * fontScale) }}>--</Text>
+                    ) : (
+                      availableQuarterKeys.map((q) => (
+                        <TouchableOpacity
+                          key={q}
+                          style={{
+                            backgroundColor: selectedQuarter === q ? "#ea580c" : "#e5e7eb",
+                            paddingHorizontal: 10,
+                            paddingVertical: 3,
+                            borderRadius: 12,
+                            marginHorizontal: 2,
+                          }}
+                          onPress={() => setSelectedQuarter(q)}
+                        >
+                          <Text style={{ color: selectedQuarter === q ? "#fff" : "#1e293b", fontWeight: "700", fontSize: Math.round(13 * fontScale) }}>
+                            {String(q).toUpperCase()}
+                          </Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
                   </View>
                 </View>
               </View>
@@ -421,41 +453,19 @@ export default function ClassMark() {
               )}
             </TouchableOpacity>
 
-            <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}> 
-              {/* Show Rank, Avg Point, Percentile for selected semester */}
-              {(() => {
-                let semScore = 0, semMax = 0, semCount = 0;
-                // Placeholder for rank logic
-                let rank = '--';
-                courses.forEach((course) => {
-                  const studentMarks = marks?.[course.courseId]?.[childUser?.studentId];
-                  const semMarks = studentMarks?.[selectedSemester];
-                  if (!semMarks?.assessments) return;
-                  Object.values(semMarks.assessments).forEach((a) => {
-                    semScore += a.score || 0;
-                    semMax += a.max || 0;
-                    semCount += 1;
-                  });
-                });
-                const avg = semCount > 0 ? Math.round(semScore / semCount) : 0;
-                const perc = semMax > 0 ? Math.round((semScore / semMax) * 100) : 0;
-                // TODO: Replace with real rank logic if available
-                rank = '--';
-                return <>
-                  <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
-                    <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Rank</Text>
-                    <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{rank}</Text>
-                  </View>
-                  <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
-                    <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Avg Point</Text>
-                    <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{isNaN(avg) ? 0 : avg}</Text>
-                  </View>
-                  <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }] }>
-                    <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Percentile</Text>
-                    <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{isNaN(perc) ? 0 : perc}%</Text>
-                  </View>
-                </>;
-              })()}
+            <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}>
+              <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }]}>
+                <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Rank</Text>
+                <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{overallRank}</Text>
+              </View>
+              <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }]}>
+                <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Avg Point</Text>
+                <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{isNaN(averagePoint) ? 0 : averagePoint}</Text>
+              </View>
+              <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }]}>
+                <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Percentile</Text>
+                <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{isNaN(overallPercent) ? 0 : overallPercent}%</Text>
+              </View>
             </View>
           </>
         )}
@@ -490,7 +500,6 @@ export default function ClassMark() {
         </View>
       )}
 
-      {/* ================= DROPDOWN ================= */}
       {children.length > 1 && showList && (
         <>
           <TouchableWithoutFeedback onPress={() => setShowList(false)}>
@@ -527,7 +536,7 @@ export default function ClassMark() {
                     style={[
                       styles.dropdownItem,
                       currentIndex === i && styles.dropdownActive,
-                      { paddingHorizontal: isSmall ? 8 : 10, paddingVertical: isSmall ? 10 : 12 }
+                      { paddingHorizontal: isSmall ? 8 : 10, paddingVertical: isSmall ? 10 : 12 },
                     ]}
                     onPress={() => loadChild(c, i, cache)}
                     activeOpacity={0.85}
@@ -557,19 +566,21 @@ export default function ClassMark() {
         </>
       )}
 
-      {/* ================= BODY ================= */}
       <ScrollView contentContainerStyle={{ paddingHorizontal: 12, paddingTop: 16, paddingBottom: 16 }}>
         {courses.map((course) => {
           const courseMarks = marks?.[course.courseId] || {};
           const studentId = childUser?.studentId;
           const studentMarks = courseMarks[studentId] || {};
-          const semMarks = studentMarks[selectedSemester];
-          if (!semMarks) return null;
+          const quarterMarks =
+            selectedQuarter && studentMarks?.[selectedSemester]
+              ? studentMarks[selectedSemester][selectedQuarter]
+              : null;
 
-          // Calculate totals for header (only selected semester)
+          if (!quarterMarks) return null;
+
           let totalScore = 0, totalMax = 0, totalCount = 0;
-          if (semMarks.assessments) {
-            Object.values(semMarks.assessments).forEach((a) => {
+          if (quarterMarks.assessments) {
+            Object.values(quarterMarks.assessments).forEach((a) => {
               totalScore += a.score || 0;
               totalMax += a.max || 0;
               totalCount += 1;
@@ -579,35 +590,28 @@ export default function ClassMark() {
           const isOpen = expanded[course.courseId];
 
           return (
-            <View key={course.courseId} style={[styles.card, { padding: cardPad, borderRadius: cardRadius }] }>
-              {/* 🔽 CLICKABLE COURSE HEADER */}
-              <TouchableOpacity
-                onPress={() => toggleExpand(course.courseId)}
-                activeOpacity={0.7}
-              >
+            <View key={course.courseId} style={[styles.card, { padding: cardPad, borderRadius: cardRadius }]}>
+              <TouchableOpacity onPress={() => toggleExpand(course.courseId)} activeOpacity={0.7}>
                 <View style={styles.courseHeader}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.courseName, { fontSize: Math.round(16 * fontScale) }]}>{course.name}</Text>
                     <TouchableOpacity
                       onPress={() => {
                         if (course.teacherId) {
-                          // Find the teacher's userId from cache (like chat.jsx)
                           const teacherUserId = cache.teachers && cache.teachers[course.teacherId]?.userId;
                           router.push({
-                            pathname: '/userProfile',
+                            pathname: "/userProfile",
                             params: {
-                              recordId: course.teacherId, // Teachers/<teacherId>
+                              recordId: course.teacherId,
                               userId: teacherUserId,
-                              roleName: 'Teacher',
+                              roleName: "Teacher",
                             },
                           });
                         }
                       }}
                       activeOpacity={0.7}
                     >
-                      <Text style={[styles.teacher, { fontSize: Math.round(13 * fontScale) }]}> 
-                        {course.teacherName}
-                      </Text>
+                      <Text style={[styles.teacher, { fontSize: Math.round(13 * fontScale) }]}>{course.teacherName}</Text>
                     </TouchableOpacity>
                     <View style={styles.courseMetaRow}>
                       <View style={styles.metaPill}>
@@ -621,7 +625,7 @@ export default function ClassMark() {
                     </View>
                   </View>
                   <View style={styles.courseRight}>
-                    <View style={[styles.percentPill, { minWidth: percentMinWidth, paddingHorizontal: percentPadH, paddingVertical: percentPadV }] }>
+                    <View style={[styles.percentPill, { minWidth: percentMinWidth, paddingHorizontal: percentPadH, paddingVertical: percentPadV }]}>
                       <Text style={[styles.percentValue, { fontSize: Math.round(17 * fontScale) }]}>{percent}%</Text>
                       <Text style={[styles.percentLabel, { fontSize: Math.round(11 * fontScale) }]}>Overall</Text>
                     </View>
@@ -640,21 +644,20 @@ export default function ClassMark() {
                 </View>
               </TouchableOpacity>
 
-              {/* 🔽 DETAILS */}
               {isOpen && (
-                <View key={selectedSemester} style={{ marginTop: 8 }}>
-                  <Text style={{ fontWeight: 'bold', marginBottom: 6 }}>
-                    {selectedSemester === 'semester1' ? 'SEMESTER 1' : 'SEMESTER 2'}
+                <View key={`${selectedSemester}_${selectedQuarter || "noq"}`} style={{ marginTop: 8 }}>
+                  <Text style={{ fontWeight: "bold", marginBottom: 6 }}>
+                    {(selectedSemester || "").toUpperCase()} {selectedQuarter ? `• ${String(selectedQuarter).toUpperCase()}` : ""}
                   </Text>
-                  {semMarks.assessments ? (
-                    Object.entries(semMarks.assessments).map(([assessKey, assess]) => (
+                  {quarterMarks.assessments ? (
+                    Object.entries(quarterMarks.assessments).map(([assessKey, assess]) => (
                       <View key={assessKey} style={styles.row}>
                         <Text style={[styles.assessName, { fontSize: Math.round(14 * fontScale) }]}>{assess.name}</Text>
                         <Text style={[styles.assessScore, { fontSize: Math.round(14 * fontScale) }]}>{assess.score} / {assess.max}</Text>
                       </View>
                     ))
                   ) : (
-                    <Text style={{ color: '#888', fontStyle: 'italic' }}>No assessments found</Text>
+                    <Text style={{ color: "#888", fontStyle: "italic" }}>No assessments found</Text>
                   )}
                 </View>
               )}
@@ -665,8 +668,6 @@ export default function ClassMark() {
     </View>
   );
 }
-
-/* ================= STYLES ================= */
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#f3f4f6" },
