@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Image,
@@ -7,243 +8,96 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
   useWindowDimensions,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
-import { ref, get } from "firebase/database";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { ref, get } from "firebase/database";
+import { Ionicons } from "@expo/vector-icons";
 import moment from "moment";
 import { database } from "../../constants/firebaseConfig";
-import { useRouter } from "expo-router";
+
+const PRIMARY = "#1E90FF";
+const BG = "#FFFFFF";
+const CARD = "#FFFFFF";
+const TEXT = "#0F172A";
+const MUTED = "#64748B";
+const BORDER = "#E2E8F0";
+
+const SUCCESS = "#16A34A";
+const WARNING = "#F59E0B";
+const DANGER = "#DC2626";
+
+const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+const CACHE_KEY = "attendance_cache_v2";
+
+const getPathPrefix = async () => {
+  const sk = (await AsyncStorage.getItem("schoolKey")) || null;
+  return sk ? `Platform1/Schools/${sk}/` : "";
+};
+
+const statusColor = (status) => {
+  switch (String(status || "").toLowerCase()) {
+    case "present":
+      return SUCCESS;
+    case "late":
+      return WARNING;
+    case "absent":
+      return DANGER;
+    default:
+      return MUTED;
+  }
+};
 
 export default function Attendance() {
-  const router = useRouter();
+  const { width } = useWindowDimensions();
+  const scale = width < 360 ? 0.92 : width >= 768 ? 1.1 : 1.0;
+  const fontScale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1.0;
+  const avatarSize = Math.round(72 * scale);
+
   const [parentId, setParentId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshingBg, setRefreshingBg] = useState(false);
+
   const [children, setChildren] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [childUser, setChildUser] = useState(null);
-  const [attendanceData, setAttendanceData] = useState({});
-  const [courses, setCourses] = useState([]);
-  const [tab, setTab] = useState("daily");
   const [showList, setShowList] = useState(false);
-  const [cache, setCache] = useState({});
-  const [expandedCourses, setExpandedCourses] = useState({});
-  const [loading, setLoading] = useState(true);
 
-  const progressAnim = useRef({}).current;
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const dropdownOpacity = useRef(new Animated.Value(0)).current;
-  const dropdownTrans = useRef(new Animated.Value(-10)).current;
-  const skeletonAnim = useRef(new Animated.Value(0)).current;
+  const [childUser, setChildUser] = useState(null);
+  const [courses, setCourses] = useState([]);
+  const [attendanceByCourse, setAttendanceByCourse] = useState({});
+  const [expandedCourses, setExpandedCourses] = useState({});
+
+  const [tab, setTab] = useState("daily"); // daily | weekly | monthly
+  const tabOptions = ["daily", "weekly", "monthly"];
   const tabAnim = useRef(new Animated.Value(0)).current;
   const [tabWidthState, setTabWidthState] = useState(0);
-  const tabOptions = ["daily", "weekly", "monthly"];
 
-  const { width, height } = useWindowDimensions();
-  const isTiny = width < 340;
-  const isSmall = width >= 340 && width < 360;
-  const isMedium = width >= 360 && width < 400;
-  const isTablet = width >= 768;
-  const scale = isTiny ? 0.85 : isSmall ? 0.9 : isMedium ? 0.95 : isTablet ? 1.1 : 1.0;
-  const fontScale = isTiny ? 0.9 : isSmall ? 0.92 : isMedium ? 0.97 : isTablet ? 1.08 : 1.0;
-  const avatarSize = isTiny ? 58 : isSmall ? 64 : isTablet ? 84 : Math.round(74 * scale);
-  const headerPadding = Math.round(22 * scale);
-  const headerRadius = Math.round(20 * scale);
-  const headerMinH = isTiny ? 110 : isSmall ? 120 : isTablet ? 140 : 130;
-  const headerChevronSize = isTiny ? 16 : isSmall ? 18 : isTablet ? 22 : 20;
-  const dropdownTop = headerPadding + avatarSize + Math.round(24 * scale);
-  const dropdownMaxH = Math.min(Math.round(height * 0.5), 360);
-  const chipPadH = isTiny ? 6 : isSmall ? 8 : Math.round(10 * scale);
-  const chipPadV = isTiny ? 3 : isSmall ? 4 : Math.round(6 * scale);
-  const pillPadH = isTiny ? 8 : isSmall ? 10 : Math.round(12 * scale);
-  const pillPadV = isTiny ? 6 : isSmall ? 8 : Math.round(10 * scale);
-  const H_MARGIN = Math.round(16 * (isTiny ? 0.85 : scale));
-  const cardPad = Math.round(16 * (isTiny ? 0.85 : scale));
-  const rowPadV = Math.round(8 * (isTiny ? 0.85 : scale));
-  const tabHeight = isTiny ? 38 : isSmall ? 40 : 44;
-  const tabFontSize = Math.round(13 * fontScale);
-  const tabWidth = Math.max(Math.floor((width - H_MARGIN * 2) / tabOptions.length), 88);
-
-  const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+  const shimmerAnim = useRef(new Animated.Value(-120)).current;
 
   useEffect(() => {
     AsyncStorage.getItem("parentId").then((id) => {
       if (id) setParentId(id);
     });
-  }, []);
 
-  useEffect(() => {
-    if (!parentId) return;
-
-    const loadData = async () => {
-      setLoading(true);
-      const [parentsSnap, studentsSnap, usersSnap, attendanceSnap, coursesSnap, teachersSnap, assignSnap] =
-        await Promise.all([
-          get(ref(database, "Parents")),
-          get(ref(database, "Students")),
-          get(ref(database, "Users")),
-          get(ref(database, "Attendance")),
-          get(ref(database, "Courses")),
-          get(ref(database, "Teachers")),
-          get(ref(database, "TeacherAssignments")),
-        ]);
-
-      const data = {
-        parents: parentsSnap.val() || {},
-        students: studentsSnap.val() || {},
-        users: usersSnap.val() || {},
-        attendance: attendanceSnap.val() || {},
-        courses: coursesSnap.val() || {},
-        teachers: teachersSnap.val() || {},
-        assignments: assignSnap.val() || {},
-      };
-
-      setCache(data);
-
-      const parent = data.parents[parentId];
-      const kids = parent?.children ? Object.values(parent.children) : [];
-      setChildren(kids);
-
-      if (kids.length > 0) loadChild(kids[0], 0, data);
-      setLoading(false);
-    };
-
-    loadData();
-  }, [parentId]);
-
-  const loadChild = (child, index, data) => {
-    const student = data.students[child.studentId];
-    if (!student) return;
-
-    const user = data.users[student.userId];
-    setChildUser({
-      ...user,
-      grade: student.grade,
-      section: student.section,
-      studentId: child.studentId,
-    });
-
-    setAttendanceData(data.attendance || {});
-
-    const courseList = Object.keys(data.courses)
-      .map((id) => ({ courseId: id, ...data.courses[id] }))
-      .filter((c) => c.grade === student.grade && (c.section || "") === student.section)
-      .map((course) => {
-        const assign = Object.values(data.assignments).find((a) => a.courseId === course.courseId);
-        const teacherId = assign ? assign.teacherId : null;
-        const teacherName = assign ? data.users[data.teachers[assign.teacherId]?.userId]?.name || "N/A" : "N/A";
-        const teacherUserId = teacherId ? data.teachers[teacherId]?.userId : null;
-        return { ...course, teacherName, teacherId, teacherUserId };
-      });
-
-    setCourses(courseList);
-    setCurrentIndex(index);
-    setShowList(false);
-    setExpandedCourses({});
-  };
-
-  const filteredAttendance = useMemo(() => {
-    if (!childUser?.studentId) return {};
-
-    const studentId = childUser.studentId;
-    const now = moment();
-
-    return courses.reduce((acc, course) => {
-      const courseAttendance = attendanceData[course.courseId] || {};
-      let filtered = {};
-
-      if (tab === "daily") {
-        const today = now.format("YYYY-MM-DD");
-        const status = courseAttendance[today]?.[studentId];
-        if (status) filtered[today] = status;
-      } else {
-        Object.entries(courseAttendance).forEach(([date, students]) => {
-          const m = moment(date, "YYYY-MM-DD");
-          if ((tab === "weekly" && m.isSame(now, "week")) || (tab === "monthly" && m.isSame(now, "month"))) {
-            const status = students?.[studentId];
-            if (status) filtered[date] = status;
-          }
-        });
-      }
-
-      acc[course.courseId] = filtered;
-      return acc;
-    }, {});
-  }, [attendanceData, childUser, courses, tab]);
-
-  const statusColor = (status) => {
-    switch (status) {
-      case "present":
-        return "#16a34a";
-      case "absent":
-        return "#dc2626";
-      case "late":
-        return "#f59e0b";
-      default:
-        return "#6b7280";
-    }
-  };
-
-  const attendanceTotalsAll = useMemo(() => {
-    const totals = { present: 0, late: 0, absent: 0 };
-    if (!childUser?.studentId) return totals;
-    const studentId = childUser.studentId;
-    Object.values(attendanceData).forEach((courseAttendance) => {
-      Object.entries(courseAttendance).forEach(([date, students]) => {
-        const status = students?.[studentId];
-        if (status === "present") totals.present += 1;
-        else if (status === "late") totals.late += 1;
-        else if (status === "absent") totals.absent += 1;
-      });
-    });
-    return totals;
-  }, [attendanceData, childUser]);
-
-  useEffect(() => {
-    const shimmer = Animated.loop(
-      Animated.timing(skeletonAnim, {
-        toValue: 1,
-        duration: 1200,
-        useNativeDriver: true,
-        easing: Easing.linear,
-      })
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(shimmerAnim, {
+          toValue: 220,
+          duration: 1100,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(shimmerAnim, {
+          toValue: -120,
+          duration: 0,
+          useNativeDriver: true,
+        }),
+      ])
     );
-    shimmer.start();
-    return () => shimmer.stop();
-  }, [skeletonAnim]);
-
-  useEffect(() => {
-    if (showList) {
-      backdropOpacity.setValue(0);
-      dropdownOpacity.setValue(0);
-      dropdownTrans.setValue(-10);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: 160,
-          useNativeDriver: true,
-        }),
-        Animated.timing(dropdownOpacity, {
-          toValue: 1,
-          duration: 180,
-          useNativeDriver: true,
-        }),
-        Animated.timing(dropdownTrans, {
-          toValue: 0,
-          duration: 180,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      backdropOpacity.setValue(0);
-      dropdownOpacity.setValue(0);
-      dropdownTrans.setValue(-10);
-    }
-  }, [showList]);
+    loop.start();
+    return () => loop.stop();
+  }, [shimmerAnim]);
 
   useEffect(() => {
     const target = tabOptions.indexOf(tab);
@@ -254,146 +108,317 @@ export default function Attendance() {
       damping: 18,
       mass: 0.6,
     }).start();
-  }, [tab, tabAnim, tabOptions]);
+  }, [tab]);
 
-  const renderShimmer = (style) => {
-    const translateX = skeletonAnim.interpolate({
-      inputRange: [0, 1],
-      outputRange: [-60, 200],
-    });
-    return (
-      <View style={[styles.skeletonBase, style]}>
-        <Animated.View
-          style={[
-            styles.skeletonShimmer,
-            {
-              transform: [{ translateX }],
-            },
-          ]}
-        />
-      </View>
-    );
+  const saveCache = async (payload) => {
+    try {
+      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    } catch {}
   };
 
-  const renderSkeleton = () => (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <View style={[styles.header, { padding: headerPadding, borderRadius: headerRadius, minHeight: headerMinH }]}>
-          <View style={styles.headerLeft}>
-            {renderShimmer({ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginRight: 16 })}
-            <View style={styles.headerText}>
-              {renderShimmer({ height: 18, width: "70%", marginBottom: 10 })}
-              <View style={styles.chipRow}>
-                {renderShimmer({ height: 22, width: 90, borderRadius: 12, marginRight: 8, marginBottom: 6 })}
-                {renderShimmer({ height: 22, width: 90, borderRadius: 12, marginBottom: 6 })}
-              </View>
-            </View>
-          </View>
-          <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}>
-            {renderShimmer({ height: 60, flex: 1, borderRadius: 12, marginRight: 8 })}
-            {renderShimmer({ height: 60, flex: 1, borderRadius: 12, marginRight: 8 })}
-            {renderShimmer({ height: 60, flex: 1, borderRadius: 12 })}
-          </View>
-        </View>
+  const loadCache = async () => {
+    try {
+      const raw = await AsyncStorage.getItem(CACHE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  };
 
-        <View style={styles.tabsWrapper}>
-          <View style={styles.tabs}>
-            {renderShimmer({ height: 32, flex: 1, borderRadius: 10, marginHorizontal: 4 })}
-            {renderShimmer({ height: 32, flex: 1, borderRadius: 10, marginHorizontal: 4 })}
-            {renderShimmer({ height: 32, flex: 1, borderRadius: 10, marginHorizontal: 4 })}
-          </View>
-        </View>
+  const fetchChildBundle = async ({ prefix, studentId, childInfo }) => {
+    const studentSnap = await get(ref(database, `${prefix}Students/${studentId}`));
+    const student = studentSnap.exists() ? studentSnap.val() : null;
+    if (!student) return null;
 
-        <View style={styles.body}>
-          {[1, 2, 3].map((i) => (
-            <View key={i} style={styles.courseCard}>
-              {renderShimmer({ height: 16, width: "60%", borderRadius: 10, marginBottom: 10 })}
-              {renderShimmer({ height: 12, width: "40%", borderRadius: 10, marginBottom: 14 })}
-              {renderShimmer({ height: 10, width: "100%", borderRadius: 8, marginBottom: 10 })}
-              {renderShimmer({ height: 10, width: "70%", borderRadius: 8, marginBottom: 12 })}
-              {[1, 2].map((j) => (
-                <View key={j} style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-                  {renderShimmer({ height: 10, width: 10, borderRadius: 5, marginRight: 10 })}
-                  {renderShimmer({ height: 12, width: "50%", borderRadius: 8 })}
-                </View>
-              ))}
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    </View>
-  );
+    const userSnap = await get(ref(database, `${prefix}Users/${student.userId}`));
+    const user = userSnap.exists() ? userSnap.val() : {};
 
-  if (loading) return renderSkeleton();
+    const childUserObj = {
+      ...user,
+      studentId,
+      grade: student.grade,
+      section: student.section,
+      _childInfo: childInfo,
+    };
+
+    const [coursesSnap, assignSnap, teachersSnap] = await Promise.all([
+      get(ref(database, `${prefix}Courses`)),
+      get(ref(database, `${prefix}TeacherAssignments`)),
+      get(ref(database, `${prefix}Teachers`)),
+    ]);
+
+    const allCourses = coursesSnap.exists() ? coursesSnap.val() : {};
+    const allAssignments = assignSnap.exists() ? assignSnap.val() : {};
+    const allTeachers = teachersSnap.exists() ? teachersSnap.val() : {};
+
+    const relevantCourses = Object.keys(allCourses)
+      .map((id) => ({ courseId: id, ...allCourses[id] }))
+      .filter((c) => String(c.grade) === String(student.grade) && String(c.section || "") === String(student.section || ""));
+
+    const teacherUserIds = new Set();
+    const courseList = relevantCourses.map((course) => {
+      const assign = Object.values(allAssignments).find((a) => a.courseId === course.courseId);
+      const teacherId = assign?.teacherId || null;
+      const teacherUserId = teacherId ? allTeachers?.[teacherId]?.userId : null;
+      if (teacherUserId) teacherUserIds.add(teacherUserId);
+
+      return {
+        ...course,
+        teacherId,
+        teacherUserId,
+        teacherName: "Teacher",
+      };
+    });
+
+    if (teacherUserIds.size > 0) {
+      const users = await Promise.all(
+        Array.from(teacherUserIds).map(async (uid) => {
+          const s = await get(ref(database, `${prefix}Users/${uid}`));
+          return [uid, s.exists() ? s.val() : null];
+        })
+      );
+      const tUserMap = Object.fromEntries(users);
+
+      courseList.forEach((c) => {
+        c.teacherName = c.teacherUserId ? tUserMap?.[c.teacherUserId]?.name || "Teacher" : "Teacher";
+      });
+    }
+
+    const attendanceSnap = await get(ref(database, `${prefix}Attendance`));
+    const allAttendance = attendanceSnap.exists() ? attendanceSnap.val() : {};
+
+    const attendanceMap = {};
+    courseList.forEach((c) => {
+      const byDate = allAttendance?.[c.courseId] || {};
+      const studentOnly = {};
+      Object.entries(byDate).forEach(([date, studentsMap]) => {
+        const s = studentsMap?.[studentId];
+        if (s) studentOnly[date] = s;
+      });
+      attendanceMap[c.courseId] = studentOnly;
+    });
+
+    return {
+      childUser: childUserObj,
+      courses: courseList,
+      attendanceByCourse: attendanceMap,
+    };
+  };
+
+  useEffect(() => {
+    if (!parentId) return;
+
+    let mounted = true;
+
+    (async () => {
+      const cached = await loadCache();
+      if (cached && mounted) {
+        setChildren(cached.children || []);
+        setCurrentIndex(cached.currentIndex || 0);
+        setChildUser(cached.childUser || null);
+        setCourses(cached.courses || []);
+        setAttendanceByCourse(cached.attendanceByCourse || {});
+        setTab(cached.tab || "daily");
+        setLoading(false);
+      }
+
+      setRefreshingBg(true);
+      try {
+        const prefix = await getPathPrefix();
+
+        const parentSnap = await get(ref(database, `${prefix}Parents/${parentId}`));
+        const parent = parentSnap.exists() ? parentSnap.val() : null;
+        const kids = parent?.children ? Object.values(parent.children) : [];
+
+        if (!mounted) return;
+        setChildren(kids);
+
+        if (kids.length === 0) {
+          setLoading(false);
+          setRefreshingBg(false);
+          return;
+        }
+
+        const idx = cached?.currentIndex && kids[cached.currentIndex] ? cached.currentIndex : 0;
+        const chosen = kids[idx];
+
+        const bundle = await fetchChildBundle({
+          prefix,
+          studentId: chosen.studentId,
+          childInfo: chosen,
+        });
+
+        if (!bundle || !mounted) return;
+
+        setCurrentIndex(idx);
+        setChildUser(bundle.childUser);
+        setCourses(bundle.courses);
+        setAttendanceByCourse(bundle.attendanceByCourse);
+        setExpandedCourses({});
+        setLoading(false);
+
+        saveCache({
+          children: kids,
+          currentIndex: idx,
+          childUser: bundle.childUser,
+          courses: bundle.courses,
+          attendanceByCourse: bundle.attendanceByCourse,
+          tab,
+          ts: Date.now(),
+        });
+      } catch (e) {
+        console.warn("Attendance load error:", e);
+        setLoading(false);
+      } finally {
+        if (mounted) setRefreshingBg(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [parentId]);
+
+  const switchChild = async (child, index) => {
+    try {
+      setLoading(true);
+      const prefix = await getPathPrefix();
+      const bundle = await fetchChildBundle({
+        prefix,
+        studentId: child.studentId,
+        childInfo: child,
+      });
+      if (!bundle) {
+        setLoading(false);
+        return;
+      }
+
+      setCurrentIndex(index);
+      setChildUser(bundle.childUser);
+      setCourses(bundle.courses);
+      setAttendanceByCourse(bundle.attendanceByCourse);
+      setExpandedCourses({});
+      setShowList(false);
+
+      saveCache({
+        children,
+        currentIndex: index,
+        childUser: bundle.childUser,
+        courses: bundle.courses,
+        attendanceByCourse: bundle.attendanceByCourse,
+        tab,
+        ts: Date.now(),
+      });
+    } catch (e) {
+      console.warn("switchChild error:", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredAttendance = useMemo(() => {
+    if (!childUser?.studentId) return {};
+
+    const now = moment();
+    return courses.reduce((acc, course) => {
+      const courseAttendance = attendanceByCourse?.[course.courseId] || {};
+      const filtered = {};
+
+      if (tab === "daily") {
+        const today = now.format("YYYY-MM-DD");
+        if (courseAttendance[today]) filtered[today] = courseAttendance[today];
+      } else {
+        Object.entries(courseAttendance).forEach(([date, status]) => {
+          const m = moment(date, "YYYY-MM-DD");
+          if ((tab === "weekly" && m.isSame(now, "week")) || (tab === "monthly" && m.isSame(now, "month"))) {
+            filtered[date] = status;
+          }
+        });
+      }
+
+      acc[course.courseId] = filtered;
+      return acc;
+    }, {});
+  }, [attendanceByCourse, courses, tab, childUser?.studentId]);
+
+  const attendanceTotalsAll = useMemo(() => {
+    const totals = { present: 0, late: 0, absent: 0 };
+    Object.values(attendanceByCourse).forEach((courseAttendance) => {
+      Object.values(courseAttendance).forEach((status) => {
+        const s = String(status || "").toLowerCase();
+        if (s === "present") totals.present += 1;
+        else if (s === "late") totals.late += 1;
+        else if (s === "absent") totals.absent += 1;
+      });
+    });
+    return totals;
+  }, [attendanceByCourse]);
+
+  if (loading && !childUser) {
+    return (
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator size="large" color={PRIMARY} />
+      </View>
+    );
+  }
+
+  if (!children.length) {
+    return (
+      <View style={styles.loadingWrap}>
+        <Text style={styles.emptyTitle}>No child is linked yet</Text>
+        <Text style={styles.emptySubtitle}>Please contact school admin to link child profile.</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        stickyHeaderIndices={[1]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* HEADER */}
-        <LinearGradient
-          colors={["#f7f9fc", "#eef3ff"]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.header, { padding: headerPadding, borderRadius: headerRadius, minHeight: headerMinH }]}
-        >
-          <TouchableOpacity
-            style={styles.headerLeft}
-            onPress={() => setShowList(!showList)}
-            activeOpacity={0.85}
-          >
+      <ScrollView contentContainerStyle={{ padding: 14, paddingBottom: 20 }} stickyHeaderIndices={[1]}>
+        {/* Summary header */}
+        <View style={styles.headerCard}>
+          <View style={styles.headerTop}>
             <Image
               source={{ uri: childUser?.profileImage || defaultProfile }}
-              style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: Math.round(avatarSize / 2) }]}
+              style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
             />
-
-            <View style={styles.headerText}>
-              <Text style={[styles.childName, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
                 {childUser?.name || "Student"}
               </Text>
-              <View style={styles.chipRow}>
-                <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV }]}>
-                  <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale) }]}>Grade {childUser?.grade ?? "--"}</Text>
-                </View>
-                <View style={[styles.chip, { paddingHorizontal: chipPadH, paddingVertical: chipPadV }]}>
-                  <Text style={[styles.chipText, { fontSize: Math.round(13 * fontScale) }]}>Section {childUser?.section ?? "--"}</Text>
-                </View>
-              </View>
+              <Text style={styles.subText}>
+                Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
+              </Text>
             </View>
 
             {children.length > 1 && (
-              <Ionicons
-                name={showList ? "chevron-up" : "chevron-down"}
-                size={headerChevronSize}
-                color="#2563eb"
-                style={[styles.headerArrow, { marginTop: -50 * scale }]}
-              />
+              <TouchableOpacity onPress={() => setShowList((s) => !s)} style={styles.switchBtn}>
+                <Ionicons name={showList ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
+              </TouchableOpacity>
             )}
-          </TouchableOpacity>
-          <View style={[styles.headerMetricsRow, { marginTop: isSmall ? 8 : 14 }]}>
-            <View style={[styles.metricPillPrimary, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }]}>
-              <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Present</Text>
-              <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{attendanceTotalsAll.present}</Text>
+          </View>
+
+          <View style={styles.metricRow}>
+            <View style={styles.metricPill}>
+              <Text style={styles.metricLabel}>Present</Text>
+              <Text style={[styles.metricValue, { color: SUCCESS }]}>{attendanceTotalsAll.present}</Text>
             </View>
-            <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }]}>
-              <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Late</Text>
-              <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{attendanceTotalsAll.late}</Text>
+            <View style={styles.metricPill}>
+              <Text style={styles.metricLabel}>Late</Text>
+              <Text style={[styles.metricValue, { color: WARNING }]}>{attendanceTotalsAll.late}</Text>
             </View>
-            <View style={[styles.metricPill, { paddingHorizontal: pillPadH, paddingVertical: pillPadV }]}>
-              <Text style={[styles.pillLabel, { fontSize: Math.round(12 * fontScale) }]}>Absent</Text>
-              <Text style={[styles.pillValue, { fontSize: Math.round(16 * fontScale) }]}>{attendanceTotalsAll.absent}</Text>
+            <View style={styles.metricPill}>
+              <Text style={styles.metricLabel}>Absent</Text>
+              <Text style={[styles.metricValue, { color: DANGER }]}>{attendanceTotalsAll.absent}</Text>
             </View>
           </View>
-        </LinearGradient>
+        </View>
 
-        {/* TABS (sticky, pill style) */}
+        {/* Sticky filter tabs */}
         <View style={styles.tabsWrapper}>
           <View
             style={[styles.filterTabs, { height: 44 }]}
-            onLayout={e => setTabWidthState(e.nativeEvent.layout.width)}
+            onLayout={(e) => setTabWidthState(e.nativeEvent.layout.width)}
           >
             {tabWidthState > 0 && (
               <Animated.View
@@ -404,16 +429,14 @@ export default function Attendance() {
                     width: tabWidthState / tabOptions.length,
                     transform: [
                       {
-                        translateX: Animated.multiply(
-                          tabAnim,
-                          tabWidthState / tabOptions.length || 0
-                        ),
+                        translateX: Animated.multiply(tabAnim, tabWidthState / tabOptions.length || 0),
                       },
                     ],
                   },
                 ]}
               />
             )}
+
             {tabOptions.map((t) => {
               const active = tab === t;
               return (
@@ -421,492 +444,271 @@ export default function Attendance() {
                   key={t}
                   style={styles.filterTab}
                   onPress={() => setTab(t)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Select ${t}`}
-                  accessibilityState={{ selected: active }}
                   activeOpacity={0.85}
                 >
-                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{t.charAt(0).toUpperCase() + t.slice(1)}</Text>
+                  <Text style={[styles.filterText, active && styles.filterTextActive]}>
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
           </View>
         </View>
 
-        {/* BODY */}
-        <View style={styles.body}>
+        {/* Child list */}
+        {showList && children.length > 1 && (
+          <View style={[styles.card, { marginTop: 12 }]}>
+            <Text style={styles.sectionTitle}>Choose Child</Text>
+            <View style={{ marginTop: 8 }}>
+              {children.map((c, i) => {
+                const active = i === currentIndex;
+                return (
+                  <TouchableOpacity
+                    key={c.studentId}
+                    style={[styles.childRow, active && styles.childRowActive]}
+                    onPress={() => switchChild(c, i)}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={[styles.childName, active && { color: PRIMARY }]}>
+                      {c.name || `Child ${i + 1}`}
+                    </Text>
+                    {active && <Ionicons name="checkmark-circle" size={18} color={PRIMARY} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* Course cards */}
+        <View style={{ marginTop: 12 }}>
           {courses.map((c) => {
             const courseAttendance = filteredAttendance[c.courseId] || {};
+            const entries = Object.entries(courseAttendance).sort((a, b) => moment(b[0]).valueOf() - moment(a[0]).valueOf());
+
             let attendancePercent = 0;
-
             if (tab !== "daily") {
-              const totalDays = Object.keys(courseAttendance).length;
-              const attendedDays = Object.values(courseAttendance).filter((s) => s === "present" || s === "late").length;
-              attendancePercent = totalDays > 0 ? Math.round((attendedDays / totalDays) * 100) : 0;
+              const total = entries.length;
+              const attended = entries.filter(([, s]) => String(s).toLowerCase() === "present" || String(s).toLowerCase() === "late").length;
+              attendancePercent = total > 0 ? Math.round((attended / total) * 100) : 0;
             }
 
-            if (!progressAnim[c.courseId]) {
-              progressAnim[c.courseId] = new Animated.Value(0);
-            }
-
-            Animated.timing(progressAnim[c.courseId], {
-              toValue: attendancePercent,
-              duration: 800,
-              useNativeDriver: false,
-              easing: Easing.inOut(Easing.ease),
-            }).start();
-
-            const isExpanded = expandedCourses[c.courseId];
+            const isExpanded = !!expandedCourses[c.courseId];
 
             return (
-              <TouchableOpacity
-                key={c.courseId}
-                onPress={() =>
-                  setExpandedCourses((prev) => ({
-                    ...prev,
-                    [c.courseId]: !prev[c.courseId],
-                  }))
-                }
-                activeOpacity={0.9}
-                style={styles.courseCard}
-              >
-                <View style={styles.courseHeader}>
-                  <Text style={styles.courseName}>{c.name}</Text>
-                  <Text style={styles.teacher}>
-                    👨‍🏫 
-                    <Text
-                      style={{ }}
-                      onPress={() => {
-                        if (c.teacherId) {
-                          router.push({
-                            pathname: '/userProfile',
-                            params: {
-                              recordId: c.teacherId,
-                              userId: c.teacherUserId,
-                              roleName: 'Teacher',
-                            },
-                          });
-                        }
-                      }}
-                    >
-                      {c.teacherName}
-                    </Text>
-                  </Text>
-                </View>
+              <View key={c.courseId} style={[styles.card, { marginBottom: 12 }]}>
+                <TouchableOpacity
+                  onPress={() =>
+                    setExpandedCourses((prev) => ({ ...prev, [c.courseId]: !prev[c.courseId] }))
+                  }
+                  activeOpacity={0.88}
+                >
+                  <View style={styles.courseHead}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.courseName}>{c.name}</Text>
+                      <Text style={styles.teacher}>Teacher: {c.teacherName}</Text>
+                    </View>
 
-                <View style={styles.courseBadgeRow}>
-                  <View style={styles.courseBadge}>
-                    <Text style={styles.courseBadgeText}>
-                      {tab === "daily" ? "Today" : tab === "weekly" ? "This week" : "This month"}
-                    </Text>
+                    <View style={styles.percentChip}>
+                      <Text style={styles.percentText}>
+                        {tab === "daily" ? "Today" : `${attendancePercent}%`}
+                      </Text>
+                      <Ionicons
+                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                        size={16}
+                        color={PRIMARY}
+                        style={{ marginLeft: 6 }}
+                      />
+                    </View>
                   </View>
-                  {tab !== "daily" && (
-                    <Text style={styles.courseBadgeMeta}>{attendancePercent}% attendance</Text>
-                  )}
-                </View>
 
-                {tab !== "daily" && (
-                  <View style={styles.progressContainer}>
-                    <View style={styles.progressBarBackground}>
-                      <Animated.View
+                  {tab !== "daily" && (
+                    <View style={styles.progressTrack}>
+                      <View
                         style={[
-                          styles.progressBarFill,
+                          styles.progressFill,
                           {
-                            width: progressAnim[c.courseId].interpolate({
-                              inputRange: [0, 100],
-                              outputRange: ["0%", "100%"],
-                            }),
+                            width: `${attendancePercent}%`,
                             backgroundColor:
-                              attendancePercent >= 80
-                                ? "#16a34a"
-                                : attendancePercent >= 50
-                                ? "#fbbf24"
-                                : "#dc2626",
+                              attendancePercent >= 80 ? SUCCESS : attendancePercent >= 50 ? WARNING : DANGER,
                           },
                         ]}
                       />
                     </View>
-                    <Text style={styles.progressText}>{attendancePercent}%</Text>
+                  )}
+                </TouchableOpacity>
+
+                {(tab === "daily" || isExpanded) && (
+                  <View style={{ marginTop: 10 }}>
+                    {entries.length === 0 ? (
+                      <Text style={styles.noRecords}>No attendance recorded</Text>
+                    ) : (
+                      entries.map(([date, status]) => {
+                        const sc = statusColor(status);
+                        const s = String(status || "").toUpperCase();
+                        const icon =
+                          s === "PRESENT"
+                            ? "checkmark-circle"
+                            : s === "LATE"
+                            ? "time"
+                            : "close-circle";
+
+                        return (
+                          <View key={date} style={styles.attRow}>
+                            <View style={[styles.statusDot, { backgroundColor: sc }]} />
+                            <Text style={styles.attDate}>{moment(date).format("DD MMM, ddd")}</Text>
+                            <View style={styles.statusWrap}>
+                              <Ionicons name={icon} size={16} color={sc} style={{ marginRight: 6 }} />
+                              <Text style={[styles.attStatus, { color: sc }]}>{s}</Text>
+                            </View>
+                          </View>
+                        );
+                      })
+                    )}
                   </View>
                 )}
-
-                {(tab === "daily" || isExpanded) &&
-                  Object.keys(courseAttendance).length > 0 &&
-                  Object.entries(courseAttendance).map(([date, status]) => (
-                    <View key={date} style={styles.attRow}>
-                      <View style={[styles.statusDot, { backgroundColor: statusColor(status) }]} />
-                      <Text style={styles.attDate}>{moment(date).format("DD MMM, ddd")}</Text>
-                      <View style={styles.statusWrap}>
-                        <Ionicons
-                          name={status === "present" ? "checkmark-circle" : status === "late" ? "time" : "close-circle"}
-                          size={16}
-                          color={statusColor(status)}
-                          style={{ marginRight: 6 }}
-                        />
-                        <Text style={[styles.attStatus, { color: statusColor(status) }]}>{status.toUpperCase()}</Text>
-                      </View>
-                    </View>
-                  ))}
-                {(tab === "daily" || isExpanded) && Object.keys(courseAttendance).length === 0 && (
-                  <Text style={styles.noRecords}>No attendance recorded</Text>
-                )}
-              </TouchableOpacity>
+              </View>
             );
           })}
         </View>
+
+        {refreshingBg && (
+          <View style={{ marginTop: 8, alignItems: "center" }}>
+            <Text style={{ fontSize: 12, color: MUTED }}>Refreshing latest attendance…</Text>
+          </View>
+        )}
       </ScrollView>
-
-      {/* DROPDOWN */}
-      {children.length > 1 && showList && (
-        <>
-          <TouchableWithoutFeedback onPress={() => setShowList(false)}>
-            <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]} />
-          </TouchableWithoutFeedback>
-
-          <Animated.View
-            style={[
-              styles.dropdown,
-              {
-                top: dropdownTop,
-                maxWidth: Math.min(460, width - 24),
-                opacity: dropdownOpacity,
-                transform: [{ translateY: dropdownTrans }],
-              },
-            ]}
-          >
-            <View style={styles.dropdownHandle} />
-            <View style={styles.dropdownHeader}>
-              <View>
-                <Text style={[styles.dropdownTitle, { fontSize: Math.round(16 * fontScale) }]}>Select your child</Text>
-                <Text style={[styles.dropdownSubtitle, { fontSize: Math.round(12 * fontScale) }]}>
-                  {children.length} profiles · Grade {childUser?.grade ?? "--"} / Section {childUser?.section ?? "--"}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowList(false)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.dropdownClose}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="close" size={20} color="#0f172a" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={[styles.dropdownScroll, { maxHeight: dropdownMaxH }]} nestedScrollEnabled>
-              {children.map((c, i) => {
-                const s = cache.students?.[c.studentId];
-                const u = cache.users?.[s?.userId];
-
-                return (
-                  <TouchableOpacity
-                    key={c.studentId}
-                    style={[
-                      styles.dropdownItem,
-                      currentIndex === i && styles.dropdownActive,
-                      { paddingHorizontal: isSmall ? 8 : 10, paddingVertical: isSmall ? 10 : 12 },
-                    ]}
-                    onPress={() => loadChild(c, i, cache)}
-                    activeOpacity={0.85}
-                  >
-                    <Image
-                      source={{ uri: u?.profileImage || defaultProfile }}
-                      style={[
-                        styles.dropdownAvatar,
-                        { width: isSmall ? 36 : 40, height: isSmall ? 36 : 40, borderRadius: isSmall ? 18 : 20 },
-                      ]}
-                    />
-                    <View style={styles.dropdownContent}>
-                      <Text style={[styles.dropdownText, { fontSize: Math.round(15 * fontScale) }]} numberOfLines={1}>
-                        {u?.name || "Student"}
-                      </Text>
-                      <Text style={[styles.dropdownMeta, { fontSize: Math.round(12 * fontScale) }]} numberOfLines={1}>
-                        Grade {s?.grade ?? "--"} · Section {s?.section ?? "--"}
-                      </Text>
-                    </View>
-                    <Ionicons
-                      name={currentIndex === i ? "checkmark-circle" : "chevron-forward"}
-                      size={18}
-                      color={currentIndex === i ? "#2563eb" : "#94a3b8"}
-                    />
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </Animated.View>
-        </>
-      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3f4f6" },
-  scrollContent: { paddingBottom: 24 },
-  header: {
-    marginHorizontal: 8,
-    marginTop: 12,
-    marginBottom: 10,
-    borderRadius: 20,
-    padding: 22,
-    elevation: 8,
-    minHeight: 150,
-    zIndex: 10,
+  container: { flex: 1, backgroundColor: BG },
+  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
+
+  headerCard: {
+    backgroundColor: CARD,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
+    borderColor: BORDER,
+    padding: 16,
   },
-  headerLeft: { flexDirection: "row", alignItems: "center" },
-  avatar: { width: 78, height: 78, borderRadius: 39, marginRight: 16 },
-  headerText: { flex: 1, marginLeft: 4, paddingTop: 4 },
-  childName: { fontSize: 20, fontWeight: "800", letterSpacing: -0.2, color: "#0f172a" },
-  chipRow: { flexDirection: "row", flexWrap: "wrap", marginTop: 8 },
-  chip: {
-    backgroundColor: "#e2e8f0",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginRight: 8,
-    marginBottom: 6,
-  },
-  chipText: { fontSize: 13, color: "#0f172a", fontWeight: "600" },
-  headerArrow: { marginLeft: 8 },
-  headerMetricsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
+  headerTop: { flexDirection: "row", alignItems: "center" },
+  avatar: { marginRight: 12, backgroundColor: "#E5E7EB" },
+  name: { color: TEXT, fontWeight: "800" },
+  subText: { color: MUTED, fontSize: 13, marginTop: 2 },
+  switchBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#EEF4FF",
     alignItems: "center",
-    marginTop: 14,
+    justifyContent: "center",
   },
+
+  metricRow: { flexDirection: "row", marginTop: 14, gap: 8 },
   metricPill: {
     flex: 1,
-    backgroundColor: "#f8fafc",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
     borderRadius: 12,
-    marginRight: 8,
+    backgroundColor: "#F8FAFC",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  metricPillPrimary: {
-    flex: 1,
-    backgroundColor: "#e0f2fe",
+    borderColor: BORDER,
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
+    paddingHorizontal: 10,
   },
-  pillLabel: { fontSize: 12, color: "#64748b", marginBottom: 4, fontWeight: "600" },
-  pillValue: { fontSize: 16, fontWeight: "800", color: "#0f172a" },
-  tabs: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginHorizontal: 16,
-    backgroundColor: "#e5e7eb",
-    borderRadius: 14,
-    overflow: "hidden",
-    position: "relative",
-  },
+  metricLabel: { fontSize: 12, color: MUTED, fontWeight: "600" },
+  metricValue: { marginTop: 3, fontSize: 16, color: TEXT, fontWeight: "800" },
+
   tabsWrapper: {
-    backgroundColor: "transparent", // Make tab selector background transparent
+    backgroundColor: "#FFFFFF",
     paddingTop: 6,
     paddingBottom: 6,
     zIndex: 5,
-    elevation: 4,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
   },
   filterTabs: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#dce3f5",
+    backgroundColor: "#DCE3F5",
     borderRadius: 14,
     overflow: "hidden",
     position: "relative",
-    elevation: 2,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-    marginHorizontal: 16,
-    marginBottom: 8,
+    marginHorizontal: 2,
   },
   filterTab: { flex: 1, paddingVertical: 10, alignItems: "center", backgroundColor: "transparent" },
   filterText: { fontWeight: "700", fontSize: 13, color: "#475569", letterSpacing: 0.3 },
-  filterTextActive: { color: "#0f172a" },
+  filterTextActive: { color: "#0F172A" },
   filterIndicator: {
     position: "absolute",
     top: 4,
     bottom: 4,
     left: 0,
-    backgroundColor: "rgba(37,99,235,0.18)",
+    backgroundColor: "rgba(30,144,255,0.18)",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(37,99,235,0.45)",
-    elevation: 2,
-    shadowColor: "#2563eb",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
+    borderColor: "rgba(30,144,255,0.45)",
   },
-  body: { paddingHorizontal: 16, marginTop: 16 },
-  courseCard: {
-    marginBottom: 16,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 16,
-    elevation: 4,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-  },
-  courseHeader: { marginBottom: 12 },
-  courseName: { fontSize: 16, fontWeight: "600", color: "#111827" },
-  teacher: { fontSize: 13, color: "#6b7280", marginTop: 2 },
-  attRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-    borderBottomColor: "#f3f4f6",
-    borderBottomWidth: 1,
-  },
-  statusDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
-  attDate: { flex: 1, fontSize: 13, color: "#111827" },
-  statusWrap: { flexDirection: "row", alignItems: "center" },
-  attStatus: { fontSize: 13, fontWeight: "600" },
-  noRecords: { fontSize: 13, color: "#6b7280", paddingVertical: 6 },
-  progressContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  progressBarBackground: {
-    flex: 1,
-    height: 10,
-    backgroundColor: "#e5e7eb",
-    borderRadius: 5,
-    overflow: "hidden",
-    marginRight: 8,
-  },
-  progressBarFill: {
-    height: 10,
-    borderRadius: 5,
-  },
-  progressText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#111827",
-  },
-  backdrop: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(15, 23, 42, 0.57)",
-    zIndex: 50,
-  },
-  dropdown: {
-    position: "absolute",
-    top: 104,
-    alignSelf: "center",
-    width: "94%",
-    maxWidth: 460,
-    backgroundColor: "#ffffff",
-    borderRadius: 18,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    elevation: 14,
-    zIndex: 999,
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  dropdownHandle: {
-    alignSelf: "center",
-    width: 44,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: "#e2e8f0",
-    marginBottom: 10,
-  },
-  dropdownHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
-  },
-  dropdownClose: {
-    width: 32,
-    height: 32,
+
+  card: {
+    backgroundColor: CARD,
     borderRadius: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#f1f5f9",
+    borderWidth: 1,
+    borderColor: BORDER,
+    padding: 14,
   },
-  dropdownTitle: { fontSize: 16, fontWeight: "800", color: "#0f172a", letterSpacing: -0.2 },
-  dropdownSubtitle: { fontSize: 12, color: "#64748b", marginTop: 2 },
-  dropdownScroll: { maxHeight: 280, paddingVertical: 4 },
-  dropdownItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 12,
+  sectionTitle: { fontSize: 14, color: TEXT, fontWeight: "800" },
+
+  childRow: {
+    paddingVertical: 10,
     paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "transparent",
-    marginTop: 6,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  dropdownActive: { backgroundColor: "#eef2ff", borderColor: "#cbd5e1" },
-  dropdownAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-    backgroundColor: "#e2e8f0",
-  },
-  dropdownContent: { flex: 1, maxWidth: "72%" },
-  dropdownText: { fontSize: 15, fontWeight: "700", color: "#0f172a", letterSpacing: -0.1 },
-  dropdownMeta: { fontSize: 12, color: "#64748b", marginTop: 2 },
-  courseBadgeRow: {
+  childRowActive: { backgroundColor: "#EEF4FF", borderColor: "#BFDBFE" },
+  childName: { fontSize: 14, color: TEXT, fontWeight: "700" },
+
+  courseHead: { flexDirection: "row", alignItems: "flex-start" },
+  courseName: { fontSize: 16, color: TEXT, fontWeight: "800" },
+  teacher: { marginTop: 3, fontSize: 13, color: MUTED, fontWeight: "600" },
+
+  percentChip: {
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
+    backgroundColor: "#F8FBFF",
   },
-  courseBadge: {
-    backgroundColor: "#e0f2fe",
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-  },
-  courseBadgeText: { fontSize: 12, fontWeight: "700", color: "#0f172a", letterSpacing: 0.2 },
-  courseBadgeMeta: { fontSize: 12, color: "#475569", fontWeight: "600" },
-  skeletonBase: {
+  percentText: { fontSize: 14, fontWeight: "800", color: PRIMARY },
+
+  progressTrack: {
+    marginTop: 10,
+    height: 8,
+    borderRadius: 99,
+    backgroundColor: "#E5E7EB",
     overflow: "hidden",
-    backgroundColor: "#e5e7eb",
-    position: "relative",
   },
-  skeletonShimmer: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 80,
-    backgroundColor: "rgba(255,255,255,0.6)",
-    opacity: 0.7,
+  progressFill: { height: "100%", borderRadius: 99 },
+
+  attRow: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    flexDirection: "row",
+    alignItems: "center",
   },
+  statusDot: { width: 9, height: 9, borderRadius: 4.5, marginRight: 8 },
+  attDate: { flex: 1, fontSize: 13, color: TEXT },
+  statusWrap: { flexDirection: "row", alignItems: "center" },
+  attStatus: { fontSize: 12, fontWeight: "700" },
+
+  noRecords: { fontSize: 13, color: MUTED, paddingVertical: 4 },
+
+  emptyTitle: { fontSize: 18, color: TEXT, fontWeight: "800", textAlign: "center" },
+  emptySubtitle: { fontSize: 14, color: MUTED, textAlign: "center", marginTop: 6 },
 });

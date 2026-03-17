@@ -256,7 +256,9 @@ export default function DashboardLayout() {
             tabBarIcon: ({ color, size }) => <Ionicons name="calendar-outline" size={size} color={color} />,
           }}
         />
-
+<Tabs.Screen name="school/payments" options={{ href: null }} />
+<Tabs.Screen name="school/history" options={{ href: null }} />
+<Tabs.Screen name="school/calendar" options={{ href: null }} />
         <Tabs.Screen
           name="school"
           options={{
@@ -272,6 +274,7 @@ export default function DashboardLayout() {
           }}
         />
       </Tabs>
+      
     </SafeAreaView>
   );
 }
