@@ -30,7 +30,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 const { width } = Dimensions.get("window");
 
 const HEADER_MAX_HEIGHT = Math.max(220, Math.min(280, width * 0.68));
-const HEADER_MIN_HEIGHT = 96;
+const HEADER_MIN_HEIGHT = 58;
 const MINI_AVATAR = 34;
 
 const PALETTE = {
