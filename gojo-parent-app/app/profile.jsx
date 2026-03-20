@@ -363,13 +363,13 @@ export default function ParentProfile() {
 
   const heroScale = scrollY.interpolate({
     inputRange: [0, 120],
-    outputRange: [1, 0.95],
+    outputRange: [1, 0.96],
     extrapolate: "clamp",
   });
 
   const heroOpacity = scrollY.interpolate({
     inputRange: [0, 110, 180],
-    outputRange: [1, 0.65, 0],
+    outputRange: [1, 0.7, 0],
     extrapolate: "clamp",
   });
 
@@ -426,7 +426,7 @@ export default function ParentProfile() {
           useNativeDriver: false,
         })}
         contentContainerStyle={{
-          paddingTop: HEADER_MAX_HEIGHT + insets.top + 10,
+          paddingTop: HEADER_MAX_HEIGHT + insets.top + 14,
           paddingBottom: Math.max(24, insets.bottom + 8),
         }}
         showsVerticalScrollIndicator={false}
@@ -454,7 +454,7 @@ export default function ParentProfile() {
                   key={child.studentId}
                   style={styles.childCard}
                   onPress={() => handleChildPress(child)}
-                  activeOpacity={0.86}
+                  activeOpacity={0.88}
                 >
                   <Image source={{ uri: child.profileImage }} style={styles.childImage} />
                   <View style={styles.childBody}>
@@ -554,11 +554,23 @@ export default function ParentProfile() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.identityCard}>
-            <Text style={styles.identityName} numberOfLines={1}>
-              {parentUser.name}
-            </Text>
-            {!!parentUser.username && <Text style={styles.identityUsername}>@{parentUser.username}</Text>}
+          <View style={styles.identitySide}>
+            <View style={styles.identityCard}>
+              <Text style={styles.identityName} numberOfLines={1}>
+                {parentUser.name}
+              </Text>
+              {!!parentUser.username && <Text style={styles.identityUsername}>@{parentUser.username}</Text>}
+
+              {/* <View style={styles.identityMetaRow}>
+                <View
+                  style={[
+                    styles.onlineDot,
+                    { backgroundColor: isOnline ? PALETTE.success : PALETTE.offline },
+                  ]}
+                />
+                <Text style={styles.identityMetaText}>{isOnline ? "Online" : "Offline"}</Text>
+              </View> */}
+            </View>
           </View>
         </Animated.View>
       </Animated.View>
@@ -658,7 +670,7 @@ function SectionHeader({ title, icon }) {
 
 function QuickAction({ icon, label, onPress }) {
   return (
-    <TouchableOpacity style={styles.quickActionItem} onPress={onPress} activeOpacity={0.85}>
+    <TouchableOpacity style={styles.quickActionItem} onPress={onPress} activeOpacity={0.88}>
       <View style={styles.quickActionIcon}>
         <Ionicons name={icon} size={18} color={PALETTE.accentDark} />
       </View>
@@ -784,7 +796,7 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: 12,
     flexDirection: "row",
-    alignItems: "stretch",
+    alignItems: "flex-end",
   },
 
   photoCard: {
@@ -814,20 +826,26 @@ const styles = StyleSheet.create({
     borderColor: "#fff",
   },
 
-  identityCard: {
+  identitySide: {
     flex: 1,
     marginLeft: 12,
-    backgroundColor: "rgba(15,23,42,0.36)",
+    alignSelf: "flex-end",
+    justifyContent: "flex-end",
+  },
+  identityCard: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(15,23,42,0.34)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.28)",
+    borderColor: "rgba(255,255,255,0.25)",
     paddingVertical: 12,
     paddingHorizontal: 12,
-    justifyContent: "center",
+    minWidth: "76%",
+    maxWidth: "100%",
   },
   identityName: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 19,
     fontWeight: "800",
     letterSpacing: 0.2,
   },
@@ -835,7 +853,23 @@ const styles = StyleSheet.create({
     color: "#DDEAFE",
     fontSize: 13,
     fontWeight: "600",
-    marginTop: 2,
+    marginTop: 3,
+  },
+  identityMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 9,
+  },
+  onlineDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  identityMetaText: {
+    color: "#E2E8F0",
+    fontSize: 12,
+    fontWeight: "700",
   },
 
   contentWrap: {
@@ -847,11 +881,16 @@ const styles = StyleSheet.create({
     backgroundColor: PALETTE.card,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    borderRadius: 16,
+    borderRadius: 18,
     paddingVertical: 12,
     paddingHorizontal: 8,
     flexDirection: "row",
     justifyContent: "space-between",
+    shadowColor: "rgba(15,23,42,0.03)",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
   },
   quickActionItem: {
     flex: 1,
@@ -859,9 +898,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   quickActionIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
@@ -875,10 +914,15 @@ const styles = StyleSheet.create({
 
   card: {
     backgroundColor: PALETTE.card,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: PALETTE.border,
     padding: 14,
+    shadowColor: "rgba(15,23,42,0.03)",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
   },
 
   sectionHeader: {
@@ -887,9 +931,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionIconWrap: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
@@ -905,7 +949,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 12,
-    paddingVertical: 9,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: "#EFF4FA",
   },
@@ -926,16 +970,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginVertical: 6,
-    padding: 11,
+    padding: 12,
     backgroundColor: "#FAFCFF",
-    borderRadius: 13,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
   childImage: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
@@ -954,7 +998,7 @@ const styles = StyleSheet.create({
   accountItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 12,
+    paddingVertical: 13,
     borderBottomWidth: 1,
     borderBottomColor: PALETTE.border,
   },
@@ -962,9 +1006,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   accountIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
   },
