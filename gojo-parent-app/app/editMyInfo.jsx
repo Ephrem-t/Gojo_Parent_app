@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -6,29 +6,43 @@ import {
   TouchableOpacity,
   Alert,
   StyleSheet,
-  ScrollView,
   StatusBar,
   ActivityIndicator,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get, update } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+const PRIMARY = "#2563EB";
+const PRIMARY_DARK = "#1D4ED8";
+const PRIMARY_SOFT = "#EFF6FF";
+const BG = "#FFFFFF";
+const CARD = "#FFFFFF";
+const TEXT = "#0F172A";
+const MUTED = "#64748B";
+const BORDER = "#E2E8F0";
+
+const HEADER_MAX_HEIGHT = 210;
+const HEADER_MIN_HEIGHT = 58;
 
 export default function EditMyInfo() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const scrollY = useRef(new Animated.Value(0)).current;
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const handleBack = useCallback(() => {
-    if (router?.canGoBack && router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/");
-    }
-  }, [router]);
-  
+  const [schoolKey, setSchoolKey] = useState(null);
+  const [parentId, setParentId] = useState(null);
+  const [userId, setUserId] = useState(null);
+
   const [userInfo, setUserInfo] = useState({
     name: "",
     phone: "",
@@ -42,132 +56,161 @@ export default function EditMyInfo() {
     bio: "",
   });
 
-  useEffect(() => {
-    loadUserInfo();
-  }, []);
+  const schoolAwarePath = useCallback(
+    (subPath) => (schoolKey ? `Platform1/Schools/${schoolKey}/${subPath}` : subPath),
+    [schoolKey]
+  );
 
-  const loadUserInfo = async () => {
-    try {
-      const parentId = await AsyncStorage.getItem("parentId");
-      console.log("Loading info for parentId:", parentId);
-      
-      if (!parentId) {
-        Alert.alert("Error", "User not found");
-        handleBack();
-        return;
-      }
-
-      // First get the parent data to find the userId
-      const parentRef = ref(database, `Parents/${parentId}`);
-      console.log("Parent database path:", `Parents/${parentId}`);
-      
-      const parentSnapshot = await get(parentRef);
-      console.log("Parent snapshot exists:", parentSnapshot.exists());
-      
-      if (parentSnapshot.exists()) {
-        const parentData = parentSnapshot.val();
-        console.log("Parent data loaded:", parentData);
-        
-        // Get the userId from the parent data
-        const userId = parentData.userId;
-        console.log("Found userId:", userId);
-        
-        if (userId) {
-          // Now get the user data from Users collection
-          const userRef = ref(database, `Users/${userId}`);
-          console.log("User database path:", `Users/${userId}`);
-          
-          const userSnapshot = await get(userRef);
-          console.log("User snapshot exists:", userSnapshot.exists());
-          
-          if (userSnapshot.exists()) {
-            const userData = userSnapshot.val();
-            console.log("User data loaded:", userData);
-            
-            setUserInfo({
-              name: userData.name || "",
-              phone: userData.phone || "",
-              email: userData.email || "",
-              username: userData.username || "",
-              job: userData.job || "",
-              age: userData.age || "",
-              city: userData.city || "",
-              citizenship: userData.citizenship || "",
-              address: userData.address || "",
-              bio: userData.bio || "",
-            });
-          } else {
-            console.log("No user data found for userId:", userId);
-          }
-        } else {
-          console.log("No userId found in parent data");
-        }
-      } else {
-        console.log("No parent data found for parentId:", parentId);
-      }
-    } catch (error) {
-      console.error("Error loading user info:", error);
-      Alert.alert("Error", "Failed to load user information");
-    } finally {
-      setLoading(false);
+  const handleBack = useCallback(() => {
+    if (router?.canGoBack && router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace("/");
     }
+  }, [router]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      try {
+        const [pid, sk] = await Promise.all([
+          AsyncStorage.getItem("parentId"),
+          AsyncStorage.getItem("schoolKey"),
+        ]);
+
+        if (!mounted) return;
+
+        setParentId(pid || null);
+        setSchoolKey(sk || null);
+
+        if (!pid) {
+          Alert.alert("Error", "User not found");
+          handleBack();
+          return;
+        }
+
+        const pathPrefix = sk ? `Platform1/Schools/${sk}/` : "";
+
+        const parentSnap = await get(ref(database, `${pathPrefix}Parents/${pid}`));
+        if (!parentSnap.exists()) {
+          Alert.alert("Error", "Parent data not found");
+          handleBack();
+          return;
+        }
+
+        const parentData = parentSnap.val() || {};
+        if (!parentData.userId) {
+          Alert.alert("Error", "User ID not found");
+          handleBack();
+          return;
+        }
+
+        setUserId(parentData.userId);
+
+        const userSnap = await get(ref(database, `${pathPrefix}Users/${parentData.userId}`));
+        if (!userSnap.exists()) {
+          Alert.alert("Error", "User profile not found");
+          handleBack();
+          return;
+        }
+
+        const userData = userSnap.val() || {};
+
+        setUserInfo({
+          name: userData.name || "",
+          phone: userData.phone || "",
+          email: userData.email || "",
+          username: userData.username || "",
+          job: userData.job || "",
+          age: userData.age ? String(userData.age) : "",
+          city: userData.city || "",
+          citizenship: userData.citizenship || "",
+          address: userData.address || "",
+          bio: userData.bio || "",
+        });
+      } catch (e) {
+        console.error("load profile error:", e);
+        Alert.alert("Error", "Failed to load your information");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [handleBack]);
+
+  const updateField = (field, value) => {
+    setUserInfo((prev) => ({ ...prev, [field]: value }));
   };
 
+  const editablePayload = useMemo(
+    () => ({
+      job: (userInfo.job || "").trim(),
+      age: (userInfo.age || "").trim(),
+      city: (userInfo.city || "").trim(),
+      citizenship: (userInfo.citizenship || "").trim(),
+      address: (userInfo.address || "").trim(),
+      bio: (userInfo.bio || "").trim(),
+    }),
+    [userInfo]
+  );
+
   const handleSave = async () => {
-    if (!userInfo.name.trim()) {
-      Alert.alert("Error", "Name is required");
+    if (!userId || !parentId) {
+      Alert.alert("Error", "User not found");
+      return;
+    }
+
+    if (editablePayload.age && !/^\d{1,3}$/.test(editablePayload.age)) {
+      Alert.alert("Validation", "Age must be a number (1-3 digits).");
       return;
     }
 
     setSaving(true);
     try {
-      const parentId = await AsyncStorage.getItem("parentId");
-      if (!parentId) {
-        Alert.alert("Error", "User not found");
-        return;
-      }
-
-      // Get the userId from Parents collection first
-      const parentRef = ref(database, `Parents/${parentId}`);
-      const parentSnapshot = await get(parentRef);
-      
-      if (parentSnapshot.exists()) {
-        const parentData = parentSnapshot.val();
-        const userId = parentData.userId;
-        
-        if (userId) {
-          // Save to the Users collection using the userId
-          const userRef = ref(database, `Users/${userId}`);
-          await update(userRef, userInfo);
-          
-          Alert.alert("Success", "Your information has been updated successfully");
-          handleBack();
-        } else {
-          Alert.alert("Error", "User ID not found");
-        }
-      } else {
-        Alert.alert("Error", "Parent data not found");
-      }
-    } catch (error) {
-      console.error("Error saving user info:", error);
+      await update(ref(database, `${schoolAwarePath("Users")}/${userId}`), editablePayload);
+      Alert.alert("Success", "Your information has been updated successfully.");
+      handleBack();
+    } catch (e) {
+      console.error("save profile error:", e);
       Alert.alert("Error", "Failed to save your information");
     } finally {
       setSaving(false);
     }
   };
 
-  const updateField = (field, value) => {
-    setUserInfo(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
+    outputRange: [HEADER_MAX_HEIGHT + insets.top, HEADER_MIN_HEIGHT + insets.top],
+    extrapolate: "clamp",
+  });
+
+  const heroOpacity = scrollY.interpolate({
+    inputRange: [0, 50, 100],
+    outputRange: [1, 0.45, 0],
+    extrapolate: "clamp",
+  });
+
+  const heroTranslateY = scrollY.interpolate({
+    inputRange: [0, 90],
+    outputRange: [0, -18],
+    extrapolate: "clamp",
+  });
+
+  const compactBarOpacity = scrollY.interpolate({
+    inputRange: [0, 45, 85],
+    outputRange: [0, 0.25, 1],
+    extrapolate: "clamp",
+  });
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2AABEE" />
-        <Text style={styles.loadingText}>Loading...</Text>
+        <ActivityIndicator size="large" color={PRIMARY} />
+        <Text style={styles.loadingText}>Loading your profile...</Text>
       </View>
     );
   }
@@ -175,145 +218,199 @@ export default function EditMyInfo() {
   return (
     <View style={styles.container}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-      
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
+
+      <View style={[styles.topActionsRow, { top: insets.top + 6 }]}>
+        <TouchableOpacity style={styles.topIcon} onPress={handleBack}>
+          <Ionicons name="arrow-back" size={21} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Edit My Info</Text>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
+
+        <Animated.View style={[styles.compactCenter, { opacity: compactBarOpacity }]}>
+          <Text style={styles.compactTitle} numberOfLines={1}>
+            Edit My Info
+          </Text>
+        </Animated.View>
+
+        <TouchableOpacity
+          style={[styles.saveButtonTop, saving && { opacity: 0.7 }]}
+          onPress={handleSave}
+          disabled={saving}
+        >
           {saving ? (
             <ActivityIndicator size="small" color="#fff" />
           ) : (
-            <Text style={styles.saveButtonText}>Save</Text>
+            <>
+              <Ionicons name="checkmark-circle-outline" size={15} color="#fff" style={{ marginRight: 4 }} />
+              <Text style={styles.saveButtonText}>Save</Text>
+            </>
           )}
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Basic Information */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Basic Information</Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Name *</Text>
-            <TextInput
-              style={styles.input}
-              value={userInfo.name}
-              placeholder="Enter your full name"
-              editable={false}
-              selectTextOnFocus={false}
-            />
+      <Animated.View style={[styles.header, { height: headerHeight }]}>
+        <View style={styles.headerOverlay} />
+
+        <Animated.View
+          style={[
+            styles.heroWrap,
+            {
+              opacity: heroOpacity,
+              transform: [{ translateY: heroTranslateY }],
+            },
+          ]}
+        >
+          <View style={styles.heroCard}>
+            <View style={styles.heroIconWrap}>
+              <Ionicons name="create-outline" size={28} color={PRIMARY} />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroTitle}>Edit My Info</Text>
+              <Text style={styles.heroSub}>
+                Update your editable profile details while protected fields stay secure.
+              </Text>
+
+              <View style={styles.statusChip}>
+                <Ionicons name="shield-checkmark-outline" size={14} color={PRIMARY} />
+                <Text style={styles.statusText}>Secure profile editing</Text>
+              </View>
+            </View>
+          </View>
+        </Animated.View>
+      </Animated.View>
+
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top + 20 : 0}
+      >
+        <Animated.ScrollView
+          keyboardShouldPersistTaps="handled"
+          scrollEventThrottle={16}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+            useNativeDriver: false,
+          })}
+          contentContainerStyle={{
+            paddingTop: HEADER_MAX_HEIGHT + insets.top + 14,
+            paddingHorizontal: 14,
+            paddingBottom: 28 + insets.bottom,
+          }}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.noticeCard}>
+            <Ionicons name="lock-closed-outline" size={16} color={PRIMARY_DARK} />
+            <Text style={styles.noticeText}>
+              Name, Email, Phone Number, and Username are protected and cannot be changed.
+            </Text>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Phone Number</Text>
-            <TextInput
-              style={styles.input}
-              value={userInfo.phone}
-              placeholder="Enter your phone number"
-              keyboardType="phone-pad"
-              editable={false}
-              selectTextOnFocus={false}
-            />
+          <View style={styles.card}>
+            <SectionHeader title="Protected Information" icon="shield-outline" />
+
+            <InputField label="Name" value={userInfo.name} editable={false} />
+            <InputField label="Email" value={userInfo.email} editable={false} />
+            <InputField label="Phone Number" value={userInfo.phone} editable={false} />
+            <InputField label="Username" value={userInfo.username} editable={false} />
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              value={userInfo.email}
-              onChangeText={(value) => updateField('email', value)}
-              placeholder="Enter your email"
-              keyboardType="email-address"
-              autoCapitalize="none"
-            />
-          </View>
+          <View style={styles.card}>
+            <SectionHeader title="Editable Details" icon="create-outline" />
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Username</Text>
-            <TextInput
-              style={styles.input}
-              value={userInfo.username}
-              onChangeText={(value) => updateField('username', value)}
-              placeholder="Enter your username"
-              autoCapitalize="none"
-            />
-          </View>
-        </View>
-
-        {/* Personal Details */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Personal Details</Text>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Job/Occupation</Text>
-            <TextInput
-              style={styles.input}
+            <InputField
+              label="Job / Occupation"
               value={userInfo.job}
-              onChangeText={(value) => updateField('job', value)}
-              placeholder="Enter your job or occupation"
+              onChangeText={(v) => updateField("job", v)}
+              placeholder="Enter job or occupation"
             />
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Age</Text>
-            <TextInput
-              style={styles.input}
+            <InputField
+              label="Age"
               value={userInfo.age}
-              onChangeText={(value) => updateField('age', value)}
-              placeholder="Enter your age"
+              onChangeText={(v) => updateField("age", v.replace(/[^0-9]/g, ""))}
               keyboardType="numeric"
               maxLength={3}
+              placeholder="Enter age"
             />
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>City</Text>
-            <TextInput
-              style={styles.input}
+            <InputField
+              label="City"
               value={userInfo.city}
-              onChangeText={(value) => updateField('city', value)}
-              placeholder="Enter your city"
+              onChangeText={(v) => updateField("city", v)}
+              placeholder="Enter city"
             />
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Citizenship</Text>
-            <TextInput
-              style={styles.input}
+            <InputField
+              label="Citizenship"
               value={userInfo.citizenship}
-              onChangeText={(value) => updateField('citizenship', value)}
-              placeholder="Enter your citizenship"
+              onChangeText={(v) => updateField("citizenship", v)}
+              placeholder="Enter citizenship"
             />
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Address</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
+            <InputField
+              label="Address"
               value={userInfo.address}
-              onChangeText={(value) => updateField('address', value)}
-              placeholder="Enter your full address"
-              multiline
-              numberOfLines={3}
-            />
-          </View>
-
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Bio</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={userInfo.bio}
-              onChangeText={(value) => updateField('bio', value)}
-              placeholder="Tell us about yourself"
+              onChangeText={(v) => updateField("address", v)}
+              placeholder="Enter full address"
               multiline
               numberOfLines={4}
             />
+
+            <InputField
+              label="Bio"
+              value={userInfo.bio}
+              onChangeText={(v) => updateField("bio", v)}
+              placeholder="Tell us about yourself"
+              multiline
+              numberOfLines={5}
+            />
           </View>
-        </View>
-      </ScrollView>
+        </Animated.ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function SectionHeader({ title, icon }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionIconWrap}>
+        <Ionicons name={icon} size={16} color={PRIMARY_DARK} />
+      </View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
+
+function InputField({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  editable = true,
+  multiline = false,
+  numberOfLines,
+  keyboardType = "default",
+  maxLength,
+}) {
+  return (
+    <View style={styles.inputGroup}>
+      <Text style={styles.label}>{label}</Text>
+      <TextInput
+        style={[
+          styles.input,
+          multiline && styles.textArea,
+          !editable && styles.inputDisabled,
+        ]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        editable={editable}
+        selectTextOnFocus={editable}
+        multiline={multiline}
+        numberOfLines={numberOfLines}
+        keyboardType={keyboardType}
+        maxLength={maxLength}
+        placeholderTextColor="#94A3B8"
+      />
     </View>
   );
 }
@@ -321,97 +418,213 @@ export default function EditMyInfo() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#EFEFF4",
+    backgroundColor: BG,
   },
+
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#EFEFF4",
+    backgroundColor: BG,
   },
   loadingText: {
     marginTop: 10,
-    fontSize: 16,
-    color: "#666",
-  },
-  header: {
-    backgroundColor: "#2AABEE",
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  headerTitle: {
-    fontSize: 20,
+    fontSize: 14,
+    color: MUTED,
     fontWeight: "600",
-    color: "#fff",
   },
-  saveButton: {
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    justifyContent: "center",
+
+  topActionsRow: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    height: 40,
+    zIndex: 200,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+  },
+  topIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.20)",
+  },
+  compactCenter: {
+    position: "absolute",
+    left: 56,
+    right: 92,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  saveButtonTop: {
+    minWidth: 78,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255,255,255,0.20)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    flexDirection: "row",
   },
   saveButtonText: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "800",
   },
-  content: {
+
+  header: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: PRIMARY,
+    zIndex: 10,
+    overflow: "hidden",
+  },
+  headerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: PRIMARY,
+  },
+  heroWrap: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 12,
+  },
+  heroCard: {
+    backgroundColor: CARD,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
+    padding: 16,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 18,
+    backgroundColor: PRIMARY_SOFT,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  heroTitle: {
+    fontSize: 21,
+    fontWeight: "900",
+    color: TEXT,
+  },
+  heroSub: {
+    fontSize: 13,
+    color: MUTED,
+    marginTop: 3,
+    lineHeight: 18,
+    fontWeight: "500",
+  },
+  statusChip: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    backgroundColor: PRIMARY_SOFT,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: PRIMARY,
+    marginLeft: 6,
+  },
+
+  noticeCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  noticeText: {
+    marginLeft: 8,
     flex: 1,
-    paddingHorizontal: 20,
+    color: "#1E3A8A",
+    fontSize: 12.5,
+    fontWeight: "700",
+    lineHeight: 18,
   },
-  section: {
-    backgroundColor: "#fff",
-    marginTop: 20,
-    padding: 20,
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+
+  card: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+    shadowColor: "rgba(15,23,42,0.04)",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
+    elevation: 2,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  sectionIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: PRIMARY_SOFT,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-    marginBottom: 20,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
+    fontSize: 16,
+    fontWeight: "800",
+    color: TEXT,
   },
+
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 12,
   },
   label: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#666",
-    marginBottom: 8,
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#334155",
+    marginBottom: 6,
   },
   input: {
-    backgroundColor: "#f8f9fa",
     borderWidth: 1,
-    borderColor: "#e9ecef",
-    borderRadius: 8,
-    paddingHorizontal: 15,
+    borderColor: BORDER,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    paddingHorizontal: 12,
     paddingVertical: 12,
-    fontSize: 16,
-    color: "#333",
+    fontSize: 15,
+    color: TEXT,
+  },
+  inputDisabled: {
+    backgroundColor: "#F1F5F9",
+    color: "#64748B",
   },
   textArea: {
-    height: 80,
+    minHeight: 110,
     textAlignVertical: "top",
+    paddingTop: 12,
   },
 });

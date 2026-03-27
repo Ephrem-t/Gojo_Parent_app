@@ -1,482 +1,486 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Image,
-  Pressable,
+  Linking,
+  Modal,
+  ScrollView,
+  Share,
   StatusBar,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
-  Linking,
-  Share,
-  Alert,
-  Platform,
-  ToastAndroid,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { ref, get, child, push, set } from "firebase/database";
+import { child, get, push, ref, set } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-/* ---------------- CONSTANTS ---------------- */
-const TG_BLUE = "#2AABEE";
+
 const { width } = Dimensions.get("window");
 
-const HEADER_MAX_HEIGHT = Math.max(220, Math.min(300, width * 0.62));
-const HEADER_MIN_HEIGHT = 60;
-const AVATAR_SIZE = Math.max(96, Math.min(140, width * 0.32));
-const CAMERA_SIZE = Math.max(36, Math.min(50, width * 0.12));
-const SKELETON_BASE = "#E6E8EB";
-const SKELETON_HIGHLIGHT = "#F2F4F6";
+const HEADER_MAX_HEIGHT = Math.max(220, Math.min(280, width * 0.68));
+const HEADER_MIN_HEIGHT = 58;
+const MINI_AVATAR = 34;
 
-function ShimmerBlock({ style }) {
-  const animated = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(animated, {
-        toValue: 1,
-        duration: 1400,
-        useNativeDriver: true,
-      })
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [animated]);
+const PALETTE = {
+  background: "#FFFFFF",
+  card: "#FFFFFF",
+  accent: "#2296F3",
+  accentDark: "#0B72C7",
+  accentSoft: "#EAF5FF",
+  text: "#0F172A",
+  subtext: "#475569",
+  muted: "#64748B",
+  border: "#E5EDF5",
+  white: "#FFFFFF",
+  danger: "#E53935",
+  success: "#10B981",
+  offline: "#94A3B8",
+};
 
-  const translateX = animated.interpolate({ inputRange: [0, 1], outputRange: [-120, 240] });
+const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+const WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+const WEEK_DAY_SHORT = {
+  Monday: "Mon",
+  Tuesday: "Tue",
+  Wednesday: "Wed",
+  Thursday: "Thu",
+  Friday: "Fri",
+};
 
-  return (
-    <View style={[{ overflow: "hidden", backgroundColor: SKELETON_BASE, borderRadius: 8 }, style]}>
-      <Animated.View
-        style={{
-          position: "absolute",
-          top: 0,
-          bottom: 0,
-          width: 120,
-          opacity: 0.6,
-          transform: [{ translateX }],
-          backgroundColor: SKELETON_HIGHLIGHT,
-        }}
-      />
-    </View>
-  );
-}
-
-function SkeletonProfile() {
-  const insets = useSafeAreaInsets();
-  return (
-    <View style={{ flex: 1, backgroundColor: "#EFEFF4" }}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-
-      <View style={[styles.topBar, { top: insets.top + 8 }]}> 
-        {/* Remove shimmer for back icon and 3-dot menu */}
-        <View style={styles.topIcon} />
-        <View style={styles.topTitleStack}>
-          <ShimmerBlock style={{ height: 12, width: Math.min(140, width * 0.4), borderRadius: 6, marginBottom: 6 }} />
-          <ShimmerBlock style={{ height: 10, width: Math.min(90, width * 0.26), borderRadius: 6 }} />
-        </View>
-        <View style={styles.topIcon} />
-      </View>
-
-      <View style={{ height: HEADER_MAX_HEIGHT }}>
-        <ShimmerBlock style={{ flex: 1, borderRadius: 0 }} />
-      </View>
-
-      <View style={{ alignItems: "center", marginTop: -AVATAR_SIZE / 2 }}>
-        <ShimmerBlock style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }} />
-        <ShimmerBlock style={{ height: 14, width: Math.min(180, width * 0.5), borderRadius: 7, marginTop: 12 }} />
-        <ShimmerBlock style={{ height: 10, width: Math.min(120, width * 0.32), borderRadius: 6, marginTop: 8 }} />
-      </View>
-
-      <View style={{ paddingHorizontal: 16, marginTop: 16 }}>
-        {/* Info Card */}
-        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
-          <ShimmerBlock style={{ height: 14, width: 120, borderRadius: 7, marginBottom: 10 }} />
-          <ShimmerBlock style={{ height: 10, width: "90%", borderRadius: 6, marginBottom: 8 }} />
-          <ShimmerBlock style={{ height: 10, width: "80%", borderRadius: 6, marginBottom: 8 }} />
-          <ShimmerBlock style={{ height: 10, width: "70%", borderRadius: 6 }} />
-        </View>
-
-        {/* Badges Section */}
-        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
-          <ShimmerBlock style={{ height: 14, width: 160, borderRadius: 7, marginBottom: 10 }} />
-          <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-            <ShimmerBlock style={{ height: 24, width: 80, borderRadius: 12, marginRight: 8, marginBottom: 8 }} />
-            <ShimmerBlock style={{ height: 24, width: 60, borderRadius: 12, marginRight: 8, marginBottom: 8 }} />
-            <ShimmerBlock style={{ height: 24, width: 70, borderRadius: 12, marginRight: 8, marginBottom: 8 }} />
-          </View>
-        </View>
-
-        {/* Parents Section */}
-        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 12 }}>
-          <ShimmerBlock style={{ height: 14, width: 120, borderRadius: 7, marginBottom: 10 }} />
-          {[...Array(2)].map((_, i) => (
-            <View key={`p-${i}`} style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-              <ShimmerBlock style={{ width: 48, height: 48, borderRadius: 24, marginRight: 10 }} />
-              <View style={{ flex: 1 }}>
-                <ShimmerBlock style={{ height: 12, width: "60%", borderRadius: 6, marginBottom: 6 }} />
-                <ShimmerBlock style={{ height: 10, width: "40%", borderRadius: 6 }} />
-              </View>
-              <ShimmerBlock style={{ width: 36, height: 36, borderRadius: 18 }} />
-            </View>
-          ))}
-        </View>
-
-        {/* Teachers Section */}
-        <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, marginBottom: 24 }}>
-          <ShimmerBlock style={{ height: 14, width: 140, borderRadius: 7, marginBottom: 10 }} />
-          {[...Array(2)].map((_, i) => (
-            <View key={`t-${i}`} style={{ flexDirection: "row", alignItems: "center", marginBottom: 10 }}>
-              <ShimmerBlock style={{ width: 48, height: 48, borderRadius: 24, marginRight: 10 }} />
-              <View style={{ flex: 1 }}>
-                <ShimmerBlock style={{ height: 12, width: "60%", borderRadius: 6, marginBottom: 6 }} />
-                <ShimmerBlock style={{ height: 10, width: "40%", borderRadius: 6 }} />
-              </View>
-              <ShimmerBlock style={{ width: 36, height: 36, borderRadius: 18 }} />
-            </View>
-          ))}
-        </View>
-      </View>
-    </View>
-  );
+function getPeriodOrder(periodName) {
+  const match = String(periodName || "").match(/\d+/);
+  return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 }
 
 export default function UserProfile() {
   const router = useRouter();
-  const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams();
 
   const { recordId: paramRecordId, userId: paramUserId, roleName: paramRoleName } = params ?? {};
 
-  const [user, setUser] = useState(null);
-  const [roleData, setRoleData] = useState(null);
-  const [roleName, setRoleName] = useState(paramRoleName ?? null);
+  const [schoolKey, setSchoolKey] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const [user, setUser] = useState(null);
+  const [roleName, setRoleName] = useState(paramRoleName ?? null);
+  const [resolvedUserId, setResolvedUserId] = useState(paramUserId ?? null);
+
   const [parentUserId, setParentUserId] = useState(null);
   const [parentRecordId, setParentRecordId] = useState(null);
-  const [menuVisible, setMenuVisible] = useState(false); // 3-dot menu
-  const [showFullProfileImage, setShowFullProfileImage] = useState(true);
-  const [children, setChildren] = useState([]);
+
   const [parents, setParents] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [badges, setBadges] = useState([]);
   const [teacherCourses, setTeacherCourses] = useState([]);
+
+  const [studentWeeklySchedule, setStudentWeeklySchedule] = useState({});
+  const [studentGradeSection, setStudentGradeSection] = useState(null);
+  const [selectedScheduleDay, setSelectedScheduleDay] = useState(null);
+  const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
+
+  const [showMenu, setShowMenu] = useState(false);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
-  /* ---------------- LOAD PARENT USER ---------------- */
+  const schoolAwarePath = useCallback(
+    (subPath) => (schoolKey ? `Platform1/Schools/${schoolKey}/${subPath}` : subPath),
+    [schoolKey]
+  );
+
   useEffect(() => {
-    let mounted = true;
     (async () => {
-      const pr = await AsyncStorage.getItem("parentId");
-      if (!pr || !mounted) return;
-      setParentRecordId(pr);
-      const snap = await get(child(ref(database), `Parents/${pr}`));
-      if (snap.exists()) setParentUserId(snap.val()?.userId);
+      const [sk, parentId] = await Promise.all([
+        AsyncStorage.getItem("schoolKey"),
+        AsyncStorage.getItem("parentId"),
+      ]);
+      setSchoolKey(sk || null);
+
+      if (parentId) {
+        setParentRecordId(parentId);
+        const parentSnap = await get(
+          child(ref(database), `${sk ? `Platform1/Schools/${sk}/` : ""}Parents/${parentId}`)
+        );
+        if (parentSnap.exists()) {
+          setParentUserId(parentSnap.val()?.userId || null);
+        }
+      }
     })();
-    return () => (mounted = false);
   }, []);
 
-  /* ---------------- LOAD USER + ROLE ---------------- */
   useEffect(() => {
     let mounted = true;
 
     const load = async () => {
       setLoading(true);
       try {
-        let resolvedUserId = paramUserId ?? null;
-        let rId = paramRecordId ?? null;
+        let localResolvedUserId = paramUserId ?? null;
+        const rId = paramRecordId ?? null;
         let detectedRole = roleName;
 
-        if (!resolvedUserId && rId) {
-          const roles = ["Students", "Teachers", "School_Admins", "Parents"];
-          for (const r of roles) {
-            const snap = await get(child(ref(database), `${r}/${rId}`));
+        if (!localResolvedUserId && rId) {
+          const roleNodes = ["Students", "Teachers", "School_Admins", "Parents"];
+          for (const node of roleNodes) {
+            const snap = await get(child(ref(database), `${schoolAwarePath(node)}/${rId}`));
             if (snap.exists()) {
-              resolvedUserId = snap.val().userId;
-              setRoleData(snap.val());
-              detectedRole = r === "Students" ? "Student" : r === "Teachers" ? "Teacher" : r === "Parents" ? "Parent" : "Admin";
+              const row = snap.val() || {};
+              localResolvedUserId = row.userId || null;
+              detectedRole =
+                node === "Students"
+                  ? "Student"
+                  : node === "Teachers"
+                  ? "Teacher"
+                  : node === "Parents"
+                  ? "Parent"
+                  : "Admin";
               setRoleName(detectedRole);
               break;
             }
           }
         }
 
-        const effectiveRole = detectedRole;
+        if (mounted) setResolvedUserId(localResolvedUserId || null);
 
-        if (resolvedUserId) {
-          const userSnap = await get(child(ref(database), `Users/${resolvedUserId}`));
-          if (mounted) setUser(userSnap.val());
+        const usersSnap = await get(child(ref(database), schoolAwarePath("Users")));
+        const usersData = usersSnap.exists() ? usersSnap.val() : {};
+
+        if (localResolvedUserId) {
+          const userSnap = await get(child(ref(database), `${schoolAwarePath("Users")}/${localResolvedUserId}`));
+          if (mounted) setUser(userSnap.exists() ? userSnap.val() : null);
         }
 
-        // If Parent role detected, load children
-        if ((rId && effectiveRole === "Parent") || (!effectiveRole && rId)) {
-          const parentSnap = await get(child(ref(database), `Parents/${rId}`));
-          if (parentSnap.exists()) {
-            const parentNode = parentSnap.val();
-            const usersSnap = await get(child(ref(database), `Users`));
-            const studentsSnap = await get(child(ref(database), `Students`));
-            const usersData = usersSnap.exists() ? usersSnap.val() : {};
-            const studentsData = studentsSnap.exists() ? studentsSnap.val() : {};
-            const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
-            const childrenArray = parentNode.children
-              ? Object.values(parentNode.children).map((childLink) => {
-                  const student = studentsData[childLink.studentId];
-                  const studentUser = usersData[student?.userId] || {};
-                  return {
-                    ...childLink,
-                    name: studentUser.name || "Student Name",
-                    profileImage: studentUser.profileImage || defaultProfile,
-                    grade: student?.grade || "--",
-                    section: student?.section || "--",
-                  };
-                })
-              : [];
-            if (mounted) setChildren(childrenArray);
-          }
-        }
+        if (rId && detectedRole === "Student") {
+          // fetch student, teachers node, schedules and grade management
+          const [studentSnap, teachersSnap, schedulesSnap, gradesSnap] = await Promise.all([
+            get(child(ref(database), `${schoolAwarePath("Students")}/${rId}`)),
+            get(child(ref(database), schoolAwarePath("Teachers"))),
+            get(child(ref(database), schoolAwarePath("Schedules"))),
+            get(child(ref(database), schoolAwarePath("GradeManagement/grades"))),
+          ]);
 
-        // If Student role detected, load parents and teachers linked to this student
-        if (rId && effectiveRole === "Student") {
-          const studentSnap = await get(child(ref(database), `Students/${rId}`));
-          const usersSnap = await get(child(ref(database), `Users`));
-          const usersData = usersSnap.exists() ? usersSnap.val() : {};
-          const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
-          const coursesSnap = await get(child(ref(database), `Courses`));
-          const assignmentsSnap = await get(child(ref(database), `TeacherAssignments`));
-          const teachersSnap = await get(child(ref(database), `Teachers`));
-          const coursesData = coursesSnap.exists() ? coursesSnap.val() : {};
-          const assignmentsData = assignmentsSnap.exists() ? assignmentsSnap.val() : {};
+          const student = studentSnap.exists() ? studentSnap.val() : null;
           const teachersData = teachersSnap.exists() ? teachersSnap.val() : {};
+          const schedulesData = schedulesSnap.exists() ? schedulesSnap.val() : {};
+          const gradesData = gradesSnap.exists() ? gradesSnap.val() : {};
 
-          let parentsArray = [];
-          let teachersArray = [];
-          let badgeArray = [];
-          if (studentSnap.exists()) {
-            const sData = studentSnap.val();
-            const parentMap = sData?.parents || {};
-            const parentIds = Object.keys(parentMap);
-            if (parentIds.length) {
-              // Fetch each parent to get relationship and user details
-              const collected = [];
-              for (const pid of parentIds) {
-                const pSnap = await get(child(ref(database), `Parents/${pid}`));
-                if (pSnap.exists()) {
-                  const pNode = pSnap.val();
-                  const pUser = usersData[pNode.userId] || {};
-                  const relationship = parentMap[pid]?.relationship || "Parent";
-                  collected.push({
-                    parentId: pid,
-                    name: pUser.name || pUser.username || "Parent",
-                    profileImage: pUser.profileImage || defaultProfile,
-                    relationship,
-                  });
-                }
-              }
-              parentsArray = collected;
-            }
+          if (student) {
+            const grade = student?.grade;
+            const section = student?.section;
+            const gradeSectionKey = `Grade ${grade}${section || ""}`;
+            setStudentGradeSection({ grade, section, key: gradeSectionKey });
 
-            // Build teacher list based on grade/section courses and assignments
-            const grade = sData?.grade;
-            const section = sData?.section;
-            const courseIds = Object.keys(coursesData).filter((cid) => {
-              const c = coursesData[cid];
-              return c?.grade === grade && c?.section === section;
-            });
-
-            if (courseIds.length) {
-              const teacherMap = {};
-              Object.keys(assignmentsData).forEach((aid) => {
-                const assign = assignmentsData[aid];
-                if (!assign?.teacherId || !assign?.courseId) return;
-                if (!courseIds.includes(assign.courseId)) return;
-                const tId = assign.teacherId;
-                if (!teacherMap[tId]) {
-                  teacherMap[tId] = {
-                    teacherId: tId,
-                    subjects: new Set(),
-                  };
-                }
-                const course = coursesData[assign.courseId] || {};
-                if (course?.subject) teacherMap[tId].subjects.add(course.subject);
-              });
-
-              teachersArray = Object.keys(teacherMap).map((tId) => {
-                const tNode = teachersData[tId] || {};
-                const tUser = usersData[tNode.userId] || {};
-                return {
-                  teacherId: tId,
-                  userId: tNode.userId,
-                  name: tUser.name || tUser.username || "Teacher",
-                  profileImage: tUser.profileImage || defaultProfile,
-                  subjects: Array.from(teacherMap[tId].subjects),
-                };
-              });
-            }
-
-            // Collect badges from Students/<id>/badges if present
-            const badgeMap = sData?.badges || {};
-            badgeArray = Object.keys(badgeMap).map((bid) => {
-              const b = badgeMap[bid] || {};
-              return {
-                id: bid,
-                title: b.title || b.name || "Badge",
-                teacherId: b.teacherId || null,
-                color: b.color || "#e0f2fe",
-                issuedAt: b.issuedAt || null,
-              };
-            });
-          }
-
-          // Fallback: scan Parents if student.parents is missing
-          if (!parentsArray.length) {
-            const parentsSnap = await get(child(ref(database), `Parents`));
-            const parentsData = parentsSnap.exists() ? parentsSnap.val() : {};
-            parentsArray = Object.keys(parentsData).reduce((acc, pid) => {
-              const pNode = parentsData[pid];
-              const links = pNode?.children ? Object.values(pNode.children) : [];
-              const match = links.find((link) => link?.studentId === rId);
-              if (match) {
+            // Parents resolution (unchanged)
+            let parentRows = [];
+            const parentMap = student.parents || {};
+            for (const pid of Object.keys(parentMap)) {
+              const pSnap = await get(child(ref(database), `${schoolAwarePath("Parents")}/${pid}`));
+              if (pSnap.exists()) {
+                const pNode = pSnap.val();
                 const pUser = usersData[pNode.userId] || {};
-                acc.push({
+                parentRows.push({
                   parentId: pid,
                   userId: pNode.userId,
                   name: pUser.name || pUser.username || "Parent",
                   profileImage: pUser.profileImage || defaultProfile,
-                  relationship: match.relationship || "Parent",
+                  relationship: parentMap[pid]?.relationship || "Parent",
                 });
               }
-              return acc;
-            }, []);
-          }
+            }
 
-          if (mounted) {
-            setParents(parentsArray);
-            setTeachers(teachersArray);
-            setBadges(badgeArray);
+            if (!parentRows.length) {
+              const parentsSnap = await get(child(ref(database), schoolAwarePath("Parents")));
+              const parentsData = parentsSnap.exists() ? parentsSnap.val() : {};
+              parentRows = Object.keys(parentsData).reduce((acc, pid) => {
+                const pNode = parentsData[pid];
+                const links = pNode?.children ? Object.values(pNode.children) : [];
+                const match = links.find((link) => link?.studentId === rId);
+                if (match) {
+                  const pUser = usersData[pNode.userId] || {};
+                  acc.push({
+                    parentId: pid,
+                    userId: pNode.userId,
+                    name: pUser.name || pUser.username || "Parent",
+                    profileImage: pUser.profileImage || defaultProfile,
+                    relationship: match.relationship || "Parent",
+                  });
+                }
+                return acc;
+              }, []);
+            }
+
+            // Build teacher map from schedules (existing logic)
+            const teacherMap = {};
+
+            Object.keys(schedulesData || {}).forEach((day) => {
+              const dayNode = schedulesData?.[day]?.[gradeSectionKey] || {};
+              Object.values(dayNode).forEach((period) => {
+                if (!period?.teacherName || period.teacherName === "Unassigned") return;
+
+                // try match teacher by name in teachersData -> usersData
+                const teacherEntry =
+                  Object.values(teachersData).find((t) => {
+                    const userRow = usersData[t?.userId] || {};
+                    return (
+                      String(userRow?.name || "").trim().toLowerCase() ===
+                      String(period.teacherName || "").trim().toLowerCase()
+                    );
+                  }) || null;
+
+                const teacherId = teacherEntry?.teacherId || period.teacherName;
+                if (!teacherMap[teacherId]) {
+                  teacherMap[teacherId] = {
+                    teacherId: teacherEntry?.teacherId || null,
+                    userId: teacherEntry?.userId || null,
+                    name: period.teacherName || "Teacher",
+                    profileImage: teacherEntry?.userId
+                      ? usersData[teacherEntry.userId]?.profileImage || defaultProfile
+                      : defaultProfile,
+                    subjects: new Set(),
+                  };
+                }
+
+                if (period?.subject && period.subject !== "Free Period") {
+                  teacherMap[teacherId].subjects.add(period.subject);
+                }
+              });
+            });
+
+            // --- NEW: merge GradeManagement assignments so assigned teachers show up ---
+            if (gradesData && grade) {
+              try {
+                const gradeNode = gradesData?.[grade] || {};
+                const sectionTeacherMap = gradeNode?.sectionSubjectTeachers || {};
+                const sectionAssignments = sectionTeacherMap?.[section] || {};
+
+                Object.keys(sectionAssignments || {}).forEach((subjectKey) => {
+                  const assignment = sectionAssignments[subjectKey] || {};
+                  const assignedTeacherId = assignment?.teacherId || null;
+                  const assignedSubject = assignment?.subject || subjectKey;
+
+                  if (!assignedTeacherId) return;
+
+                  // teachersData may be keyed by teacher record id. Find teacher node by key or by teacherId field
+                  let teacherNode = teachersData?.[assignedTeacherId] || null;
+                  if (!teacherNode) {
+                    // fallback: teachersData values might include teacherId field
+                    teacherNode =
+                      Object.values(teachersData || {}).find((t) => String(t?.teacherId) === String(assignedTeacherId)) ||
+                      null;
+                  }
+
+                  const mapKey = teacherNode?.teacherId || assignedTeacherId;
+                  const teacherUser = teacherNode ? usersData[teacherNode.userId] || {} : {};
+
+                  if (!teacherMap[mapKey]) {
+                    teacherMap[mapKey] = {
+                      teacherId: teacherNode?.teacherId || null,
+                      userId: teacherNode?.userId || null,
+                      name: teacherUser?.name || assignment?.teacherName || assignedTeacherId || "Teacher",
+                      profileImage: teacherUser?.profileImage || defaultProfile,
+                      subjects: new Set(),
+                    };
+                  }
+
+                  // add the assigned subject
+                  if (assignedSubject && assignedSubject !== "Free Period") {
+                    teacherMap[mapKey].subjects.add(assignedSubject);
+                  }
+                });
+              } catch (e) {
+                // non-fatal, continue with whatever teacherMap we have
+                console.warn("GradeManagement merge error", e);
+              }
+            }
+
+            // Convert teacherMap subjects sets -> arrays
+            const teacherRows = Object.values(teacherMap).map((t) => ({
+              ...t,
+              subjects: Array.from(t.subjects),
+            }));
+
+            // Build weekly schedule (unchanged)
+            const weekly = {};
+            WEEK_DAYS.forEach((day) => {
+              const dayPeriods = schedulesData?.[day]?.[gradeSectionKey] || {};
+              const sorted = Object.entries(dayPeriods)
+                .map(([periodName, info]) => ({
+                  periodName,
+                  subject: info?.subject || "Free Period",
+                  teacherName: info?.teacherName || "Unassigned",
+                  isFree: (info?.subject || "Free Period") === "Free Period",
+                }))
+                .sort((a, b) => getPeriodOrder(a.periodName) - getPeriodOrder(b.periodName));
+
+              weekly[day] = sorted;
+            });
+
+            const todayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+            const defaultDay = WEEK_DAYS.includes(todayName) ? todayName : "Monday";
+
+            if (mounted) {
+              setParents(parentRows);
+              setTeachers(teacherRows);
+              setStudentWeeklySchedule(weekly);
+              setSelectedScheduleDay(defaultDay);
+            }
           }
         }
 
-        // If Teacher role detected, load assigned courses and students
-        if (rId && effectiveRole === "Teacher") {
-          const usersSnap = await get(child(ref(database), `Users`));
-          const usersData = usersSnap.exists() ? usersSnap.val() : {};
-          const coursesSnap = await get(child(ref(database), `Courses`));
-          const assignmentsSnap = await get(child(ref(database), `TeacherAssignments`));
-          const coursesData = coursesSnap.exists() ? coursesSnap.val() : {};
-          const assignmentsData = assignmentsSnap.exists() ? assignmentsSnap.val() : {};
+        if (rId && detectedRole === "Teacher") {
+          const gradeSnap = await get(child(ref(database), schoolAwarePath("GradeManagement/grades")));
+          const gradesData = gradeSnap.exists() ? gradeSnap.val() : {};
 
-          const assignedCourseIds = Object.keys(assignmentsData)
-            .filter((aid) => assignmentsData[aid]?.teacherId === rId)
-            .map((aid) => assignmentsData[aid].courseId);
+          const courseRows = [];
+          Object.keys(gradesData || {}).forEach((gradeKey) => {
+            const gradeNode = gradesData[gradeKey] || {};
+            const sectionTeacherMap = gradeNode?.sectionSubjectTeachers || {};
 
-          const uniqueCourseIds = Array.from(new Set(assignedCourseIds));
-
-          const coursesArray = uniqueCourseIds.map((cid) => {
-            const c = coursesData[cid] || {};
-            return {
-              courseId: cid,
-              subject: c.subject || "Subject",
-              grade: c.grade || "--",
-              section: c.section || "--",
-            };
+            Object.keys(sectionTeacherMap).forEach((sectionKey) => {
+              const sectionAssignments = sectionTeacherMap[sectionKey] || {};
+              Object.keys(sectionAssignments).forEach((subjectKey) => {
+                const assignment = sectionAssignments[subjectKey];
+                if (assignment?.teacherId === rId) {
+                  courseRows.push({
+                    courseId: assignment?.courseId || `${gradeKey}-${sectionKey}-${subjectKey}`,
+                    subject: assignment?.subject || subjectKey,
+                    grade: gradeKey,
+                    section: sectionKey,
+                  });
+                }
+              });
+            });
           });
 
-          if (mounted) {
-            setTeacherCourses(coursesArray);
-          }
+          if (mounted) setTeacherCourses(courseRows);
         }
       } catch (e) {
-        console.warn(e);
+        console.warn("userProfile load error:", e);
       } finally {
         if (mounted) setLoading(false);
       }
     };
 
-    load();
-    return () => (mounted = false);
-  }, [paramRecordId, paramUserId]);
+    if (schoolKey !== undefined) load();
+    return () => {
+      mounted = false;
+    };
+  }, [paramRecordId, paramUserId, roleName, schoolKey, schoolAwarePath]);
 
-  /* ---------------- ANIMATIONS ---------------- */
+  const isSelfProfile =
+    !!parentUserId && !!resolvedUserId && String(parentUserId) === String(resolvedUserId);
+
+  const canMessageMain = !!resolvedUserId && !isSelfProfile;
+
+  const profileSubtitle = useMemo(() => {
+    if (isSelfProfile) return "This is your profile";
+    if (roleName === "Teacher" && teacherCourses.length) return `${teacherCourses[0].subject} Teacher`;
+    if (roleName === "Student") return "Student Profile";
+    if (roleName === "Parent") return "Parent Profile";
+    if (roleName === "Admin") return "School Management";
+    return "School Profile";
+  }, [isSelfProfile, roleName, teacherCourses]);
+
+  const selectedDayPeriods = useMemo(() => {
+    if (!selectedScheduleDay) return [];
+    return studentWeeklySchedule?.[selectedScheduleDay] || [];
+  }, [selectedScheduleDay, studentWeeklySchedule]);
+
+  const selectedDaySummary = useMemo(() => {
+    const total = selectedDayPeriods.length;
+    const classCount = selectedDayPeriods.filter((period) => !period.isFree).length;
+    const freeCount = total - classCount;
+
+    return {
+      total,
+      classCount,
+      freeCount,
+    };
+  }, [selectedDayPeriods]);
+
   const headerHeight = scrollY.interpolate({
     inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
-    outputRange: [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
+    outputRange: [HEADER_MAX_HEIGHT + insets.top, HEADER_MIN_HEIGHT + insets.top],
     extrapolate: "clamp",
   });
 
-  // Avatar + Name animation (move & shrink together)
-  const headerContentTranslate = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
-    outputRange: [0, -60],
-    extrapolate: "clamp",
-  });
-  const headerContentScale = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
-    outputRange: [1, 0.6],
-    extrapolate: "clamp",
-  });
-  const headerContentOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT - 20],
-    outputRange: [1, 0],
+  const compactBarOpacity = scrollY.interpolate({
+    inputRange: [0, 65, 125],
+    outputRange: [0, 0.25, 1],
     extrapolate: "clamp",
   });
 
-  // Small name in top bar appear
-  const smallNameOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT - 20, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
-    outputRange: [0, 0, 1],
+  const heroTranslateY = scrollY.interpolate({
+    inputRange: [0, 120],
+    outputRange: [0, -16],
     extrapolate: "clamp",
   });
 
-  // Toggle header modes based on scroll position
-  useEffect(() => {
-    const listenerId = scrollY.addListener(({ value }) => {
-      if (value > 0 && showFullProfileImage) {
-        setShowFullProfileImage(false);
-      } else if (value === 0 && !showFullProfileImage) {
-        setShowFullProfileImage(true);
+  const heroScale = scrollY.interpolate({
+    inputRange: [0, 120],
+    outputRange: [1, 0.96],
+    extrapolate: "clamp",
+  });
+
+  const heroOpacity = scrollY.interpolate({
+    inputRange: [0, 110, 180],
+    outputRange: [1, 0.7, 0],
+    extrapolate: "clamp",
+  });
+
+  const handleBack = useCallback(() => {
+    if (router?.canGoBack && router.canGoBack()) router.back();
+    else router.replace("/");
+  }, [router]);
+
+  const openChat = () => {
+    if (!canMessageMain) return Alert.alert("Not allowed", "You cannot message yourself.");
+    router.push({ pathname: "/chat", params: { userId: resolvedUserId } });
+    console.log("Opening chat with userId:", resolvedUserId);
+  };
+
+  const openChatWith = useCallback(
+    (targetUserId, displayName) => {
+      if (!targetUserId) {
+        return Alert.alert("Chat unavailable", `No chat available for ${displayName || "this user"}.`);
       }
-    });
-    return () => scrollY.removeListener(listenerId);
-  }, [showFullProfileImage, scrollY]);
+      if (parentUserId && String(targetUserId) === String(parentUserId)) {
+        return Alert.alert("Not allowed", "You cannot message yourself.");
+      }
+      console.log("Opening chat with userId:", targetUserId);
+
+      router.push({ pathname: "/chat", params: { userId: targetUserId } });
+    },
+    [router, parentUserId]
+  );
 
   const handleCall = () => {
     const phone = user?.phone || "";
-    if (!phone) {
-      alert("No phone number available for this user.");
-      return;
-    }
-    try {
-      const sanitized = phone.toString().trim();
-      Linking.openURL(`tel:${sanitized}`);
-    } catch (_) {
-      alert("Unable to start a call on this device.");
-    }
+    if (!phone) return Alert.alert("No phone number", "No phone number available.");
+    Linking.openURL(`tel:${String(phone).trim()}`);
   };
 
-  const shareProfile = async () => {
+  const handleShare = async () => {
     try {
       const name = user?.name || "User";
       const link = `https://gojo.app/userProfile?recordId=${paramRecordId ?? ""}&userId=${paramUserId ?? ""}`;
-      await Share.share({
-        message: `View ${name}'s profile\n${link}`,
-      });
-    } catch (e) {
+      await Share.share({ message: `View ${name}'s profile\n${link}` });
+    } catch {
       Alert.alert("Sharing failed", "Unable to share this profile.");
-    } finally {
-      setMenuVisible(false);
     }
   };
 
-  const reportUser = async () => {
+  const handleReport = async () => {
     try {
-      const reportRef = push(ref(database, "Reports"));
+      const reportRef = push(ref(database, schoolAwarePath("Reports")));
       await set(reportRef, {
-        targetUserId: paramUserId || user?.userId || null,
+        targetUserId: resolvedUserId || null,
         targetRecordId: paramRecordId || null,
         targetName: user?.name || null,
         targetRole: roleName || null,
@@ -485,52 +489,21 @@ export default function UserProfile() {
         status: "open",
       });
       const msg = "Reported. We will review this user.";
-      if (Platform.OS === "android") {
-        ToastAndroid.show(msg, ToastAndroid.SHORT);
-      } else {
-        Alert.alert("Reported", msg);
-      }
-    } catch (e) {
+      if (Platform.OS === "android") ToastAndroid.show(msg, ToastAndroid.SHORT);
+      else Alert.alert("Reported", msg);
+    } catch {
       const msg = "Could not submit the report.";
-      if (Platform.OS === "android") {
-        ToastAndroid.show(msg, ToastAndroid.SHORT);
-      } else {
-        Alert.alert("Error", msg);
-      }
-    } finally {
-      setMenuVisible(false);
+      if (Platform.OS === "android") ToastAndroid.show(msg, ToastAndroid.SHORT);
+      else Alert.alert("Error", msg);
     }
   };
-
-  const openChat = () => {
-    const targetId = paramRecordId ?? paramUserId ?? user?.userId;
-    if (targetId) router.push({ pathname: "/chat", params: { userId: targetId } });
-  };
-
-  const openChatWith = useCallback(
-    (targetUserId, displayName) => {
-      if (targetUserId) {
-        router.push({ pathname: "/chat", params: { userId: targetUserId } });
-      } else if (displayName) {
-        alert(`No chat available for ${displayName}.`);
-      } else {
-        alert("Chat unavailable for this user.");
-      }
-    },
-    [router]
-  );
-
-  const handleBack = useCallback(() => {
-    if (router?.canGoBack && router.canGoBack()) {
-      router.back();
-    } else {
-      router.replace("/");
-    }
-  }, [router]);
 
   if (loading) {
     return (
-      <SkeletonProfile />
+      <View style={styles.loadingWrap}>
+        <ActivityIndicator size="large" color={PALETTE.accent} />
+        <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
     );
   }
 
@@ -538,420 +511,1204 @@ export default function UserProfile() {
     <View style={styles.container}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-      {/* Fixed Top Bar with Back & 3-dot */}
-      <View style={[styles.topBar, { top: insets.top + 8 }]}>
+      <View style={[styles.topActionsRow, { top: insets.top + 8 }]}>
         <TouchableOpacity style={styles.topIcon} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={22} color="#fff" />
+          <Ionicons name="arrow-back" size={21} color="#fff" />
         </TouchableOpacity>
 
-        <View style={styles.topTitleStack}>
-          <Animated.Text style={[styles.smallName, { opacity: smallNameOpacity }]}>
-            {user?.name}
-          </Animated.Text>
-          <Animated.Text style={[styles.smallStatus, { opacity: smallNameOpacity }]}>
-            Last seen recently
-          </Animated.Text>
-        </View>
+        <Animated.View style={[styles.compactCenter, { opacity: compactBarOpacity }]}>
+          <Image source={{ uri: user?.profileImage || defaultProfile }} style={styles.compactAvatar} />
+          <View>
+            <Text style={styles.compactName} numberOfLines={1}>
+              {user?.name}
+            </Text>
+            <Text style={styles.compactSub}>{profileSubtitle}</Text>
+          </View>
+        </Animated.View>
 
-        <TouchableOpacity style={styles.topIcon} onPress={() => setMenuVisible(!menuVisible)}>
-          <Ionicons name="ellipsis-vertical" size={22} color="#fff" />
+        <TouchableOpacity style={styles.topIcon} onPress={() => setShowMenu((v) => !v)}>
+          <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
-      {/* Telegram Style Dropdown Menu */}
-      {menuVisible && (
+      {showMenu && (
         <>
-          <TouchableOpacity 
-            style={styles.menuOverlay} 
-            activeOpacity={1}
-            onPress={() => setMenuVisible(false)}
-          />
-          <View style={styles.dropdownMenu}>
-            <Pressable style={styles.menuItem} onPress={shareProfile}>
-              <Ionicons name="share-outline" size={18} color={TG_BLUE} style={{ marginRight: 8 }} />
+          <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMenu(false)} />
+          <View style={[styles.dropdownMenu, { top: insets.top + 52 }]}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={async () => {
+                setShowMenu(false);
+                await handleShare();
+              }}
+            >
               <Text style={styles.menuText}>Share</Text>
-            </Pressable>
-            <Pressable style={styles.menuItem} onPress={reportUser}>
-              <Ionicons name="warning-outline" size={18} color="#FFA500" style={{ marginRight: 8 }} />
-              <Text style={styles.menuText}>Report User</Text>
-            </Pressable>
-            <Pressable style={styles.menuItem} onPress={handleCall}>
-              <Ionicons name="call-outline" size={18} color={TG_BLUE} style={{ marginRight: 8 }} />
-              <Text style={styles.menuText}>Call</Text>
-            </Pressable>
+            </TouchableOpacity>
+            {!isSelfProfile && (
+              <TouchableOpacity
+                style={[styles.menuItem, styles.menuItemNoBorder]}
+                onPress={async () => {
+                  setShowMenu(false);
+                  await handleReport();
+                }}
+              >
+                <Text style={[styles.menuText, { color: "#F59E0B" }]}>Report User</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </>
       )}
 
-      {/* Scrollable content */}
       <Animated.ScrollView
         scrollEventThrottle={16}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
-        contentContainerStyle={{ paddingTop: HEADER_MAX_HEIGHT + CAMERA_SIZE / 2 }}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          useNativeDriver: false,
+        })}
+        contentContainerStyle={{
+          paddingTop: HEADER_MAX_HEIGHT + insets.top + 14,
+          paddingBottom: Math.max(24, insets.bottom + 8),
+        }}
+        showsVerticalScrollIndicator={false}
       >
-        {/* Info Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Info</Text>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Name</Text>
-            <Text style={styles.infoValue}>{user?.name}</Text>
+        <View style={styles.contentWrap}>
+          <View style={styles.quickActions}>
+            {canMessageMain && (
+              <QuickAction icon="chatbubble-ellipses-outline" label="Message" onPress={openChat} />
+            )}
+            <QuickAction icon="call-outline" label="Call" onPress={handleCall} />
+            <QuickAction icon="share-social-outline" label="Share" onPress={handleShare} />
           </View>
-          {user?.username && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Username</Text>
-              <Text style={styles.infoValue}>{user.username}</Text>
+
+          <View style={styles.card}>
+            <SectionHeader title="Info" icon="person-circle-outline" />
+            <InfoRow label="Name" value={user?.name} />
+            <InfoRow label="Username" value={user?.username} />
+            <InfoRow label="Phone" value={user?.phone} />
+            <InfoRow label="Email" value={user?.email} />
+            <InfoRow label="Role" value={roleName} />
+          </View>
+
+          {roleName === "Student" && (
+            <>
+              <View style={styles.card}>
+                <SectionHeader title="Periods" icon="calendar-outline" />
+
+                <View style={styles.schedulePreviewCard}>
+                  <View style={styles.schedulePreviewHeader}>
+                    <View style={styles.schedulePreviewIconWrap}>
+                      <Ionicons name="calendar-clear-outline" size={18} color={PALETTE.accentDark} />
+                    </View>
+                    <View style={styles.schedulePreviewTextWrap}>
+                      <Text style={styles.schedulePreviewEyebrow}>Weekly learning flow</Text>
+                      <Text style={styles.schedulePreviewTitle}>
+                        {selectedScheduleDay || "Today"} schedule
+                      </Text>
+                      <Text style={styles.schedulePreviewSubtext}>
+                        {studentGradeSection?.key || "Class schedule"}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* <View style={styles.schedulePreviewStatsRow}>
+                    <View style={styles.schedulePreviewStatPill}>
+                      <Text style={styles.schedulePreviewStatValue}>{selectedDaySummary.classCount}
+
+                        <Text style={styles.schedulePreviewStatLabel}> Classes</Text>
+                      </Text>
+                      
+                    </View>
+                    <View style={styles.schedulePreviewStatPill}>
+                      <Text style={styles.schedulePreviewStatValue}>{selectedDaySummary.freeCount}
+                        <Text style={styles.schedulePreviewStatLabel}> Free</Text>
+                      </Text>
+                      
+                    </View>
+                    <View style={styles.schedulePreviewStatPillWide}>
+                      <Text style={styles.schedulePreviewStatValue}>{selectedDaySummary.total}
+                        <Text style={styles.schedulePreviewStatLabel}> Total periods</Text>
+                      </Text>
+                      
+                    </View>
+                  </View> */}
+                </View>
+
+                <TouchableOpacity
+                  style={styles.scheduleOpenButton}
+                  activeOpacity={0.9}
+                  onPress={() => setScheduleSheetVisible(true)}
+                >
+                  <View>
+                    <Text style={styles.scheduleOpenButtonTitle}>Open full schedule</Text>
+                    <Text style={styles.scheduleOpenButtonSubtext}>
+                      View the day tabs and all periods in a bottom sheet.
+                    </Text>
+                  </View>
+                  {/* <View style={styles.scheduleOpenButtonIcon}>
+                    <Ionicons name="chevron-up" size={18} color={PALETTE.accentDark} />
+                  </View> */}
+                </TouchableOpacity>
+              </View>
+
+              {parents.length > 0 && (
+                <View style={styles.card}>
+                  <SectionHeader title="Parents" icon="home-outline" />
+                  {parents.map((p) => (
+                    <PersonRow
+                      key={p.parentId}
+                      name={p.name}
+                      subtitle={`Relation: ${p.relationship}`}
+                      image={p.profileImage}
+                      onPress={() => {
+                        if (parentRecordId && p.parentId === parentRecordId) router.push("/profile");
+                        else router.push(`/userProfile?recordId=${p.parentId}`);
+                      }}
+                      onMessage={
+                        p.userId && (!parentUserId || String(p.userId) !== String(parentUserId))
+                          ? () => openChatWith(p.userId, p.name)
+                          : null
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+
+              {teachers.length > 0 && (
+                <View style={styles.card}>
+                  <SectionHeader title="Teachers" icon="school-outline" />
+                  {teachers.map((t) => (
+                    <PersonRow
+                      key={t.teacherId || t.name}
+                      name={t.name}
+                      subtitle={t.subjects?.length ? t.subjects.join(", ") : "Teacher"}
+                      image={t.profileImage}
+                      onPress={() => (t.teacherId ? router.push(`/userProfile?recordId=${t.teacherId}`) : null)}
+                      onMessage={
+                        t.userId && (!parentUserId || String(t.userId) !== String(parentUserId))
+                          ? () => openChatWith(t.userId, t.name)
+                          : null
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+
+          {roleName === "Teacher" && teacherCourses.length > 0 && (
+            <View style={styles.card}>
+              <SectionHeader title="Subjects" icon="book-outline" />
+              {teacherCourses.map((c) => (
+                <View key={c.courseId} style={styles.subjectRow}>
+                  <Text style={styles.subjectName}>{c.subject}</Text>
+                  <Text style={styles.subjectMeta}>Grade {c.grade} • Section {c.section}</Text>
+                </View>
+              ))}
             </View>
           )}
-          {user?.phone && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Phone</Text>
-              <Text style={[styles.infoValue, styles.link]}>{user.phone}</Text>
-            </View>
-          )}
-          {user?.email && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Email</Text>
-              <Text style={styles.infoValue}>{user.email}</Text>
-            </View>
-          )}
-          {roleName && (
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Role</Text>
-              <Text style={styles.infoValue}>{roleName}</Text>
+
+          {roleName === "Parent" && (
+            <View style={styles.card}>
+              <SectionHeader title="Account" icon="settings-outline" />
+
+              <TouchableOpacity
+                style={styles.accountItem}
+                onPress={canMessageMain ? openChat : handleShare}
+              >
+                <View style={[styles.accountIconWrap, { backgroundColor: "#E9F5FF" }]}>
+                  <Ionicons
+                    name={canMessageMain ? "chatbubble-ellipses-outline" : "share-social-outline"}
+                    size={18}
+                    color={PALETTE.accentDark}
+                  />
+                </View>
+                <Text style={styles.accountText}>
+                  {canMessageMain ? "Send Message" : "Share Profile"}
+                </Text>
+                <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.accountItem} onPress={handleCall}>
+                <View style={[styles.accountIconWrap, { backgroundColor: "#ECFDF3" }]}>
+                  <Ionicons name="call-outline" size={18} color="#059669" />
+                </View>
+                <Text style={styles.accountText}>Call User</Text>
+                <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.accountItem, styles.accountItemNoBorder]}
+                onPress={handleShare}
+              >
+                <View style={[styles.accountIconWrap, { backgroundColor: "#F1F5FF" }]}>
+                  <Ionicons name="share-social-outline" size={18} color="#4F46E5" />
+                </View>
+                <Text style={styles.accountText}>Share Profile</Text>
+                <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
+              </TouchableOpacity>
             </View>
           )}
         </View>
-
-        {/* Badges Section (Student only) */}
-        {roleName === "Student" && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Collected Badges ({badges.length})</Text>
-            {badges.length > 0 ? (
-              <View style={styles.badgeGrid}>
-                {badges.map((b) => (
-                  <View key={b.id} style={[styles.badgePill, { backgroundColor: b.color || "#e0f2fe" }]}>
-                    <Text style={styles.badgeText}>{b.title}</Text>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.childDetails}>No badges yet</Text>
-            )}
-          </View>
-        )}
-
-        {/* Children Section (for Parent profiles) */}
-        {children.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Children</Text>
-            {children.map((child) => (
-              <TouchableOpacity 
-                key={child.studentId}
-                style={styles.childCard}
-                onPress={() => router.push(`/userProfile?recordId=${child.studentId}`)}
-              >
-                <Image source={{ uri: child.profileImage }} style={styles.childImage} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.childName}>{child.name}</Text>
-                  <Text style={styles.childDetails}>
-                    Grade {child.grade} - Section {child.section}
-                  </Text>
-                  <Text style={styles.childDetails}>
-                    Relation: {child.relationship}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#999" />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-        {/* Parents Section (for Student profiles) */}
-        {parents.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Parents</Text>
-            {parents.map((p) => (
-              <TouchableOpacity
-                key={p.parentId}
-                style={styles.childCard}
-                onPress={() => {
-                  if (parentRecordId && p.parentId === parentRecordId) {
-                    router.push("/profile");
-                  } else {
-                    router.push(`/userProfile?recordId=${p.parentId}`);
-                  }
-                }}
-              >
-                <Image source={{ uri: p.profileImage }} style={styles.childImage} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.childName}>{p.name}</Text>
-                  <Text style={styles.childDetails}>Relation: {p.relationship}</Text>
-                </View>
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  {p.userId ? (
-                    <TouchableOpacity
-                      style={styles.messageBtn}
-                      onPress={() => openChatWith(p.userId, p.name)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Message ${p.name}`}
-                    >
-                      <Ionicons name="chatbubble-ellipses-outline" size={18} color="#1e90ff" />
-                    </TouchableOpacity>
-                  ) : null}
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-        
-        {/* Teachers Section (for Student profiles) */}
-        {teachers.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Teachers</Text>
-            {teachers.map((t) => (
-              <TouchableOpacity
-                key={t.teacherId}
-                style={styles.childCard}
-                onPress={() => router.push(`/userProfile?recordId=${t.teacherId}`)}
-              >
-                <Image source={{ uri: t.profileImage }} style={styles.childImage} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.childName}>{t.name}</Text>
-                  <Text style={styles.childDetails}>
-                    {t.subjects && t.subjects.length ? t.subjects.join(", ") : "Teacher"}
-                  </Text>
-                </View>
-                <View style={{ flexDirection: "row", alignItems: "center" }}>
-                  {t.userId ? (
-                    <TouchableOpacity
-                      style={styles.messageBtn}
-                      onPress={() => openChatWith(t.userId, t.name)}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Message ${t.name}`}
-                    >
-                      <Ionicons name="chatbubble-ellipses-outline" size={18} color="#1e90ff" />
-                    </TouchableOpacity>
-                  ) : null}
-                  <Ionicons name="chevron-forward" size={20} color="#999" />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Subjects Section (for Teacher profiles) */}
-        {roleName === "Teacher" && teacherCourses.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Subjects</Text>
-            {teacherCourses.map((c) => (
-              <View key={c.courseId} style={styles.childCard}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.childName}>{c.subject}</Text>
-                  <Text style={styles.childDetails}>Grade {c.grade} - Section {c.section}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Students Section removed for Teacher profiles per request */}
       </Animated.ScrollView>
 
-      {/* Animated Header (Avatar + Name move & shrink together) */}
-      <Animated.View
-        style={[styles.header, { height: headerHeight }]}
-      >
-        {/* Background Profile Image - Shows at top (0 scroll) */}
-        <Image
-          source={{ uri: user?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
-          style={[styles.bgProfileImage, { opacity: showFullProfileImage ? 1 : 0 }]}
-        />
-
-        {showFullProfileImage ? (
-          <View style={styles.heroOverlayBare}>
-            <Text style={styles.heroName}>{user?.name}</Text>
-            <View style={styles.statusBadge}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Last seen recently</Text>
-            </View>
-          </View>
-        ) : null}
+      <Animated.View style={[styles.header, { height: headerHeight }]}>
+        <Image source={{ uri: user?.profileImage || defaultProfile }} style={styles.headerBgImage} />
+        <View style={styles.headerBgOverlay} />
 
         <Animated.View
-          style={{
-            transform: [
-              { translateY: headerContentTranslate },
-              { scale: headerContentScale },
-            ],
-            opacity: showFullProfileImage ? 0 : headerContentOpacity,
-            alignItems: "center",
-          }}
+          style={[
+            styles.heroWrap,
+            {
+              transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
+              opacity: heroOpacity,
+            },
+          ]}
         >
-          {showFullProfileImage ? null : (
-            <>
-              <Image
-                source={{ uri: user?.profileImage || "https://cdn-icons-png.flaticon.com/512/847/847969.png" }}
-                style={styles.avatar}
-              />
-              <Text style={styles.nameOverlay}>{user?.name}</Text>
-              
-            </>
-          )}
+          <View style={styles.photoCard}>
+            <Image source={{ uri: user?.profileImage || defaultProfile }} style={styles.photoCardImage} />
+          </View>
+
+          <View style={styles.identitySide}>
+            <View style={styles.identityCard}>
+              <Text style={styles.identityName} numberOfLines={1}>
+                {user?.name}
+              </Text>
+              {!!user?.username && <Text style={styles.identityUsername}>@{user.username}</Text>}
+              <Text style={styles.identityRole}>{profileSubtitle}</Text>
+            </View>
+          </View>
         </Animated.View>
       </Animated.View>
 
-      {/* FLOATING MESSAGE BUTTON */}
-      <TouchableOpacity
-        style={styles.floatingMessageBtn}
-        onPress={openChat}
+      <Modal
+        visible={scheduleSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setScheduleSheetVisible(false)}
       >
-        <Ionicons name="chatbubble-outline" size={24} color="#fff" />
-      </TouchableOpacity>
+        <View style={styles.sheetOverlay}>
+          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setScheduleSheetVisible(false)} />
+
+          <View style={[styles.sheetContainer, { paddingBottom: Math.max(insets.bottom, 18) }]}> 
+            <View style={styles.sheetHandle} />
+
+            <View style={styles.sheetHeader}>
+              <View>
+                <Text style={styles.sheetTitle}>Student periods</Text>
+                <Text style={styles.sheetSubtitle}>{studentGradeSection?.key || "Class schedule"}</Text>
+              </View>
+
+              <TouchableOpacity style={styles.sheetCloseButton} onPress={() => setScheduleSheetVisible(false)}>
+                <Ionicons name="close" size={18} color={PALETTE.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetScrollContent}>
+              <View style={styles.scheduleHeroCard}>
+                <View style={styles.scheduleHeroTextWrap}>
+                  <Text style={styles.scheduleEyebrow}>Weekly learning flow</Text>
+                  <Text style={styles.scheduleHeroTitle}>{selectedScheduleDay || "Today"} schedule</Text>
+                  <Text style={styles.scheduleHeroSubtext}>
+                    {selectedDaySummary.total} period{selectedDaySummary.total === 1 ? "" : "s"} planned
+                  </Text>
+                </View>
+
+                <View style={styles.scheduleHeroCountPill}>
+                  <Text style={styles.scheduleHeroCountNumber}>{selectedDaySummary.total}</Text>
+                  <Text style={styles.scheduleHeroCountLabel}>periods</Text>
+                </View>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.dayChipRow}
+              >
+                {WEEK_DAYS.map((day) => {
+                  const active = selectedScheduleDay === day;
+                  const dayCount = studentWeeklySchedule?.[day]?.length || 0;
+                  return (
+                    <TouchableOpacity
+                      key={day}
+                      style={[styles.dayChip, active && styles.dayChipActive]}
+                      onPress={() => setSelectedScheduleDay(day)}
+                      activeOpacity={0.88}
+                    >
+                      <Text style={[styles.dayChipKicker, active && styles.dayChipKickerActive]}>
+                        {WEEK_DAY_SHORT[day]}
+                      </Text>
+                      <Text style={[styles.dayChipTitle, active && styles.dayChipTitleActive]}>{day}</Text>
+                      <Text style={[styles.dayChipSub, active && styles.dayChipSubActive]}>
+                        {dayCount} period{dayCount === 1 ? "" : "s"}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.scheduleInsightsRow}>
+                <View style={styles.scheduleInsightCard}>
+                  <Text style={styles.scheduleInsightValue}>{selectedDaySummary.classCount}
+
+                    <Text style={styles.scheduleInsightLabel}> Classes</Text>
+                  </Text>
+                  
+                </View>
+                <View style={styles.scheduleInsightCard}>
+                  <Text style={styles.scheduleInsightValue}>{selectedDaySummary.freeCount}
+                    <Text style={styles.scheduleInsightLabel}> Free</Text>
+                  </Text>
+                  
+                </View>
+                {/* <View style={[styles.scheduleInsightCard, styles.scheduleInsightCardAccent]}>
+                  <Ionicons name="sparkles-outline" size={15} color={PALETTE.accentDark} />
+                  <Text style={styles.scheduleInsightHint}>Tap a day to focus on that plan</Text>
+                </View> */}
+              </View>
+
+              {selectedDayPeriods.length ? (
+                <View style={styles.periodTimeline}>
+                  {selectedDayPeriods.map((p, index) => (
+                    <View
+                      key={`${selectedScheduleDay}-${p.periodName}`}
+                      style={[
+                        styles.periodTimelineRow,
+                        p.isFree && styles.periodTimelineRowFree,
+                        index === selectedDayPeriods.length - 1 && styles.periodTimelineRowLast,
+                      ]}
+                    >
+                      <View style={styles.periodRailWrap}>
+                        <View style={[styles.periodRailDot, p.isFree && styles.periodRailDotFree]} />
+                        {index !== selectedDayPeriods.length - 1 && (
+                          <View style={[styles.periodRailLine, p.isFree && styles.periodRailLineFree]} />
+                        )}
+                      </View>
+
+                      <View style={[styles.periodCard, p.isFree && styles.periodCardFree]}>
+                        <View style={styles.periodTopRow}>
+                          <View>
+                            <Text style={styles.periodLabel}>{p.periodName}</Text>
+                            <Text style={[styles.periodSubject, p.isFree && styles.periodSubjectFree]}>
+                              {p.subject}
+                            </Text>
+                          </View>
+
+                          <View style={[styles.subjectMiniChip, p.isFree && styles.subjectMiniChipFree]}>
+                            <Text
+                              style={[
+                                styles.subjectMiniChipText,
+                                p.isFree && styles.subjectMiniChipTextFree,
+                              ]}
+                            >
+                              {p.isFree ? "Break" : "Class"}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={styles.periodMetaRow}>
+                          <View style={styles.periodMetaPill}>
+                            <Ionicons
+                              name={p.isFree ? "cafe-outline" : "school-outline"}
+                              size={13}
+                              color={p.isFree ? PALETTE.muted : PALETTE.accentDark}
+                            />
+                            <Text style={styles.periodTeacher} numberOfLines={1}>
+                              {p.teacherName}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.scheduleEmptyState}>
+                  <Ionicons name="calendar-clear-outline" size={18} color={PALETTE.muted} />
+                  <Text style={styles.emptyText}>No schedule found for this day.</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
-/* ---------------- STYLES ---------------- */
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#EFEFF4" },
-  loading: { flex: 1, justifyContent: "center", alignItems: "center" },
+function SectionHeader({ title, icon }) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionIconWrap}>
+        <Ionicons name={icon} size={16} color={PALETTE.accentDark} />
+      </View>
+      <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+  );
+}
 
-  topBar: {
+function QuickAction({ icon, label, onPress }) {
+  return (
+    <TouchableOpacity style={styles.quickActionItem} onPress={onPress} activeOpacity={0.88}>
+      <View style={styles.quickActionIcon}>
+        <Ionicons name={icon} size={18} color={PALETTE.accentDark} />
+      </View>
+      <Text style={styles.quickActionLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function InfoRow({ label, value }) {
+  if (!value) return null;
+  return (
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
+    </View>
+  );
+}
+
+function PersonRow({ name, subtitle, extra, image, onPress, onMessage }) {
+  return (
+    <TouchableOpacity style={styles.childCard} onPress={onPress} activeOpacity={0.88}>
+      <Image source={{ uri: image || defaultProfile }} style={styles.childImage} />
+      <View style={styles.childBody}>
+        <Text style={styles.childName}>{name}</Text>
+        {!!subtitle && <Text style={styles.childMeta}>{subtitle}</Text>}
+        {!!extra && <Text style={styles.childMeta}>{extra}</Text>}
+      </View>
+
+      <View style={{ flexDirection: "row", alignItems: "center" }}>
+        {onMessage && (
+          <TouchableOpacity style={styles.msgBtn} onPress={onMessage}>
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={PALETTE.accent} />
+          </TouchableOpacity>
+        )}
+        <Ionicons name="chevron-forward" size={18} color="#8EA1B5" />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: PALETTE.background },
+
+  loadingWrap: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: PALETTE.background,
+  },
+  loadingText: {
+    marginTop: 10,
+    color: PALETTE.muted,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  topActionsRow: {
     position: "absolute",
-    top: 20,
     left: 12,
     right: 12,
-    height: 40,
-    zIndex: 100,
+    height: 44,
+    zIndex: 150,
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
   },
   topIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    justifyContent: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.28)",
     alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.24)",
   },
-  smallName: { color: "#fff", fontSize: 18, fontWeight: "600" },
-  smallStatus: { color: "#e2e8f0", fontSize: 12 },
-  topTitleStack: { alignItems: "center", justifyContent: "center" },
+
+  compactCenter: {
+    position: "absolute",
+    left: 56,
+    right: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  compactAvatar: {
+    width: MINI_AVATAR,
+    height: MINI_AVATAR,
+    borderRadius: 9,
+    marginRight: 8,
+    borderWidth: 1.5,
+    borderColor: "#fff",
+  },
+  compactName: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+    maxWidth: 160,
+  },
+  compactSub: {
+    color: "#DBEAFE",
+    fontSize: 11,
+    marginTop: 1,
+  },
 
   header: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: TG_BLUE,
-    alignItems: "center",
+    backgroundColor: PALETTE.accent,
     zIndex: 10,
     overflow: "hidden",
   },
-  statusBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    backgroundColor: "#ffffff",
-    borderColor: "rgba(100,116,139,0.35)",
-  },
-  statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    marginRight: 5,
-    backgroundColor: "#94a3b8",
-  },
-  statusText: { fontSize: 13, fontWeight: "700", color: "#475569" },
-  bgProfileImage: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  headerBgImage: {
+    ...StyleSheet.absoluteFillObject,
     width: "100%",
     height: "100%",
   },
-  heroOverlayBare: {
-    position: "absolute",
-    left: 20,
-    right: 20,
-    bottom: 10,
-    alignItems: "flex-start",
+  headerBgOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(8, 24, 46, 0.42)",
   },
-  heroName: {
-    color: "#fff",
-    fontSize: 24,
-    fontWeight: "800",
-    letterSpacing: 0.25,
-  },
-  avatar: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
-    borderWidth: 3,
-    borderColor: "#fff",
-    marginTop: HEADER_MAX_HEIGHT / 2 - AVATAR_SIZE / 2,
-  },
-  nameOverlay: { color: "#fff", fontSize: 22, fontWeight: "700", marginTop: 8 },
-  usernameOverlay: { color: "#EAF4FF", fontSize: 14 },
 
-  section: {
-    marginHorizontal: 16,
-    marginBottom: 16,
+  heroWrap: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    bottom: 12,
+    flexDirection: "row",
+    alignItems: "flex-end",
+  },
+
+  photoCard: {
+    width: 124,
+    height: 148,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.95)",
     backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 12,
   },
-  sectionTitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
+  photoCardImage: {
+    width: "100%",
+    height: "100%",
+  },
 
-  infoRow: { flexDirection: "row", justifyContent: "space-between", paddingVertical: 6 },
-  infoLabel: { color: "#888", fontSize: 14 },
-  infoValue: { color: "#111", fontSize: 14 },
-  link: { color: TG_BLUE },
+  identitySide: {
+    flex: 1,
+    marginLeft: 12,
+    alignSelf: "flex-end",
+    justifyContent: "flex-end",
+  },
+  identityCard: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(15,23,42,0.34)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    minWidth: "76%",
+    maxWidth: "100%",
+  },
+  identityName: {
+    color: "#fff",
+    fontSize: 19,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+  identityUsername: {
+    color: "#DDEAFE",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 3,
+  },
+  identityRole: {
+    color: "#E2E8F0",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 8,
+  },
 
-  floatingMessageBtn: {
-    position: "absolute",
-    bottom: 100,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: TG_BLUE,
+  contentWrap: {
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+
+  quickActions: {
+    backgroundColor: PALETTE.card,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    shadowColor: "rgba(15,23,42,0.03)",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  quickActionItem: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-    zIndex: 100,
+  },
+  quickActionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: PALETTE.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 6,
+  },
+  quickActionLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#33506D",
   },
 
-  // Telegram Style Dropdown Menu
+  card: {
+    backgroundColor: PALETTE.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    padding: 14,
+    shadowColor: "rgba(15,23,42,0.03)",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  sectionIconWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: PALETTE.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EFF4FA",
+  },
+  infoLabel: {
+    color: PALETTE.muted,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  infoValue: {
+    color: PALETTE.text,
+    fontSize: 13,
+    fontWeight: "700",
+    maxWidth: "64%",
+    textAlign: "right",
+  },
+
+  childCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 6,
+    padding: 12,
+    backgroundColor: "#FAFCFF",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  childImage: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  childBody: { flex: 1, marginLeft: 12 },
+  childName: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: PALETTE.text,
+  },
+  childMeta: {
+    fontSize: 12.5,
+    color: PALETTE.muted,
+    marginTop: 2,
+  },
+
+  accountItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: PALETTE.border,
+  },
+  accountItemNoBorder: {
+    borderBottomWidth: 0,
+  },
+  accountIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  accountText: {
+    fontSize: 15,
+    marginLeft: 11,
+    flex: 1,
+    color: PALETTE.text,
+    fontWeight: "650",
+  },
+
+  msgBtn: {
+    marginRight: 10,
+    padding: 7,
+    borderRadius: 999,
+    backgroundColor: "#E0F2FE",
+  },
+
+  subjectRow: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    marginTop: 8,
+  },
+  subjectName: { fontSize: 14, color: PALETTE.text, fontWeight: "700" },
+  subjectMeta: { fontSize: 12.5, color: PALETTE.muted, marginTop: 3 },
+
+  schedulePreviewCard: {
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: "#F7FBFF",
+    borderWidth: 1,
+    borderColor: "#D8EAFE",
+  },
+  schedulePreviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  schedulePreviewIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  schedulePreviewTextWrap: {
+    flex: 1,
+  },
+  schedulePreviewEyebrow: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    color: PALETTE.accentDark,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  schedulePreviewTitle: {
+    marginTop: 5,
+    fontSize: 20,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  schedulePreviewSubtext: {
+    marginTop: 3,
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: PALETTE.muted,
+  },
+  schedulePreviewStatsRow: {
+    marginTop: 16,
+    flexDirection: "row",
+    gap: 8,
+  },
+  schedulePreviewStatPill: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E3EEF9",
+  },
+  schedulePreviewStatPillWide: {
+    flex: 1.25,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E3EEF9",
+  },
+  schedulePreviewStatValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  schedulePreviewStatLabel: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "700",
+    color: PALETTE.muted,
+  },
+  scheduleOpenButton: {
+    marginTop: 12,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "#0F172A",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  scheduleOpenButtonTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  scheduleOpenButtonSubtext: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#CBD5E1",
+  },
+  scheduleOpenButtonIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EAF5FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 12,
+  },
+
+  scheduleHeroCard: {
+    marginBottom: 14,
+    padding: 16,
+    borderRadius: 20,
+    backgroundColor: "#F4F9FF",
+    borderWidth: 1,
+    borderColor: "#D8EAFE",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  scheduleHeroTextWrap: {
+    flex: 1,
+  },
+  scheduleEyebrow: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: PALETTE.accentDark,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+  scheduleHeroTitle: {
+    marginTop: 6,
+    fontSize: 22,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  scheduleHeroSubtext: {
+    marginTop: 4,
+    fontSize: 12.5,
+    color: PALETTE.muted,
+    fontWeight: "600",
+  },
+  scheduleHeroCountPill: {
+    minWidth: 82,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 18,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#D8EAFE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scheduleHeroCountNumber: {
+    fontSize: 24,
+    fontWeight: "800",
+    color: PALETTE.accentDark,
+  },
+  scheduleHeroCountLabel: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: "700",
+    color: PALETTE.muted,
+    textTransform: "uppercase",
+  },
+
+  dayChipKicker: {
+    fontSize: 10.5,
+    color: PALETTE.muted,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+    marginBottom: 6,
+  },
+  dayChipKickerActive: {
+    color: PALETTE.accentDark,
+  },
+
+  dayChipRow: {
+    gap: 10,
+    paddingRight: 6,
+    paddingBottom: 8,
+  },
+  dayChip: {
+    minWidth: 122,
+    backgroundColor: "#FBFDFF",
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
+  },
+  dayChipActive: {
+    backgroundColor: "#EEF6FF",
+    borderColor: "#B6D9FB",
+    shadowColor: "#93C5FD",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    elevation: 2,
+  },
+  dayChipTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  dayChipTitleActive: {
+    color: PALETTE.accentDark,
+  },
+  dayChipSub: {
+    fontSize: 11,
+    color: PALETTE.muted,
+    marginTop: 3,
+    fontWeight: "600",
+  },
+  dayChipSubActive: {
+    color: PALETTE.accentDark,
+  },
+
+  scheduleInsightsRow: {
+    marginTop: 12,
+    marginBottom: 6,
+    flexDirection: "row",
+    gap: 8,
+  },
+  scheduleInsightCard: {
+    flex: 1,
+    minHeight: 64,
+    borderRadius: 16,
+    backgroundColor: "#F8FAFC",
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: "center",
+  },
+  scheduleInsightCardAccent: {
+    flex: 1.4,
+    backgroundColor: "#F2F8FF",
+    borderColor: "#D8EAFE",
+    gap: 5,
+  },
+  scheduleInsightValue: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  scheduleInsightLabel: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: "700",
+    color: PALETTE.muted,
+  },
+  scheduleInsightHint: {
+    fontSize: 11.5,
+    fontWeight: "700",
+    color: PALETTE.accentDark,
+    lineHeight: 16,
+  },
+
+  periodTimeline: {
+    marginTop: 8,
+  },
+  periodTimelineRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    minHeight: 96,
+  },
+  periodTimelineRowFree: {
+    opacity: 0.92,
+  },
+  periodTimelineRowLast: {
+    minHeight: 88,
+  },
+  periodRailWrap: {
+    width: 26,
+    alignItems: "center",
+  },
+  periodRailDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginTop: 22,
+    backgroundColor: PALETTE.accent,
+    borderWidth: 3,
+    borderColor: "#DCEEFF",
+  },
+  periodRailDotFree: {
+    backgroundColor: "#94A3B8",
+    borderColor: "#E2E8F0",
+  },
+  periodRailLine: {
+    flex: 1,
+    width: 2,
+    marginTop: 6,
+    marginBottom: -2,
+    backgroundColor: "#D7EAFE",
+    borderRadius: 999,
+  },
+  periodRailLineFree: {
+    backgroundColor: "#E2E8F0",
+  },
+
+  periodCard: {
+    flex: 1,
+    marginBottom: 12,
+    padding: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: "#FFFFFF",
+    shadowColor: "rgba(15,23,42,0.04)",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    elevation: 2,
+  },
+  periodCardFree: {
+    backgroundColor: "#F8FAFC",
+    shadowOpacity: 0.03,
+  },
+  periodTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 10,
+  },
+  periodLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: PALETTE.accentDark,
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+  },
+  subjectMiniChip: {
+    backgroundColor: "#DBEAFE",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  subjectMiniChipFree: {
+    backgroundColor: "#E2E8F0",
+  },
+  subjectMiniChipText: {
+    color: PALETTE.accentDark,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  subjectMiniChipTextFree: {
+    color: "#64748B",
+  },
+  periodSubject: {
+    marginTop: 6,
+    fontSize: 17,
+    color: PALETTE.text,
+    fontWeight: "800",
+    lineHeight: 22,
+  },
+  periodSubjectFree: {
+    color: "#64748B",
+  },
+  periodMetaRow: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  periodMetaPill: {
+    maxWidth: "100%",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#F3F8FD",
+  },
+  periodTeacher: {
+    fontSize: 12.5,
+    color: PALETTE.muted,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+
+  scheduleEmptyState: {
+    marginTop: 10,
+    paddingVertical: 18,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: "#F8FAFC",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  emptyText: {
+    fontSize: 13,
+    color: PALETTE.muted,
+    fontWeight: "600",
+    flex: 1,
+  },
+
   dropdownMenu: {
     position: "absolute",
-    top: 28,
-    right: 8,
-    backgroundColor: "#fff",
-    borderRadius: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 8,
-    zIndex: 1000,
-    minWidth: 180,
+    right: 10,
+    backgroundColor: PALETTE.card,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
+    borderColor: PALETTE.border,
+    zIndex: 1000,
+    minWidth: 190,
+    overflow: "hidden",
   },
   menuOverlay: {
     position: "absolute",
@@ -966,52 +1723,67 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-    backgroundColor: "#fff",
-    flexDirection: "row",
-    alignItems: "center",
+    borderBottomColor: "#F1F5F9",
   },
+  menuItemNoBorder: { borderBottomWidth: 0 },
   menuText: {
-    fontSize: 16,
-    color: "#000",
-    fontWeight: "400",
+    fontSize: 15,
+    color: PALETTE.text,
+    fontWeight: "600",
   },
-  logoutText: {
-    color: "#ff3b30",
-    fontWeight: "500",
+
+  sheetOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(15, 23, 42, 0.38)",
   },
-  // Children card styles (match profile.jsx aesthetics)
-  childCard: {
+  sheetBackdrop: {
+    flex: 1,
+  },
+  sheetContainer: {
+    maxHeight: "84%",
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 10,
+    paddingHorizontal: 14,
+  },
+  sheetHandle: {
+    alignSelf: "center",
+    width: 52,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "#D6E2EE",
+    marginBottom: 12,
+  },
+  sheetHeader: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 8,
-    padding: 12,
-    backgroundColor: "#f8fafc",
-    borderRadius: 12,
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  sheetSubtitle: {
+    marginTop: 3,
+    fontSize: 12.5,
+    fontWeight: "600",
+    color: PALETTE.muted,
+  },
+  sheetCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#F8FAFC",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    shadowColor: "rgba(15, 23, 42, 0.08)",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 3,
+    borderColor: PALETTE.border,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  childImage: { width: 50, height: 50, borderRadius: 25, borderWidth: 1, borderColor: "#e5e7eb" },
-  childName: { fontSize: 16, fontWeight: "700", color: "#0f172a" },
-  childDetails: { fontSize: 13, color: "#6b7280", marginTop: 2 },
-  messageBtn: {
-    marginRight: 10,
-    padding: 6,
-    borderRadius: 999,
-    backgroundColor: "#e0f2fe",
+  sheetScrollContent: {
+    paddingBottom: 8,
   },
-  badgeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  badgePill: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "rgba(148, 163, 184, 0.4)",
-  },
-  badgeText: { fontSize: 13, fontWeight: "700", color: "#0f172a" },
 });
