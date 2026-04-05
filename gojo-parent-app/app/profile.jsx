@@ -26,13 +26,12 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
+import { getLinkedChildrenForParent } from "./lib/parentChildren";
 
 const { width } = Dimensions.get("window");
 
 const HEADER_MAX_HEIGHT = Math.max(220, Math.min(280, width * 0.68));
 const HEADER_MIN_HEIGHT = 58;
-const MINI_AVATAR = 34;
-
 const PALETTE = {
   background: "#ffffff",
   card: "#FFFFFF",
@@ -57,12 +56,14 @@ export default function ParentProfile() {
 
   const [schoolKey, setSchoolKey] = useState(null);
   const [parentNodeId, setParentNodeId] = useState(null);
+  const [bootstrapped, setBootstrapped] = useState(false);
 
   const [parentUser, setParentUser] = useState(null);
   const [children, setChildren] = useState([]);
   const [showMenu, setShowMenu] = useState(false);
   const [online, setOnline] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [profileSectionTab, setProfileSectionTab] = useState("main");
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -90,29 +91,38 @@ export default function ParentProfile() {
       ]);
       setParentNodeId(pid || null);
       setSchoolKey(sk || null);
+      setBootstrapped(true);
     })();
   }, []);
 
   useEffect(() => {
-    if (!parentNodeId) return;
+    if (!bootstrapped) return;
+    if (!parentNodeId) {
+      setLoading(false);
+      return;
+    }
 
     const loadParentData = async () => {
       setLoading(true);
       try {
-        const [parentsSnap, studentsSnap, usersSnap] = await Promise.all([
-          get(ref(database, schoolAwarePath("Parents"))),
-          get(ref(database, schoolAwarePath("Students"))),
-          get(ref(database, schoolAwarePath("Users"))),
+        const prefix = schoolKey ? `Platform1/Schools/${schoolKey}/` : "";
+        const parentSnap = await get(ref(database, `${prefix}Parents/${parentNodeId}`));
+        if (!parentSnap.exists()) {
+          setParentUser(null);
+          setChildren([]);
+          return;
+        }
+
+        const parentNode = parentSnap.val() || {};
+
+        const [userSnap, linkedChildren] = await Promise.all([
+          parentNode.userId
+            ? get(ref(database, `${prefix}Users/${parentNode.userId}`))
+            : Promise.resolve(null),
+          getLinkedChildrenForParent(prefix, parentNodeId),
         ]);
 
-        const parentsData = parentsSnap.val() || {};
-        const studentsData = studentsSnap.val() || {};
-        const usersData = usersSnap.val() || {};
-
-        const parentNode = parentsData[parentNodeId];
-        if (!parentNode) return;
-
-        const userData = usersData[parentNode.userId] || {};
+        const userData = userSnap?.exists() ? userSnap.val() || {} : {};
         setParentUser({
           ...userData,
           userId: parentNode.userId,
@@ -120,21 +130,12 @@ export default function ParentProfile() {
           createdAt: parentNode.createdAt,
         });
 
-        const childrenArray = parentNode.children
-          ? Object.values(parentNode.children).map((childLink) => {
-              const student = studentsData[childLink.studentId];
-              const studentUser = usersData[student?.userId] || {};
-              return {
-                ...childLink,
-                name: studentUser.name || "Student",
-                profileImage: studentUser.profileImage || defaultProfile,
-                grade: student?.grade || "--",
-                section: student?.section || "--",
-              };
-            })
-          : [];
-
-        setChildren(childrenArray);
+        setChildren(
+          (linkedChildren || []).map((child) => ({
+            ...child,
+            profileImage: child.profileImage || defaultProfile,
+          }))
+        );
       } catch (error) {
         console.log("Error fetching parent profile:", error);
       } finally {
@@ -143,7 +144,7 @@ export default function ParentProfile() {
     };
 
     loadParentData();
-  }, [parentNodeId, schoolAwarePath]);
+  }, [bootstrapped, defaultProfile, parentNodeId, schoolKey]);
 
   useEffect(() => {
     let listener;
@@ -160,6 +161,10 @@ export default function ParentProfile() {
   }, []);
 
   const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
     router.replace("/dashboard/home");
   }, [router]);
 
@@ -332,7 +337,7 @@ export default function ParentProfile() {
     setConfirmPasswordError("");
   };
 
-  if (loading || !parentUser) {
+  if (loading) {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator size="large" color={PALETTE.accent} />
@@ -341,61 +346,29 @@ export default function ParentProfile() {
     );
   }
 
+  if (!parentUser) {
+    return (
+      <View style={styles.loadingWrap}>
+        <Ionicons name="person-circle-outline" size={56} color={PALETTE.offline} />
+        <Text style={styles.loadingTitle}>Profile unavailable</Text>
+        <Text style={styles.loadingText}>We could not load this parent profile.</Text>
+        <TouchableOpacity style={styles.emptyBackBtn} onPress={handleBack} activeOpacity={0.88}>
+          <Text style={styles.emptyBackText}>Back to dashboard</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   const isOnline = online !== null ? online : String(parentUser.status || "").toLowerCase() === "online";
-
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
-    outputRange: [HEADER_MAX_HEIGHT + insets.top, HEADER_MIN_HEIGHT + insets.top],
-    extrapolate: "clamp",
-  });
-
-  const compactBarOpacity = scrollY.interpolate({
-    inputRange: [0, 65, 125],
-    outputRange: [0, 0.25, 1],
-    extrapolate: "clamp",
-  });
-
-  const heroTranslateY = scrollY.interpolate({
-    inputRange: [0, 120],
-    outputRange: [0, -16],
-    extrapolate: "clamp",
-  });
-
-  const heroScale = scrollY.interpolate({
-    inputRange: [0, 120],
-    outputRange: [1, 0.96],
-    extrapolate: "clamp",
-  });
-
-  const heroOpacity = scrollY.interpolate({
-    inputRange: [0, 110, 180],
-    outputRange: [1, 0.7, 0],
-    extrapolate: "clamp",
-  });
+  const usernameHandle = parentUser.username
+    ? String(parentUser.username).startsWith("@")
+      ? String(parentUser.username)
+      : `@${parentUser.username}`
+    : "@parent";
 
   return (
     <View style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-
-      <View style={[styles.topActionsRow, { top: insets.top + 8 }]}>
-        <TouchableOpacity style={styles.topIcon} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={21} color="#fff" />
-        </TouchableOpacity>
-
-        <Animated.View style={[styles.compactCenter, { opacity: compactBarOpacity }]}>
-          <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.compactAvatar} />
-          <View>
-            <Text style={styles.compactName} numberOfLines={1}>
-              {parentUser.name}
-            </Text>
-            <Text style={styles.compactSub}>{isOnline ? "Online" : "Offline"}</Text>
-          </View>
-        </Animated.View>
-
-        <TouchableOpacity style={styles.topIcon} onPress={() => setShowMenu((v) => !v)}>
-          <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
-        </TouchableOpacity>
-      </View>
+      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
 
       {showMenu && (
         <>
@@ -420,160 +393,221 @@ export default function ParentProfile() {
         </>
       )}
 
-      <Animated.ScrollView
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
-          useNativeDriver: false,
-        })}
+      <ScrollView
         contentContainerStyle={{
-          paddingTop: HEADER_MAX_HEIGHT + insets.top + 14,
-          paddingBottom: Math.max(24, insets.bottom + 8),
+          paddingBottom: Math.max(28, insets.bottom + 16),
         }}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.contentWrap}>
-          <View style={styles.quickActions}>
-            <QuickAction icon="camera-outline" label="Photo" onPress={handleImagePicker} />
-            <QuickAction icon="create-outline" label="Edit" onPress={handleEditInfo} />
-            <QuickAction icon="shield-checkmark-outline" label="Privacy" onPress={handleTerms} />
-          </View>
+          <View style={styles.heroCard}>
+            <View style={[styles.heroBanner, { height: 110 + insets.top }]}> 
+              <View style={styles.heroBannerFallback}>
+                <View style={styles.heroBannerOrbPrimary} />
+                <View style={styles.heroBannerOrbSecondary} />
+              </View>
+              <View style={styles.heroBannerOverlay} />
 
-          <View style={styles.card}>
-            <SectionHeader title="Info" icon="person-circle-outline" />
-            <InfoRow label="Name" value={parentUser.name} />
-            <InfoRow label="Username" value={parentUser.username} />
-            <InfoRow label="Phone" value={parentUser.phone} />
-            <InfoRow label="Email" value={parentUser.email} />
-          </View>
-
-          {children.length > 0 && (
-            <View style={styles.card}>
-              <SectionHeader title="Children" icon="people-outline" />
-              {children.map((child) => (
-                <TouchableOpacity
-                  key={child.studentId}
-                  style={styles.childCard}
-                  onPress={() => handleChildPress(child)}
-                  activeOpacity={0.88}
-                >
-                  <Image source={{ uri: child.profileImage }} style={styles.childImage} />
-                  <View style={styles.childBody}>
-                    <Text style={styles.childName}>{child.name}</Text>
-                    <Text style={styles.childMeta}>
-                      Grade {child.grade} • Section {child.section}
-                    </Text>
-                    <Text style={styles.childMeta}>Relation: {child.relationship}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color="#8EA1B5" />
+              <View style={[styles.heroTopBar, { top: insets.top + 6 }]}> 
+                <TouchableOpacity style={styles.heroTopIconBtn} onPress={handleBack}>
+                  <Ionicons name="chevron-back" size={20} color={PALETTE.white} />
                 </TouchableOpacity>
-              ))}
+
+                <View style={styles.heroTopActions}>
+                  <View style={styles.heroQuickStats}>
+                    <MiniPill
+                      icon="people-outline"
+                      text={`${children.length} ${children.length === 1 ? "Child" : "Children"}`}
+                    />
+                  </View>
+
+                  <TouchableOpacity style={styles.heroTopIconBtn} onPress={() => setShowMenu((v) => !v)}>
+                    <Ionicons name="ellipsis-horizontal" size={18} color={PALETTE.white} />
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-          )}
 
-          <View style={styles.card}>
-            <SectionHeader title="Account" icon="settings-outline" />
-
-            <TouchableOpacity style={styles.accountItem} onPress={() => setShowPasswordModal(true)}>
-              <View style={[styles.accountIconWrap, { backgroundColor: "#E9F5FF" }]}>
-                <Ionicons name="key-outline" size={18} color={PALETTE.accentDark} />
+            <View style={styles.heroAvatarSlot}>
+              <View style={styles.avatarWrap}>
+                <View style={styles.photoCard}>
+                  <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.photoCardImage} />
+                  <TouchableOpacity style={styles.photoCardCamera} onPress={handleImagePicker} activeOpacity={0.9}>
+                    <Ionicons name="camera" size={16} color="#fff" />
+                  </TouchableOpacity>
+                </View>
               </View>
-              <Text style={styles.accountText}>Change Password</Text>
-              <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-            </TouchableOpacity>
+            </View>
 
-            <TouchableOpacity style={styles.accountItem} onPress={handleEditInfo}>
-              <View style={[styles.accountIconWrap, { backgroundColor: "#ECFDF3" }]}>
-                <Ionicons name="person-outline" size={18} color="#059669" />
+            <View style={styles.heroIdentityBlock}>
+              <View style={styles.identityTopRow}>
+                <Text style={styles.name} numberOfLines={1}>
+                  {parentUser.name || "Parent"}
+                </Text>
               </View>
-              <Text style={styles.accountText}>Update Profile Info</Text>
-              <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-            </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.accountItem, styles.accountItemNoBorder]} onPress={handleTerms}>
-              <View style={[styles.accountIconWrap, { backgroundColor: "#F1F5FF" }]}>
-                <Ionicons name="document-text-outline" size={18} color="#4F46E5" />
-              </View>
-              <Text style={styles.accountText}>Terms & Privacy</Text>
-              <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.card}>
-            <SectionHeader title="Contact Developer" icon="chatbubble-ellipses-outline" />
-
-            <TouchableOpacity style={styles.accountItem} onPress={() => Linking.openURL("https://t.me/gojo_edu")}>
-              <View style={[styles.accountIconWrap, { backgroundColor: "#EAF7FF" }]}>
-                <Ionicons name="paper-plane" size={18} color="#2AABEE" />
-              </View>
-              <Text style={styles.accountText}>Telegram</Text>
-              <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.accountItem}
-              onPress={() => Linking.openURL("mailto:gojo.education1@gmail.com")}
-            >
-              <View style={[styles.accountIconWrap, { backgroundColor: "#FFF1F1" }]}>
-                <Ionicons name="mail-outline" size={18} color="#EA4335" />
-              </View>
-              <Text style={styles.accountText}>Email</Text>
-              <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.accountItem, styles.accountItemNoBorder]}
-              onPress={() => Linking.openURL("https://t.me/gojo_edu")}
-            >
-              <View style={[styles.accountIconWrap, { backgroundColor: "#EEF5FF" }]}>
-                <Ionicons name="logo-linkedin" size={18} color="#0077B5" />
-              </View>
-              <Text style={styles.accountText}>LinkedIn</Text>
-              <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Animated.ScrollView>
-
-      <Animated.View style={[styles.header, { height: headerHeight }]}>
-        <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.headerBgImage} />
-        <View style={styles.headerBgOverlay} />
-
-        <Animated.View
-          style={[
-            styles.heroWrap,
-            {
-              transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
-              opacity: heroOpacity,
-            },
-          ]}
-        >
-          <View style={styles.photoCard}>
-            <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.photoCardImage} />
-            <TouchableOpacity style={styles.photoCardCamera} onPress={handleImagePicker} activeOpacity={0.9}>
-              <Ionicons name="camera" size={16} color="#fff" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.identitySide}>
-            <View style={styles.identityCard}>
-              <Text style={styles.identityName} numberOfLines={1}>
-                {parentUser.name}
-              </Text>
-              {!!parentUser.username && <Text style={styles.identityUsername}>@{parentUser.username}</Text>}
-
-              {/* <View style={styles.identityMetaRow}>
-                <View
-                  style={[
-                    styles.onlineDot,
-                    { backgroundColor: isOnline ? PALETTE.success : PALETTE.offline },
-                  ]}
+              <View style={styles.subRow}>
+                <Text style={styles.subText}>{usernameHandle}</Text>
+                <MiniPill icon="person-outline" text="Parent" compact />
+                <MiniPill
+                  icon={isOnline ? "wifi-outline" : "cloud-offline-outline"}
+                  text={isOnline ? "Online" : "Offline"}
+                  compact
                 />
-                <Text style={styles.identityMetaText}>{isOnline ? "Online" : "Offline"}</Text>
-              </View> */}
+              </View>
+
+              <TouchableOpacity style={styles.editProfileBtn} onPress={handleEditInfo} activeOpacity={0.88}>
+                <Text style={styles.editProfileText}>Edit Profile</Text>
+              </TouchableOpacity>
+
+              <View style={styles.profileFilterRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.profileFilterBtn,
+                    profileSectionTab === "main" && styles.profileFilterBtnActive,
+                  ]}
+                  onPress={() => setProfileSectionTab("main")}
+                  activeOpacity={0.85}
+                >
+                  <Text
+                    style={[
+                      styles.profileFilterText,
+                      profileSectionTab === "main" && styles.profileFilterTextActive,
+                    ]}
+                  >
+                    Main
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.profileFilterBtn,
+                    profileSectionTab === "family" && styles.profileFilterBtnActive,
+                  ]}
+                  onPress={() => setProfileSectionTab("family")}
+                  activeOpacity={0.85}
+                >
+                  <Text
+                    style={[
+                      styles.profileFilterText,
+                      profileSectionTab === "family" && styles.profileFilterTextActive,
+                    ]}
+                  >
+                    Family
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </Animated.View>
-      </Animated.View>
+
+          {profileSectionTab === "main" ? (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Parent tools</Text>
+                <ActionRow
+                  icon="create-outline"
+                  title="Edit profile info"
+                  subtitle="Update your name, phone, or email"
+                  onPress={handleEditInfo}
+                />
+                <ActionRow
+                  icon="camera-outline"
+                  title="Change profile photo"
+                  subtitle="Upload a fresh profile picture"
+                  onPress={handleImagePicker}
+                />
+                <ActionRow
+                  icon="download-outline"
+                  title="Save current photo"
+                  subtitle="Download your profile image to the gallery"
+                  onPress={handleSaveProfilePhoto}
+                />
+                <ActionRow
+                  icon="key-outline"
+                  title="Change password"
+                  subtitle="Update your account password"
+                  onPress={() => setShowPasswordModal(true)}
+                />
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Profile info</Text>
+                <InfoRow label="Name" value={parentUser.name} />
+                <InfoRow label="Username" value={parentUser.username ? usernameHandle : null} />
+                <InfoRow label="Role" value="Parent" />
+                <InfoRow label="Status" value={isOnline ? "Online" : "Offline"} />
+                <InfoRow label="Children" value={`${children.length}`} />
+                <InfoRow label="Phone" value={parentUser.phone} />
+                <InfoRow label="Email" value={parentUser.email} />
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Account</Text>
+                <ActionRow
+                  icon="shield-checkmark-outline"
+                  title="Terms & Privacy"
+                  subtitle="Read the current privacy and usage policy"
+                  onPress={handleTerms}
+                />
+                <ActionRow
+                  icon="log-out-outline"
+                  title="Logout"
+                  subtitle="Sign out from this parent account"
+                  onPress={handleLogout}
+                  destructive
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Children</Text>
+                {children.length ? (
+                  children.map((child) => (
+                    <TouchableOpacity
+                      key={child.studentId}
+                      style={styles.childCard}
+                      onPress={() => handleChildPress(child)}
+                      activeOpacity={0.88}
+                    >
+                      <Image source={{ uri: child.profileImage }} style={styles.childImage} />
+                      <View style={styles.childBody}>
+                        <Text style={styles.childName}>{child.name}</Text>
+                        <Text style={styles.childMeta}>
+                          Grade {child.grade} • Section {child.section}
+                        </Text>
+                        <Text style={styles.childMeta}>Relation: {child.relationship}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={18} color="#8EA1B5" />
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={styles.noteStateCard}>
+                    <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
+                    <Text style={styles.noteStateText}>No linked children found yet.</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Support</Text>
+                <ActionRow
+                  icon="paper-plane-outline"
+                  title="Telegram"
+                  subtitle="Chat with the Gojo team on Telegram"
+                  onPress={() => Linking.openURL("https://t.me/gojo_edu")}
+                />
+                <ActionRow
+                  icon="mail-outline"
+                  title="Email"
+                  subtitle="Send us a message by email"
+                  onPress={() => Linking.openURL("mailto:gojo.education1@gmail.com")}
+                />
+              </View>
+            </>
+          )}
+        </View>
+      </ScrollView>
 
       <Modal visible={showPasswordModal} transparent animationType="slide" onRequestClose={handleClosePasswordModal}>
         <View style={styles.modalOverlay}>
@@ -679,6 +713,39 @@ function QuickAction({ icon, label, onPress }) {
   );
 }
 
+function MiniPill({ icon, text, compact = false }) {
+  return (
+    <View style={[styles.miniPill, compact && styles.miniPillCompact]}>
+      <Ionicons name={icon} size={compact ? 10 : 13} color={compact ? PALETTE.accent : "#F8FAFC"} />
+      <Text style={[styles.miniPillText, compact && styles.miniPillTextCompact]}>{text}</Text>
+    </View>
+  );
+}
+
+function ActionRow({ icon, title, subtitle, onPress, destructive = false }) {
+  return (
+    <TouchableOpacity style={styles.actionRow} onPress={onPress} activeOpacity={0.8}>
+      <View
+        style={[
+          styles.iconWrap,
+          destructive ? styles.iconWrapDanger : null,
+        ]}
+      >
+        <Ionicons
+          name={icon}
+          size={18}
+          color={destructive ? PALETTE.danger : PALETTE.accent}
+        />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.actionTitle, destructive ? styles.actionTitleDanger : null]}>{title}</Text>
+        <Text numberOfLines={1} style={styles.actionSub}>{subtitle}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
+    </TouchableOpacity>
+  );
+}
+
 function InfoRow({ label, value }) {
   if (!value) return null;
   return (
@@ -721,54 +788,229 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
+  loadingTitle: {
+    marginTop: 12,
+    color: PALETTE.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  emptyBackBtn: {
+    marginTop: 18,
+    backgroundColor: PALETTE.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  emptyBackText: {
+    color: PALETTE.white,
+    fontSize: 13,
+    fontWeight: "700",
+  },
 
-  topActionsRow: {
+  heroCard: {
+    marginHorizontal: -14,
+    backgroundColor: PALETTE.card,
+    marginBottom: 12,
+    overflow: "hidden",
+  },
+  heroBanner: {
+    backgroundColor: PALETTE.white,
+    position: "relative",
+    overflow: "hidden",
+  },
+  heroBannerFallback: {
+    flex: 1,
+    backgroundColor: PALETTE.white,
+    overflow: "hidden",
+  },
+  heroBannerOrbPrimary: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(34,150,243,0.08)",
+    top: -40,
+    right: -20,
+  },
+  heroBannerOrbSecondary: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: "rgba(34,150,243,0.04)",
+    bottom: -60,
+    left: -20,
+  },
+  heroBannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+  },
+  heroTopBar: {
     position: "absolute",
     left: 12,
     right: 12,
-    height: 44,
+    zIndex: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  heroTopActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroTopIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(15,23,42,0.38)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+  },
+  heroQuickStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  miniPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "rgba(15,23,42,0.55)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
+  miniPillCompact: {
+    backgroundColor: PALETTE.accentSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderColor: PALETTE.border,
+  },
+  miniPillText: {
+    marginLeft: 5,
+    color: "#F8FAFC",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  miniPillTextCompact: {
+    marginLeft: 3,
+    fontSize: 9,
+    color: PALETTE.accent,
+  },
+  heroAvatarSlot: {
+    paddingHorizontal: 18,
+    marginTop: -44,
+  },
+  avatarWrap: {
+    position: "relative",
+    alignSelf: "flex-start",
+  },
+  heroIdentityBlock: {
+    marginTop: -6,
+    marginHorizontal: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    paddingBottom: 14,
+  },
+  identityTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  name: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  subRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  subText: {
+    fontSize: 11,
+    color: PALETTE.muted,
+    fontWeight: "600",
+    marginRight: 2,
+  },
+  editProfileBtn: {
+    marginTop: 10,
+    width: "100%",
+    backgroundColor: "#5865F2",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editProfileText: {
+    color: PALETTE.white,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  profileFilterRow: {
+    flexDirection: "row",
+    backgroundColor: "#F8FBFF",
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 12,
+    padding: 4,
+    marginTop: 10,
+  },
+  profileFilterBtn: {
+    flex: 1,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileFilterBtnActive: {
+    backgroundColor: PALETTE.card,
+    borderWidth: 1,
+    borderColor: PALETTE.accent,
+  },
+  profileFilterText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: PALETTE.muted,
+  },
+  profileFilterTextActive: {
+    color: PALETTE.text,
+  },
+
+  topActionsRow: {
+    position: "absolute",
+    left: 16,
+    right: 16,
+    height: 40,
     zIndex: 150,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   topIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(15, 23, 42, 0.28)",
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
+    borderColor: PALETTE.border,
+    shadowColor: "#BED3EE",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
-
-  compactCenter: {
-    position: "absolute",
-    left: 56,
-    right: 56,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  compactAvatar: {
-    width: MINI_AVATAR,
-    height: MINI_AVATAR,
-    borderRadius: 9,
-    marginRight: 8,
-    borderWidth: 1.5,
-    borderColor: "#fff",
-  },
-  compactName: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "700",
-    maxWidth: 160,
-  },
-  compactSub: {
-    color: "#DBEAFE",
-    fontSize: 11,
-    marginTop: 1,
+  topActionSpacer: {
+    flex: 1,
   },
 
   header: {
@@ -776,37 +1018,67 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: PALETTE.accent,
+    backgroundColor: PALETTE.white,
     zIndex: 10,
     overflow: "hidden",
+    borderBottomLeftRadius: 28,
+    borderBottomRightRadius: 28,
+    borderBottomWidth: 1,
+    borderColor: "#E7EEFF",
   },
-  headerBgImage: {
+  headerBgFallback: {
     ...StyleSheet.absoluteFillObject,
-    width: "100%",
-    height: "100%",
+    backgroundColor: "#FFFFFF",
   },
-  headerBgOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(8, 24, 46, 0.42)",
+  headerOrbPrimary: {
+    position: "absolute",
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: "rgba(34,150,243,0.08)",
+    top: -72,
+    right: -36,
+  },
+  headerOrbSecondary: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(34,150,243,0.05)",
+    bottom: -72,
+    left: -30,
+  },
+  headerAccentStrip: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 116,
+    backgroundColor: "#F6FAFF",
   },
 
   heroWrap: {
     position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 12,
-    flexDirection: "row",
-    alignItems: "flex-end",
+    left: 18,
+    right: 18,
+    bottom: 18,
+    flexDirection: "column",
+    alignItems: "flex-start",
   },
 
   photoCard: {
-    width: 124,
-    height: 148,
-    borderRadius: 20,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.95)",
+    borderWidth: 4,
+    borderColor: "#FFFFFF",
     backgroundColor: "#fff",
+    shadowColor: "#BED3EE",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 4,
   },
   photoCardImage: {
     width: "100%",
@@ -814,61 +1086,96 @@ const styles = StyleSheet.create({
   },
   photoCardCamera: {
     position: "absolute",
-    right: 8,
-    bottom: 8,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "rgba(11,114,199,0.95)",
+    right: 2,
+    bottom: 2,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: PALETTE.accent,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: "#fff",
   },
 
   identitySide: {
-    flex: 1,
-    marginLeft: 12,
-    alignSelf: "flex-end",
-    justifyContent: "flex-end",
+    width: "100%",
+    marginTop: 12,
   },
   identityCard: {
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(15,23,42,0.34)",
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    minWidth: "76%",
-    maxWidth: "100%",
+    width: "100%",
+    backgroundColor: "transparent",
+    paddingVertical: 0,
+    paddingHorizontal: 0,
   },
   identityName: {
-    color: "#fff",
-    fontSize: 19,
+    color: PALETTE.text,
+    fontSize: 22,
     fontWeight: "800",
     letterSpacing: 0.2,
   },
   identityUsername: {
-    color: "#DDEAFE",
+    color: PALETTE.muted,
     fontSize: 13,
     fontWeight: "600",
-    marginTop: 3,
+    marginTop: 4,
   },
   identityMetaRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 9,
+    flexWrap: "wrap",
+    marginTop: 10,
+    gap: 8,
   },
-  onlineDot: {
+  metaPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: PALETTE.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  metaPillOnline: {
+    backgroundColor: "#ECFDF3",
+    borderColor: "#CFF7E0",
+  },
+  metaPillOffline: {
+    backgroundColor: "#F8FAFC",
+  },
+  metaDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
     marginRight: 6,
   },
-  identityMetaText: {
-    color: "#E2E8F0",
-    fontSize: 12,
+  metaPillText: {
+    marginLeft: 6,
+    color: PALETTE.accentDark,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  metaPillTextOnline: {
+    color: "#0F766E",
+  },
+  metaPillTextOffline: {
+    color: PALETTE.muted,
+  },
+  heroEditBtn: {
+    marginTop: 12,
+    width: "100%",
+    backgroundColor: PALETTE.accent,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  heroEditText: {
+    color: PALETTE.white,
+    fontSize: 13,
     fontWeight: "700",
   },
 
@@ -878,29 +1185,35 @@ const styles = StyleSheet.create({
   },
 
   quickActions: {
-    backgroundColor: PALETTE.card,
+    backgroundColor: "#FCFEFF",
     borderWidth: 1,
-    borderColor: PALETTE.border,
-    borderRadius: 18,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
+    borderColor: "#E7EEFF",
+    borderRadius: 20,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     flexDirection: "row",
     justifyContent: "space-between",
-    shadowColor: "rgba(15,23,42,0.03)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 2,
+    gap: 8,
+    shadowColor: "#BED3EE",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 3,
   },
   quickActionItem: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#F7FAFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E7EEFF",
+    paddingVertical: 10,
   },
   quickActionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
@@ -917,12 +1230,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    padding: 14,
-    shadowColor: "rgba(15,23,42,0.03)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
 
   sectionHeader: {
@@ -931,9 +1240,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   sectionIconWrap: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
@@ -943,13 +1252,51 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
     color: PALETTE.text,
+    marginBottom: 10,
+  },
+
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 16,
+    backgroundColor: PALETTE.card,
+    marginBottom: 10,
+  },
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: PALETTE.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  iconWrapDanger: {
+    backgroundColor: "#FEECEC",
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: PALETTE.text,
+  },
+  actionTitleDanger: {
+    color: PALETTE.danger,
+  },
+  actionSub: {
+    fontSize: 12,
+    color: PALETTE.muted,
+    marginTop: 2,
   },
 
   infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: "#EFF4FA",
   },
@@ -969,17 +1316,22 @@ const styles = StyleSheet.create({
   childCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 6,
-    padding: 12,
-    backgroundColor: "#FAFCFF",
-    borderRadius: 14,
+    marginTop: 6,
+    padding: 13,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: PALETTE.border,
+    borderColor: "#EAF0F8",
+    shadowColor: "#D9E7F6",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 2,
   },
   childImage: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
@@ -999,11 +1351,15 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: PALETTE.border,
+    paddingHorizontal: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#EAF0F8",
+    marginBottom: 10,
   },
   accountItemNoBorder: {
-    borderBottomWidth: 0,
+    marginBottom: 0,
   },
   accountIconWrap: {
     width: 34,
@@ -1018,6 +1374,24 @@ const styles = StyleSheet.create({
     flex: 1,
     color: PALETTE.text,
     fontWeight: "650",
+  },
+
+  noteStateCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: "#F8FBFF",
+    paddingVertical: 18,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  noteStateText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: PALETTE.muted,
+    fontWeight: "600",
   },
 
   dropdownMenu: {

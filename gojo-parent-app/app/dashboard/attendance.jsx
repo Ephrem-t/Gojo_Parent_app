@@ -16,16 +16,19 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get } from "firebase/database";
 import { Ionicons } from "@expo/vector-icons";
 import moment from "moment";
+import Svg, { Circle } from "react-native-svg";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
+import { getLinkedChildrenForParent } from "../lib/parentChildren";
 
-const PRIMARY = "#2563EB";
-const PRIMARY_DARK = "#1D4ED8";
-const PRIMARY_SOFT = "#EFF6FF";
+const PRIMARY = "#1E90FF";
+const PRIMARY_DARK = "#1E90FF";
+const PRIMARY_SOFT = "#EEF4FF";
 const BG = "#FFFFFF";
 const CARD = "#FFFFFF";
 const TEXT = "#0F172A";
 const MUTED = "#64748B";
-const BORDER = "#E2E8F0";
+const BORDER = "#E5EAF2";
 
 const PRESENT = "#2563EB";
 const LATE = "#F59E0B";
@@ -33,6 +36,10 @@ const ABSENT = "#94A3B8";
 
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "attendance_cache_v6";
+const RING_SIZE = 68;
+const RING_STROKE = 6;
+const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 const getPathPrefix = async () => {
   const sk = (await AsyncStorage.getItem("schoolKey")) || null;
@@ -73,11 +80,56 @@ const percentColor = (p) => {
   return ABSENT;
 };
 
+const ProgressRing = ({ percent, color, label }) => {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const dashOffset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * safePercent) / 100;
+
+  return (
+    <View style={styles.ringWrap}>
+      <Svg width={RING_SIZE} height={RING_SIZE} style={styles.ringSvg}>
+        <Circle
+          cx={RING_SIZE / 2}
+          cy={RING_SIZE / 2}
+          r={RING_RADIUS}
+          stroke="#E2E8F0"
+          strokeWidth={RING_STROKE}
+          fill="none"
+        />
+        <Circle
+          cx={RING_SIZE / 2}
+          cy={RING_SIZE / 2}
+          r={RING_RADIUS}
+          stroke={color}
+          strokeWidth={RING_STROKE}
+          fill="none"
+          strokeDasharray={`${RING_CIRCUMFERENCE} ${RING_CIRCUMFERENCE}`}
+          strokeDashoffset={dashOffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${RING_SIZE / 2} ${RING_SIZE / 2})`}
+        />
+      </Svg>
+
+      <View style={styles.ringCenter}>
+        <Text style={[styles.ringPercent, { color }]}>{label ?? `${safePercent}%`}</Text>
+      </View>
+    </View>
+  );
+};
+
 export default function Attendance() {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const scale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1;
   const fontScale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1;
   const avatarSize = Math.round(72 * scale);
+
+  const contentStyle = useMemo(
+    () => ({
+      padding: 14,
+      paddingBottom: 110 + insets.bottom,
+    }),
+    [insets.bottom]
+  );
 
   const [parentId, setParentId] = useState(null);
 
@@ -349,10 +401,7 @@ export default function Attendance() {
 
       try {
         const prefix = await getPathPrefix();
-
-        const parentSnap = await get(ref(database, `${prefix}Parents/${parentId}`));
-        const parent = parentSnap.exists() ? parentSnap.val() : null;
-        const kids = parent?.children ? Object.values(parent.children) : [];
+        const kids = await getLinkedChildrenForParent(prefix, parentId);
 
         setChildren(kids);
 
@@ -534,7 +583,7 @@ export default function Attendance() {
   return (
     <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={contentStyle}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -561,9 +610,9 @@ export default function Attendance() {
                 Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
               </Text>
 
-              <View style={styles.statusChip}>
-                <Ionicons name="calendar-outline" size={14} color={PRIMARY} />
-                <Text style={styles.statusText}>Attendance Overview</Text>
+              <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
+                <View style={[styles.statusDot, { backgroundColor: PRIMARY }]} />
+                <Text style={[styles.statusText, { color: PRIMARY }]}>Attendance Overview</Text>
               </View>
             </View>
 
@@ -623,15 +672,14 @@ export default function Attendance() {
 
         {tab === "daily" && (
           <View style={styles.dateCard}>
-            <View style={styles.dateTopRow}>
-              <Text style={styles.cardTitle}>Choose Date</Text>
-              {!isToday && (
+            {!isToday && (
+              <View style={[styles.dateTopRow, styles.dateTopRowRight]}>
                 <TouchableOpacity onPress={resetToday} activeOpacity={0.85} style={styles.todayBtn}>
                   <Ionicons name="refresh-outline" size={14} color={PRIMARY} />
                   <Text style={styles.todayBtnText}>Today</Text>
                 </TouchableOpacity>
-              )}
-            </View>
+              </View>
+            )}
 
             <View style={styles.dateNavRow}>
               <TouchableOpacity style={styles.dateNavBtn} onPress={goPrevDate} activeOpacity={0.86}>
@@ -687,16 +735,26 @@ export default function Attendance() {
             );
 
             let attendancePercent = 0;
+            let attendedCount = 0;
             if (tab !== "daily") {
               const total = entries.length;
-              const attended = entries.filter(([, s]) => {
+              attendedCount = entries.filter(([, s]) => {
                 const st = String(s || "").toLowerCase();
                 return st === "present" || st === "late";
               }).length;
-              attendancePercent = total > 0 ? Math.round((attended / total) * 100) : 0;
+              attendancePercent = total > 0 ? Math.round((attendedCount / total) * 100) : 0;
             }
 
             const isExpanded = !!expandedCourses[course.courseId];
+            const dailyStatus = entries[0]?.[1] || null;
+            const ringColor = tab === "daily" ? (dailyStatus ? statusColor(dailyStatus) : PRIMARY) : percentColor(attendancePercent);
+            const ringValue = tab === "daily" ? (dailyStatus ? 100 : 0) : attendancePercent;
+            const ringLabel = tab === "daily" ? (dailyStatus ? "View" : "--") : `${attendancePercent}%`;
+            const summaryLabel = tab === "daily" ? "Status" : "Total";
+            const summaryValue = tab === "daily"
+              ? (dailyStatus ? String(dailyStatus).toUpperCase() : "No record")
+              : `${attendedCount}/${entries.length}`;
+            const summaryColor = tab === "daily" ? (dailyStatus ? statusColor(dailyStatus) : MUTED) : ringColor;
 
             return (
               <View key={course.courseId} style={styles.courseCard}>
@@ -710,39 +768,12 @@ export default function Attendance() {
                     <View style={{ flex: 1, paddingRight: 12 }}>
                       <Text style={styles.courseName}>{course.name}</Text>
                       <Text style={styles.teacher}>Teacher: {course.teacherName}</Text>
-                      <Text style={styles.courseMeta}>
-                        {tab === "daily"
-                          ? "Attendance for selected date"
-                          : `${entries.length} record${entries.length === 1 ? "" : "s"} in this period`}
-                      </Text>
                     </View>
 
-                    <View style={styles.percentChip}>
-                      <Text style={[styles.percentText, { color: tab === "daily" ? PRIMARY : percentColor(attendancePercent) }]}>
-                        {tab === "daily" ? "View" : `${attendancePercent}%`}
-                      </Text>
-                      <Ionicons
-                        name={isExpanded ? "chevron-up" : "chevron-down"}
-                        size={16}
-                        color={PRIMARY}
-                        style={{ marginLeft: 6 }}
-                      />
+                    <View style={styles.courseMetaRight}>
+                      <ProgressRing percent={ringValue} color={ringColor} label={ringLabel} />
                     </View>
                   </View>
-
-                  {tab !== "daily" && (
-                    <View style={styles.progressTrack}>
-                      <View
-                        style={[
-                          styles.progressFill,
-                          {
-                            width: `${attendancePercent}%`,
-                            backgroundColor: percentColor(attendancePercent),
-                          },
-                        ]}
-                      />
-                    </View>
-                  )}
                 </TouchableOpacity>
 
                 {(tab === "daily" || isExpanded) && (
@@ -767,6 +798,11 @@ export default function Attendance() {
                         );
                       })
                     )}
+
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>{summaryLabel}</Text>
+                      <Text style={[styles.summaryValue, { color: summaryColor }]}>{summaryValue}</Text>
+                    </View>
                   </View>
                 )}
               </View>
@@ -802,7 +838,6 @@ function MetricCard({ label, value, valueColor = TEXT }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
-  content: { padding: 14, paddingBottom: 24 },
 
   loadingWrap: {
     flex: 1,
@@ -820,15 +855,10 @@ const styles = StyleSheet.create({
 
   heroCard: {
     backgroundColor: CARD,
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: BORDER,
     padding: 16,
-    shadowColor: "rgba(15,23,42,0.06)",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    elevation: 3,
   },
   heroTop: {
     flexDirection: "row",
@@ -844,34 +874,21 @@ const styles = StyleSheet.create({
   name: {
     color: TEXT,
     fontWeight: "800",
-    fontSize: 21,
   },
   subText: {
     color: MUTED,
     fontSize: 13,
-    marginTop: 3,
-    fontWeight: "500",
+    marginTop: 2,
   },
-  statusChip: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    backgroundColor: PRIMARY_SOFT,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-    flexDirection: "row",
-    alignItems: "center",
-  },
+  statusDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
   statusText: {
     fontSize: 12,
-    fontWeight: "800",
-    color: PRIMARY,
-    marginLeft: 6,
+    fontWeight: "700",
   },
   switchBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: PRIMARY_SOFT,
     alignItems: "center",
     justifyContent: "center",
@@ -879,27 +896,27 @@ const styles = StyleSheet.create({
 
   metricGrid: {
     flexDirection: "row",
-    marginTop: 16,
+    marginTop: 14,
     gap: 8,
   },
   metricCard: {
     flex: 1,
+    borderRadius: 12,
     backgroundColor: "#F8FAFC",
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
   },
   metricLabel: {
     color: MUTED,
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "600",
   },
   metricValue: {
-    marginTop: 4,
-    fontSize: 17,
-    fontWeight: "900",
+    marginTop: 3,
+    fontSize: 16,
+    fontWeight: "800",
   },
 
   stickyTabsWrap: {
@@ -918,13 +935,13 @@ const styles = StyleSheet.create({
   },
   filterTab: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 11,
     alignItems: "center",
     justifyContent: "center",
   },
   filterText: {
     fontWeight: "700",
-    fontSize: 13,
+    fontSize: 12,
     color: "#475569",
     letterSpacing: 0.2,
   },
@@ -945,7 +962,7 @@ const styles = StyleSheet.create({
   dateCard: {
     marginTop: 12,
     backgroundColor: CARD,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: BORDER,
     padding: 14,
@@ -954,6 +971,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+  },
+  dateTopRowRight: {
+    justifyContent: "flex-end",
   },
   todayBtn: {
     flexDirection: "row",
@@ -1005,19 +1025,14 @@ const styles = StyleSheet.create({
   card: {
     marginTop: 12,
     backgroundColor: CARD,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: BORDER,
     padding: 14,
-    shadowColor: "rgba(15,23,42,0.04)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
   },
   cardTitle: {
     color: TEXT,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "800",
   },
 
@@ -1025,8 +1040,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   childRow: {
-    paddingVertical: 11,
-    paddingHorizontal: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "transparent",
@@ -1050,62 +1065,48 @@ const styles = StyleSheet.create({
   courseCard: {
     marginBottom: 12,
     backgroundColor: CARD,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: BORDER,
     padding: 14,
-    shadowColor: "rgba(15,23,42,0.04)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
   },
   courseHead: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
   },
   courseName: {
     fontSize: 16,
     color: TEXT,
-    fontWeight: "900",
+    fontWeight: "800",
     textTransform: "capitalize",
   },
   teacher: {
-    marginTop: 4,
+    marginTop: 3,
     fontSize: 13,
     color: MUTED,
     fontWeight: "600",
   },
-  courseMeta: {
-    marginTop: 3,
-    fontSize: 12.5,
-    color: MUTED,
-    fontWeight: "500",
-  },
-
-  percentChip: {
-    backgroundColor: PRIMARY_SOFT,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    flexDirection: "row",
+  courseMetaRight: {
     alignItems: "center",
-  },
-  percentText: {
-    fontSize: 14,
-    fontWeight: "900",
+    justifyContent: "center",
   },
 
-  progressTrack: {
-    marginTop: 12,
-    height: 8,
-    borderRadius: 999,
-    backgroundColor: "#E5E7EB",
-    overflow: "hidden",
+  ringWrap: {
+    width: RING_SIZE,
+    height: RING_SIZE,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  progressFill: {
-    height: "100%",
-    borderRadius: 999,
+  ringSvg: {
+    position: "absolute",
+  },
+  ringCenter: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ringPercent: {
+    fontSize: 13,
+    fontWeight: "800",
   },
 
   entriesWrap: {
@@ -1118,7 +1119,7 @@ const styles = StyleSheet.create({
   },
 
   attRow: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
     flexDirection: "row",
@@ -1144,11 +1145,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
   },
-
-  emptyTitle: {
-    fontSize: 19,
+  summaryRow: {
+    marginTop: 8,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  summaryLabel: {
+    fontSize: 13,
+    color: MUTED,
+    fontWeight: "700",
+  },
+  summaryValue: {
+    fontSize: 13,
     color: TEXT,
     fontWeight: "900",
+  },
+
+  emptyTitle: {
+    fontSize: 18,
+    color: TEXT,
+    fontWeight: "800",
     textAlign: "center",
   },
   emptySubtitle: {

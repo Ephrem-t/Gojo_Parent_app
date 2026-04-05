@@ -8,9 +8,11 @@ import {
   RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
+import { getLinkedChildrenForParent } from "../lib/parentChildren";
 
 const PRIMARY = "#2296F3";
 const PRIMARY_DARK = "#0B72C7";
@@ -51,9 +53,6 @@ export default function HistoryTab() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [schoolKey, setSchoolKey] = useState(null);
-  const [parentId, setParentId] = useState(null);
-
   const [children, setChildren] = useState([]);
   const [paymentRows, setPaymentRows] = useState([]);
 
@@ -71,52 +70,19 @@ export default function HistoryTab() {
           AsyncStorage.getItem("schoolKey"),
         ]);
 
-        setParentId(pid || null);
-        setSchoolKey(sk || null);
-
         if (!pid) {
           setChildren([]);
           setPaymentRows([]);
           return;
         }
 
-        const [parentSnap, studentsSnap, usersSnap, paymentsSnap] = await Promise.all([
-          get(ref(database, schoolAwarePath(`Parents/${pid}`, sk || null))),
-          get(ref(database, schoolAwarePath("Students", sk || null))),
-          get(ref(database, schoolAwarePath("Users", sk || null))),
+        const prefix = sk ? `Platform1/Schools/${sk}/` : "";
+
+        const [normalizedChildren, paymentsSnap] = await Promise.all([
+          getLinkedChildrenForParent(prefix, pid),
           get(ref(database, schoolAwarePath("Payments/monthlyPaid", sk || null))),
         ]);
-
-        const parentVal = parentSnap.exists() ? parentSnap.val() || {} : {};
-        const studentsVal = studentsSnap.exists() ? studentsSnap.val() || {} : {};
-        const usersVal = usersSnap.exists() ? usersSnap.val() || {} : {};
         const paymentsVal = paymentsSnap.exists() ? paymentsSnap.val() || {} : {};
-
-        const rawChildren = parentVal?.children ? Object.values(parentVal.children) : [];
-
-        const normalizedChildren = rawChildren
-          .map((childLink) => {
-            const studentId =
-              childLink?.studentId ||
-              childLink?.id ||
-              childLink?.student_id ||
-              childLink?.studentID ||
-              null;
-
-            if (!studentId) return null;
-
-            const studentNode = studentsVal?.[studentId] || {};
-            const studentUser = usersVal?.[studentNode?.userId] || {};
-
-            return {
-              studentId: String(studentId),
-              name: studentUser?.name || "Student",
-              grade: studentNode?.grade || "--",
-              section: studentNode?.section || "--",
-              relationship: childLink?.relationship || "Child",
-            };
-          })
-          .filter(Boolean);
 
         setChildren(normalizedChildren);
 
@@ -229,40 +195,48 @@ export default function HistoryTab() {
       showsVerticalScrollIndicator={false}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <View style={styles.heroCard}>
-        <View style={styles.heroIconWrap}>
-          <Ionicons name="wallet-outline" size={28} color={PRIMARY} />
-        </View>
+      <LinearGradient
+        colors={["#FFFFFF", "#F9FBFF", "#F1F7FF"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.heroCard}
+      >
+        <View style={styles.heroGlowOne} />
+        <View style={styles.heroGlowTwo} />
 
-        <View style={{ flex: 1 }}>
-          <Text style={styles.heroTitle}>Payment History</Text>
-          <Text style={styles.heroSub}>
-            View your children’s monthly payment records in one clean place.
-          </Text>
+        <View style={styles.heroTopRow}>
+          <View style={styles.heroCopy}>
+            <Text style={styles.heroTitle}>Payment History</Text>
+            <Text style={styles.heroSub}>See each child’s payment history.</Text>
+          </View>
 
-          <View style={styles.heroChip}>
-            <Ionicons name="shield-checkmark-outline" size={14} color={PRIMARY_DARK} />
-            <Text style={styles.heroChipText}>Synced from school payment data</Text>
+          <View style={styles.heroIconWrap}>
+            <Ionicons name="receipt-outline" size={24} color={PRIMARY} />
           </View>
         </View>
-      </View>
 
-      <View style={styles.summaryRow}>
-        <SummaryCard
-          title="Paid"
-          value={String(summary.paid)}
-          icon="checkmark-circle-outline"
-          iconColor={SUCCESS}
-          bg={SUCCESS_SOFT}
-        />
-        <SummaryCard
-          title="Pending"
-          value={String(summary.unpaid)}
-          icon="time-outline"
-          iconColor={WARNING}
-          bg={WARNING_SOFT}
-        />
-      </View>
+        <View style={styles.heroInsightsRow}>
+          <View style={styles.heroStatPill}>
+            <Text style={styles.heroStatValue}>{children.length}</Text>
+            <Text style={styles.heroStatLabel}>Children</Text>
+          </View>
+
+          <View style={styles.heroStatPill}>
+            <Text style={styles.heroStatValue}>{summary.total}</Text>
+            <Text style={styles.heroStatLabel}>Records</Text>
+          </View>
+
+          <View style={[styles.heroStatPill, styles.heroStatPillSuccess]}>
+            <Text style={[styles.heroStatValue, styles.heroStatValueSuccess]}>{summary.paid}</Text>
+            <Text style={styles.heroStatLabel}>Paid</Text>
+          </View>
+
+          <View style={[styles.heroStatPill, styles.heroStatPillWarning]}>
+            <Text style={[styles.heroStatValue, styles.heroStatValueWarning]}>{summary.unpaid}</Text>
+            <Text style={styles.heroStatLabel}>Pending</Text>
+          </View>
+        </View>
+      </LinearGradient>
 
       <View style={styles.summaryWide}>
         <View style={styles.summaryWideLeft}>
@@ -333,6 +307,7 @@ export default function HistoryTab() {
                   {group.items.map((item, index) => {
                     const statusColor = item.paid ? SUCCESS : WARNING;
                     const statusBg = item.paid ? SUCCESS_SOFT : WARNING_SOFT;
+                    const statusBorder = item.paid ? "#CFEFD9" : "#FED7AA";
                     const statusText = item.paid ? "Paid" : "Pending";
                     const iconName = item.paid ? "checkmark-circle" : "time";
 
@@ -353,7 +328,7 @@ export default function HistoryTab() {
                           <Text style={styles.historySub}>Student ID: {item.studentId}</Text>
                         </View>
 
-                        <View style={[styles.statusPill, { backgroundColor: statusBg }]}>
+                        <View style={[styles.statusPill, { backgroundColor: statusBg, borderColor: statusBorder }]}> 
                           <Ionicons name={iconName} size={14} color={statusColor} />
                           <Text style={[styles.statusText, { color: statusColor }]}>{statusText}</Text>
                         </View>
@@ -372,18 +347,6 @@ export default function HistoryTab() {
         })
       )}
     </ScrollView>
-  );
-}
-
-function SummaryCard({ title, value, icon, iconColor, bg }) {
-  return (
-    <View style={styles.summaryCard}>
-      <View style={[styles.summaryIconWrap, { backgroundColor: bg }]}>
-        <Ionicons name={icon} size={18} color={iconColor} />
-      </View>
-      <Text style={styles.summaryValue}>{value}</Text>
-      <Text style={styles.summaryLabel}>{title}</Text>
-    </View>
   );
 }
 
@@ -408,111 +371,126 @@ const styles = StyleSheet.create({
   },
 
   heroCard: {
-    backgroundColor: CARD,
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 12,
+    borderColor: "#E3EDF9",
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 14,
+    overflow: "hidden",
+    shadowColor: "#9FBFE6",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  heroGlowOne: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 999,
+    backgroundColor: "rgba(30,144,255,0.08)",
+    top: -72,
+    right: -28,
+  },
+  heroGlowTwo: {
+    position: "absolute",
+    width: 120,
+    height: 120,
+    borderRadius: 999,
+    backgroundColor: "rgba(59,130,246,0.06)",
+    bottom: -36,
+    left: -18,
+  },
+  heroTopRow: {
     flexDirection: "row",
-    alignItems: "center",
-    shadowColor: "rgba(15,23,42,0.03)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 14,
+    gap: 12,
+  },
+  heroCopy: {
+    flex: 1,
   },
   heroIconWrap: {
-    width: 58,
-    height: 58,
+    width: 52,
+    height: 52,
     borderRadius: 18,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: "#EEF5FF",
+    borderWidth: 1,
+    borderColor: "#D9E8FB",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
   },
   heroTitle: {
-    fontSize: 19,
+    fontSize: 23,
     fontWeight: "900",
     color: TEXT,
+    letterSpacing: 0.2,
   },
   heroSub: {
-    marginTop: 4,
+    marginTop: 8,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 20,
     color: MUTED,
     fontWeight: "500",
   },
-  heroChip: {
-    marginTop: 10,
-    alignSelf: "flex-start",
-    backgroundColor: PRIMARY_SOFT,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+  heroInsightsRow: {
     flexDirection: "row",
-    alignItems: "center",
+    flexWrap: "nowrap",
+    gap: 6,
   },
-  heroChipText: {
-    marginLeft: 6,
-    color: PRIMARY_DARK,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-
-  summaryRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 12,
-  },
-  summaryCard: {
+  heroStatPill: {
     flex: 1,
-    backgroundColor: CARD,
+    minWidth: 0,
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 18,
-    padding: 14,
-    shadowColor: "rgba(15,23,42,0.03)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
-  },
-  summaryIconWrap: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    borderColor: "#E2ECF9",
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 10,
   },
-  summaryValue: {
-    fontSize: 22,
+  heroStatValue: {
+    fontSize: 15,
     fontWeight: "900",
     color: TEXT,
   },
-  summaryLabel: {
+  heroStatLabel: {
     marginTop: 2,
-    fontSize: 12,
-    color: MUTED,
+    fontSize: 10,
     fontWeight: "700",
+    color: MUTED,
+  },
+  heroStatPillSuccess: {
+    backgroundColor: SUCCESS_SOFT,
+    borderColor: "#CFEFD9",
+  },
+  heroStatPillWarning: {
+    backgroundColor: WARNING_SOFT,
+    borderColor: "#FED7AA",
+  },
+  heroStatValueSuccess: {
+    color: SUCCESS,
+  },
+  heroStatValueWarning: {
+    color: WARNING,
   },
 
   summaryWide: {
-    backgroundColor: CARD,
+    backgroundColor: "#FCFEFF",
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 12,
+    borderColor: "#E3EDF9",
+    borderRadius: 20,
+    padding: 15,
+    marginBottom: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    shadowColor: "rgba(15,23,42,0.03)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 14,
-    elevation: 2,
+    shadowColor: "#BED3EE",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    elevation: 5,
   },
   summaryWideLeft: { flex: 1 },
   summaryWideLabel: {
@@ -527,23 +505,30 @@ const styles = StyleSheet.create({
     color: TEXT,
   },
   summaryWideRight: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: PRIMARY_SOFT,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#EEF5FF",
+    borderWidth: 1,
+    borderColor: "#D9E8FB",
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 12,
   },
 
   emptyCard: {
-    backgroundColor: CARD,
+    backgroundColor: "#FCFEFF",
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 18,
+    borderColor: "#E3EDF9",
+    borderRadius: 20,
     padding: 22,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#BED3EE",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 4,
   },
   emptyTitle: {
     marginTop: 10,
@@ -561,22 +546,29 @@ const styles = StyleSheet.create({
   },
 
   studentCard: {
-    backgroundColor: CARD,
+    backgroundColor: "#FCFEFF",
     borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 20,
-    padding: 14,
-    marginBottom: 12,
+    borderColor: "#E3EDF9",
+    borderRadius: 22,
+    padding: 15,
+    marginBottom: 14,
+    shadowColor: "#BED3EE",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.1,
+    shadowRadius: 18,
+    elevation: 4,
   },
   studentTop: {
     flexDirection: "row",
     alignItems: "center",
   },
   studentAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    backgroundColor: PRIMARY_SOFT,
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: "#EEF5FF",
+    borderWidth: 1,
+    borderColor: "#D9E8FB",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
@@ -603,11 +595,11 @@ const styles = StyleSheet.create({
     marginTop: 12,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F8FAFF",
-    borderRadius: 14,
+    backgroundColor: "#F6FAFF",
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#EAF0F8",
-    paddingVertical: 10,
+    borderColor: "#E4EDF9",
+    paddingVertical: 12,
   },
   studentMiniStat: {
     flex: 1,
@@ -633,6 +625,12 @@ const styles = StyleSheet.create({
 
   timelineWrap: {
     marginTop: 14,
+    backgroundColor: "#FBFDFF",
+    borderWidth: 1,
+    borderColor: "#EBF1F8",
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
   },
   historyRow: {
     flexDirection: "row",
@@ -645,12 +643,17 @@ const styles = StyleSheet.create({
     width: 46,
     height: 46,
     borderRadius: 14,
-    backgroundColor: "#F8FAFF",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#E6EDF8",
+    borderColor: "#E1EBF7",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
+    shadowColor: "#DCE8F6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    elevation: 2,
   },
   monthBadgeText: {
     fontSize: 12,
@@ -675,6 +678,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     flexDirection: "row",
     alignItems: "center",
+    borderWidth: 1,
   },
   statusText: {
     marginLeft: 6,
@@ -684,10 +688,10 @@ const styles = StyleSheet.create({
 
   childNoHistory: {
     marginTop: 14,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "#F8FBFF",
     borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 14,
+    borderColor: "#E1EBF7",
+    borderRadius: 16,
     padding: 14,
     flexDirection: "row",
     alignItems: "center",

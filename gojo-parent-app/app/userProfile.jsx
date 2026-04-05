@@ -659,7 +659,7 @@ export default function UserProfile() {
                       subtitle={`Relation: ${p.relationship}`}
                       image={p.profileImage}
                       onPress={() => {
-                        if (parentRecordId && p.parentId === parentRecordId) router.push("/profile");
+                        if (parentRecordId && p.parentId === parentRecordId) router.push("/dashboard/profile");
                         else router.push(`/userProfile?recordId=${p.parentId}`);
                       }}
                       onMessage={
