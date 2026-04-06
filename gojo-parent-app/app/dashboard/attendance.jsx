@@ -15,6 +15,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get } from "firebase/database";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import moment from "moment";
 import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,8 +37,8 @@ const ABSENT = "#94A3B8";
 
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "attendance_cache_v6";
-const RING_SIZE = 68;
-const RING_STROKE = 6;
+const RING_SIZE = 58;
+const RING_STROKE = 5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
@@ -150,8 +151,6 @@ export default function Attendance() {
   const tabOptions = ["daily", "weekly", "monthly"];
   const tabAnim = useRef(new Animated.Value(0)).current;
   const [tabWidthState, setTabWidthState] = useState(0);
-
-  const [selectedDate, setSelectedDate] = useState(moment().format("YYYY-MM-DD"));
 
   const shimmerAnim = useRef(new Animated.Value(-140)).current;
 
@@ -382,11 +381,10 @@ export default function Attendance() {
         courses: bundle?.courses || [],
         attendanceByCourse: bundle?.attendanceByCourse || {},
         tab,
-        selectedDate,
         ts: Date.now(),
       });
     },
-    [tab, selectedDate]
+    [tab]
   );
 
   const loadFreshData = useCallback(
@@ -457,7 +455,6 @@ export default function Attendance() {
         setCourses(cached.courses || []);
         setAttendanceByCourse(cached.attendanceByCourse || {});
         setTab(cached.tab || "daily");
-        setSelectedDate(cached.selectedDate || moment().format("YYYY-MM-DD"));
         setLoading(false);
       }
 
@@ -501,32 +498,18 @@ export default function Attendance() {
     await loadFreshData({ background: false });
   };
 
-  const goPrevDate = () => {
-    setSelectedDate((prev) => moment(prev).subtract(1, "day").format("YYYY-MM-DD"));
-  };
-
-  const goNextDate = () => {
-    const next = moment(selectedDate).add(1, "day");
-    const today = moment();
-    if (next.isAfter(today, "day")) return;
-    setSelectedDate(next.format("YYYY-MM-DD"));
-  };
-
-  const resetToday = () => {
-    setSelectedDate(moment().format("YYYY-MM-DD"));
-  };
-
   const filteredAttendance = useMemo(() => {
     if (!childUser?.studentId) return {};
 
     const now = moment();
+    const todayKey = now.format("YYYY-MM-DD");
 
     return courses.reduce((acc, course) => {
       const courseAttendance = attendanceByCourse?.[course.courseId] || {};
       const filtered = {};
 
       if (tab === "daily") {
-        if (courseAttendance[selectedDate]) filtered[selectedDate] = courseAttendance[selectedDate];
+        if (courseAttendance[todayKey]) filtered[todayKey] = courseAttendance[todayKey];
       } else {
         Object.entries(courseAttendance).forEach(([date, status]) => {
           const m = moment(date, "YYYY-MM-DD");
@@ -542,7 +525,7 @@ export default function Attendance() {
       acc[course.courseId] = filtered;
       return acc;
     }, {});
-  }, [attendanceByCourse, courses, tab, childUser?.studentId, selectedDate]);
+  }, [attendanceByCourse, courses, tab, childUser?.studentId]);
 
   const attendanceTotalsAll = useMemo(() => {
     const totals = { present: 0, late: 0, absent: 0 };
@@ -577,11 +560,96 @@ export default function Attendance() {
     );
   }
 
-  const selectedDateMoment = moment(selectedDate, "YYYY-MM-DD");
-  const isToday = selectedDateMoment.isSame(moment(), "day");
+  const fixedHeaderCard = (
+    <LinearGradient
+      colors={["#FFFFFF", "#F9FBFF", "#EEF5FF"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.heroCard}
+    >
+      <View style={styles.heroGlowOne} />
+      <View style={styles.heroGlowTwo} />
+
+      <View style={styles.heroTop}>
+        <Image
+          source={{ uri: childUser?.profileImage || defaultProfile }}
+          style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
+        />
+
+        <View style={styles.heroInfo}>
+          <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
+            {childUser?.name || "Student"}
+          </Text>
+          <Text style={styles.subText}>
+            Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
+          </Text>
+
+          <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
+            <View style={[styles.statusDot, { backgroundColor: PRIMARY }]} />
+            <Text style={[styles.statusText, { color: PRIMARY }]}>Attendance Overview</Text>
+          </View>
+        </View>
+
+        {children.length > 1 && (
+          <TouchableOpacity onPress={() => setShowChildPicker((s) => !s)} style={styles.switchBtn}>
+            <Ionicons name={showChildPicker ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.metricGrid}>
+        <MetricCard label="Present" value={attendanceTotalsAll.present} valueColor={PRESENT} />
+        <MetricCard label="Late" value={attendanceTotalsAll.late} valueColor={LATE} />
+        <MetricCard label="Absent" value={attendanceTotalsAll.absent} valueColor={ABSENT} />
+      </View>
+    </LinearGradient>
+  );
+  const fixedFilterCard = (
+    <View style={styles.stickyTabsWrap}>
+      <View
+        style={styles.filterTabs}
+        onLayout={(e) => setTabWidthState(e.nativeEvent.layout.width)}
+      >
+        {tabWidthState > 0 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.filterIndicator,
+              {
+                width: tabWidthState / tabOptions.length,
+                transform: [
+                  {
+                    translateX: Animated.multiply(tabAnim, tabWidthState / tabOptions.length),
+                  },
+                ],
+              },
+            ]}
+          />
+        )}
+
+        {tabOptions.map((t) => {
+          const active = tab === t;
+          return (
+            <TouchableOpacity
+              key={t}
+              style={styles.filterTab}
+              onPress={() => setTab(t)}
+              activeOpacity={0.86}
+            >
+              <Text style={[styles.filterText, active && styles.filterTextActive]}>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
+      <View style={styles.fixedHeaderWrap}>{fixedHeaderCard}</View>
+      <View style={styles.fixedFilterWrap}>{fixedFilterCard}</View>
       <ScrollView
         contentContainerStyle={contentStyle}
         showsVerticalScrollIndicator={false}
@@ -593,116 +661,7 @@ export default function Attendance() {
             tintColor={PRIMARY}
           />
         }
-        stickyHeaderIndices={[1]}
       >
-        <View style={styles.heroCard}>
-          <View style={styles.heroTop}>
-            <Image
-              source={{ uri: childUser?.profileImage || defaultProfile }}
-              style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
-            />
-
-            <View style={styles.heroInfo}>
-              <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
-                {childUser?.name || "Student"}
-              </Text>
-              <Text style={styles.subText}>
-                Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
-              </Text>
-
-              <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
-                <View style={[styles.statusDot, { backgroundColor: PRIMARY }]} />
-                <Text style={[styles.statusText, { color: PRIMARY }]}>Attendance Overview</Text>
-              </View>
-            </View>
-
-            {children.length > 1 && (
-              <TouchableOpacity onPress={() => setShowChildPicker((s) => !s)} style={styles.switchBtn}>
-                <Ionicons name={showChildPicker ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <View style={styles.metricGrid}>
-            <MetricCard label="Present" value={attendanceTotalsAll.present} valueColor={PRESENT} />
-            <MetricCard label="Late" value={attendanceTotalsAll.late} valueColor={LATE} />
-            <MetricCard label="Absent" value={attendanceTotalsAll.absent} valueColor={ABSENT} />
-          </View>
-        </View>
-
-        <View style={styles.stickyTabsWrap}>
-          <View
-            style={styles.filterTabs}
-            onLayout={(e) => setTabWidthState(e.nativeEvent.layout.width)}
-          >
-            {tabWidthState > 0 && (
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.filterIndicator,
-                  {
-                    width: tabWidthState / tabOptions.length,
-                    transform: [
-                      {
-                        translateX: Animated.multiply(tabAnim, tabWidthState / tabOptions.length),
-                      },
-                    ],
-                  },
-                ]}
-              />
-            )}
-
-            {tabOptions.map((t) => {
-              const active = tab === t;
-              return (
-                <TouchableOpacity
-                  key={t}
-                  style={styles.filterTab}
-                  onPress={() => setTab(t)}
-                  activeOpacity={0.86}
-                >
-                  <Text style={[styles.filterText, active && styles.filterTextActive]}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {tab === "daily" && (
-          <View style={styles.dateCard}>
-            {!isToday && (
-              <View style={[styles.dateTopRow, styles.dateTopRowRight]}>
-                <TouchableOpacity onPress={resetToday} activeOpacity={0.85} style={styles.todayBtn}>
-                  <Ionicons name="refresh-outline" size={14} color={PRIMARY} />
-                  <Text style={styles.todayBtnText}>Today</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-
-            <View style={styles.dateNavRow}>
-              <TouchableOpacity style={styles.dateNavBtn} onPress={goPrevDate} activeOpacity={0.86}>
-                <Ionicons name="chevron-back" size={18} color={PRIMARY} />
-              </TouchableOpacity>
-
-              <View style={styles.dateCenter}>
-                <Text style={styles.dateMain}>{selectedDateMoment.format("DD MMMM YYYY")}</Text>
-                <Text style={styles.dateSub}>{isToday ? "Showing today" : selectedDateMoment.format("dddd")}</Text>
-              </View>
-
-              <TouchableOpacity
-                style={[styles.dateNavBtn, isToday && styles.dateNavBtnDisabled]}
-                onPress={goNextDate}
-                activeOpacity={0.86}
-                disabled={isToday}
-              >
-                <Ionicons name="chevron-forward" size={18} color={isToday ? "#CBD5E1" : PRIMARY} />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
         {showChildPicker && children.length > 1 && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Choose Child</Text>
@@ -727,7 +686,7 @@ export default function Attendance() {
           </View>
         )}
 
-        <View style={{ marginTop: 12 }}>
+        <View style={{ marginTop: 8 }}>
           {courses.map((course) => {
             const courseAttendance = filteredAttendance[course.courseId] || {};
             const entries = Object.entries(courseAttendance).sort(
@@ -747,20 +706,22 @@ export default function Attendance() {
 
             const isExpanded = !!expandedCourses[course.courseId];
             const dailyStatus = entries[0]?.[1] || null;
-            const ringColor = tab === "daily" ? (dailyStatus ? statusColor(dailyStatus) : PRIMARY) : percentColor(attendancePercent);
-            const ringValue = tab === "daily" ? (dailyStatus ? 100 : 0) : attendancePercent;
-            const ringLabel = tab === "daily" ? (dailyStatus ? "View" : "--") : `${attendancePercent}%`;
-            const summaryLabel = tab === "daily" ? "Status" : "Total";
-            const summaryValue = tab === "daily"
-              ? (dailyStatus ? String(dailyStatus).toUpperCase() : "No record")
-              : `${attendedCount}/${entries.length}`;
-            const summaryColor = tab === "daily" ? (dailyStatus ? statusColor(dailyStatus) : MUTED) : ringColor;
+            const dailyStatusKey = String(dailyStatus || "").toLowerCase();
+            const ringColor = percentColor(attendancePercent);
+            const ringValue = attendancePercent;
+            const ringLabel = `${attendancePercent}%`;
+            const summaryLabel = "Total";
+            const summaryValue = `${attendedCount}/${entries.length}`;
+            const summaryColor = ringColor;
 
             return (
               <View key={course.courseId} style={styles.courseCard}>
                 <TouchableOpacity
-                  onPress={() =>
-                    setExpandedCourses((prev) => ({ ...prev, [course.courseId]: !prev[course.courseId] }))
+                  onPress={
+                    tab === "daily"
+                      ? undefined
+                      : () =>
+                          setExpandedCourses((prev) => ({ ...prev, [course.courseId]: !prev[course.courseId] }))
                   }
                   activeOpacity={0.86}
                 >
@@ -771,12 +732,40 @@ export default function Attendance() {
                     </View>
 
                     <View style={styles.courseMetaRight}>
-                      <ProgressRing percent={ringValue} color={ringColor} label={ringLabel} />
+                      {tab === "daily" ? (
+                        <View
+                          style={[
+                            styles.dailyStatusPill,
+                            dailyStatusKey === "present" && styles.dailyStatusPillPresent,
+                            dailyStatusKey === "late" && styles.dailyStatusPillLate,
+                            dailyStatusKey === "absent" && styles.dailyStatusPillAbsent,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.dailyStatusText,
+                              (dailyStatusKey === "present" ||
+                                dailyStatusKey === "late" ||
+                                dailyStatusKey === "absent") && styles.dailyStatusTextActive,
+                            ]}
+                          >
+                            {dailyStatusKey === "present"
+                              ? "Present"
+                              : dailyStatusKey === "late"
+                              ? "Late"
+                              : dailyStatusKey === "absent"
+                              ? "Absent"
+                              : "No Record"}
+                          </Text>
+                        </View>
+                      ) : (
+                        <ProgressRing percent={ringValue} color={ringColor} label={ringLabel} />
+                      )}
                     </View>
                   </View>
                 </TouchableOpacity>
 
-                {(tab === "daily" || isExpanded) && (
+                {tab !== "daily" && isExpanded && (
                   <View style={styles.entriesWrap}>
                     {entries.length === 0 ? (
                       <Text style={styles.noRecords}>No attendance recorded</Text>
@@ -838,6 +827,13 @@ function MetricCard({ label, value, valueColor = TEXT }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
+  fixedHeaderWrap: {
+    padding: 14,
+    paddingBottom: 0,
+  },
+  fixedFilterWrap: {
+    paddingHorizontal: 14,
+  },
 
   loadingWrap: {
     flex: 1,
@@ -854,11 +850,34 @@ const styles = StyleSheet.create({
   },
 
   heroCard: {
-    backgroundColor: CARD,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: "#DDE8F7",
     padding: 16,
+    overflow: "hidden",
+    shadowColor: "#9FBFE6",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 7,
+  },
+  heroGlowOne: {
+    position: "absolute",
+    width: 170,
+    height: 170,
+    borderRadius: 999,
+    backgroundColor: "rgba(30,144,255,0.08)",
+    top: -72,
+    right: -18,
+  },
+  heroGlowTwo: {
+    position: "absolute",
+    width: 118,
+    height: 118,
+    borderRadius: 999,
+    backgroundColor: "rgba(96,165,250,0.08)",
+    bottom: -34,
+    left: -20,
   },
   heroTop: {
     flexDirection: "row",
@@ -902,9 +921,9 @@ const styles = StyleSheet.create({
   metricCard: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "rgba(255,255,255,0.74)",
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: "rgba(220,233,250,0.95)",
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
@@ -921,8 +940,8 @@ const styles = StyleSheet.create({
 
   stickyTabsWrap: {
     backgroundColor: BG,
-    paddingTop: 10,
-    paddingBottom: 6,
+    paddingTop: 2,
+    paddingBottom: 4,
     zIndex: 5,
   },
   filterTabs: {
@@ -960,7 +979,7 @@ const styles = StyleSheet.create({
   },
 
   dateCard: {
-    marginTop: 12,
+    marginTop: 8,
     backgroundColor: CARD,
     borderRadius: 16,
     borderWidth: 1,
@@ -1023,7 +1042,7 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    marginTop: 12,
+    marginTop: 8,
     backgroundColor: CARD,
     borderRadius: 16,
     borderWidth: 1,
@@ -1063,32 +1082,62 @@ const styles = StyleSheet.create({
   },
 
   courseCard: {
-    marginBottom: 12,
+    marginBottom: 8,
     backgroundColor: CARD,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: BORDER,
-    padding: 14,
+    padding: 10,
   },
   courseHead: {
     flexDirection: "row",
     alignItems: "center",
   },
   courseName: {
-    fontSize: 16,
+    fontSize: 14,
     color: TEXT,
     fontWeight: "800",
     textTransform: "capitalize",
   },
   teacher: {
-    marginTop: 3,
-    fontSize: 13,
+    marginTop: 2,
+    fontSize: 12,
     color: MUTED,
     fontWeight: "600",
   },
   courseMetaRight: {
     alignItems: "center",
     justifyContent: "center",
+  },
+  dailyStatusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#D5DEE9",
+    backgroundColor: "#F8FAFC",
+    minWidth: 92,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    alignItems: "center",
+  },
+  dailyStatusPillPresent: {
+    borderColor: "#93C5FD",
+    backgroundColor: "#DBEAFE",
+  },
+  dailyStatusPillLate: {
+    borderColor: "#FCD34D",
+    backgroundColor: "#FEF3C7",
+  },
+  dailyStatusPillAbsent: {
+    borderColor: "#CBD5E1",
+    backgroundColor: "#E2E8F0",
+  },
+  dailyStatusText: {
+    fontSize: 11,
+    fontWeight: "800",
+    color: "#64748B",
+  },
+  dailyStatusTextActive: {
+    color: "#0F172A",
   },
 
   ringWrap: {
@@ -1105,21 +1154,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ringPercent: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
   },
 
   entriesWrap: {
-    marginTop: 10,
+    marginTop: 8,
   },
   noRecords: {
-    fontSize: 13,
+    fontSize: 12,
     color: MUTED,
     paddingVertical: 4,
   },
 
   attRow: {
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
     flexDirection: "row",
@@ -1133,7 +1182,7 @@ const styles = StyleSheet.create({
   },
   attDate: {
     flex: 1,
-    fontSize: 13,
+    fontSize: 12,
     color: TEXT,
     fontWeight: "500",
   },
@@ -1142,12 +1191,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   attStatus: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "800",
   },
   summaryRow: {
-    marginTop: 8,
-    paddingTop: 10,
+    marginTop: 6,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: "#E2E8F0",
     flexDirection: "row",
@@ -1155,12 +1204,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   summaryLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: MUTED,
     fontWeight: "700",
   },
   summaryValue: {
-    fontSize: 13,
+    fontSize: 12,
     color: TEXT,
     fontWeight: "900",
   },
@@ -1185,7 +1234,7 @@ const styles = StyleSheet.create({
   },
 
   refreshingBgWrap: {
-    marginTop: 12,
+    marginTop: 8,
     alignItems: "center",
   },
   refreshingBgText: {

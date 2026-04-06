@@ -15,6 +15,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get } from "firebase/database";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
@@ -33,8 +34,9 @@ const WARNING = "#EA580C";
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "classMark_cache_v6";
 const DIRECT_SEMESTER_KEY = "__semester_total__";
-const RING_SIZE = 68;
-const RING_STROKE = 6;
+const AVERAGE_SEMESTER_KEY = "average";
+const RING_SIZE = 58;
+const RING_STROKE = 5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
@@ -88,6 +90,41 @@ const getMarksNodeForSelection = (marksNode, semesterKey, quarterKey) => {
   }
 
   return null;
+};
+
+const collectAssessmentsFromNode = (node, quarterKey) => {
+  if (!node || typeof node !== "object") return [];
+
+  if (quarterKey === DIRECT_SEMESTER_KEY && hasAssessments(node)) {
+    return Object.values(node.assessments || {});
+  }
+
+  if (quarterKey && hasAssessments(node?.[quarterKey])) {
+    return Object.values(node[quarterKey].assessments || {});
+  }
+
+  if (hasAssessments(node)) {
+    return Object.values(node.assessments || {});
+  }
+
+  if (!quarterKey) {
+    return Object.values(node).flatMap((value) => {
+      if (!hasAssessments(value)) return [];
+      return Object.values(value.assessments || {});
+    });
+  }
+
+  return [];
+};
+
+const getAssessmentItemsForSelection = (marksNode, semesterKey, quarterKey) => {
+  if (!marksNode || typeof marksNode !== "object") return [];
+
+  if (semesterKey === AVERAGE_SEMESTER_KEY) {
+    return ["semester1", "semester2"].flatMap((key) => collectAssessmentsFromNode(marksNode[key], null));
+  }
+
+  return collectAssessmentsFromNode(marksNode[semesterKey], quarterKey);
 };
 
 const prettifyQuarterLabel = (q) => {
@@ -156,7 +193,7 @@ export default function ClassMark() {
   const [selectedSemester, setSelectedSemester] = useState(null);
   const [selectedQuarter, setSelectedQuarter] = useState(null);
   const [expanded, setExpanded] = useState({});
-  const semesterOptions = ["semester1", "semester2"];
+  const semesterOptions = ["semester1", "semester2", AVERAGE_SEMESTER_KEY];
   const semesterAnim = useRef(new Animated.Value(0)).current;
   const [semesterTabsWidth, setSemesterTabsWidth] = useState(0);
 
@@ -551,7 +588,10 @@ export default function ClassMark() {
   useEffect(() => {
     if (!availableSemesterKeys.length) return;
 
-    if (!selectedSemester || !availableSemesterKeys.includes(selectedSemester)) {
+    if (
+      !selectedSemester ||
+      (!availableSemesterKeys.includes(selectedSemester) && selectedSemester !== AVERAGE_SEMESTER_KEY)
+    ) {
       const bestSemester = availableSemesterKeys.reduce((bestKey, currentKey) => {
         if (!bestKey) return currentKey;
 
@@ -582,6 +622,7 @@ export default function ClassMark() {
 
   const availableQuarterKeys = useMemo(() => {
     if (!childUser?.studentId) return [];
+    if (selectedSemester === AVERAGE_SEMESTER_KEY) return [];
     const qSet = new Set();
 
     courses.forEach((course) => {
@@ -634,14 +675,14 @@ export default function ClassMark() {
     let assessmentsCount = 0;
 
     courses.forEach((course) => {
-      const quarterMarks = getMarksNodeForSelection(
+      const assessments = getAssessmentItemsForSelection(
         marksByCourse?.[course.courseId],
         selectedSemester,
         effectiveQuarter
       );
-      if (!quarterMarks?.assessments) return;
+      if (!assessments.length) return;
 
-      Object.values(quarterMarks.assessments).forEach((a) => {
+      assessments.forEach((a) => {
         overallScore += Number(a.score || 0);
         overallMax += Number(a.max || 0);
         assessmentsCount += 1;
@@ -678,14 +719,148 @@ export default function ClassMark() {
       : stats.overallPercent >= 50
       ? "On track"
       : "Needs support";
-  const isQuarterBasedSemester = visibleQuarterKeys.length > 0;
+  const isQuarterBasedSemester = selectedSemester !== AVERAGE_SEMESTER_KEY && visibleQuarterKeys.length > 0;
+  const fixedHeaderCard = (
+    <LinearGradient
+      colors={["#FFFFFF", "#F9FBFF", "#EEF5FF"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.headerCard}
+    >
+      <View style={styles.headerGlowOne} />
+      <View style={styles.headerGlowTwo} />
+
+      <View style={styles.headerTop}>
+        <Image
+          source={{ uri: childUser?.profileImage || defaultProfile }}
+          style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
+        />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
+            {childUser?.name || "Student"}
+          </Text>
+          <Text style={styles.subText}>
+            Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
+          </Text>
+
+          <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
+            <View style={[styles.statusDot, { backgroundColor: overallStatusColor }]} />
+            <Text style={[styles.statusText, { color: overallStatusColor }]}>{overallStatus}</Text>
+          </View>
+        </View>
+
+        {children.length > 1 && (
+          <TouchableOpacity onPress={() => setShowList((s) => !s)} style={styles.switchBtn}>
+            <Ionicons name={showList ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <View style={styles.metricRow}>
+        <View style={styles.metricPill}>
+          <Text style={styles.metricLabel}>Rank</Text>
+          <Text style={styles.metricValue}>{rank ?? "--"}</Text>
+        </View>
+        <View style={styles.metricPill}>
+          <Text style={styles.metricLabel}>Average</Text>
+          <Text style={styles.metricValue}>{stats.averagePoint || 0}</Text>
+        </View>
+        <View style={styles.metricPill}>
+          <Text style={styles.metricLabel}>Percent</Text>
+          <Text style={[styles.metricValue, { color: overallStatusColor }]}>{stats.overallPercent}%</Text>
+        </View>
+      </View>
+    </LinearGradient>
+  );
+  const fixedFilterCard = (
+    <View style={styles.stickyHeaderShell}>
+      <View style={styles.academicTermCard}>
+        <View style={styles.stickyTabsWrap}>
+          <View
+            style={styles.filterTabs}
+            onLayout={(e) => setSemesterTabsWidth(e.nativeEvent.layout.width)}
+          >
+            {semesterTabsWidth > 0 && (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.filterIndicator,
+                  {
+                    width: semesterTabsWidth / semesterOptions.length,
+                    transform: [
+                      {
+                        translateX: Animated.multiply(
+                          semesterAnim,
+                          semesterTabsWidth / semesterOptions.length
+                        ),
+                      },
+                    ],
+                  },
+                ]}
+              />
+            )}
+
+            {semesterOptions.map((semesterKey, index) => {
+              const active = selectedSemester === semesterKey;
+              const label =
+                semesterKey === AVERAGE_SEMESTER_KEY
+                  ? "Average"
+                  : `Semester ${index + 1}`;
+              return (
+                <TouchableOpacity
+                  key={semesterKey}
+                  style={styles.filterTab}
+                  onPress={() => setSelectedSemester(semesterKey)}
+                  activeOpacity={0.86}
+                >
+                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {isQuarterBasedSemester && (
+          <>
+            <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 2 }]}>Quarter</Text>
+
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.quarterRow}
+            >
+              {visibleQuarterKeys.map((q) => {
+                const active = effectiveQuarter === q;
+                return (
+                  <TouchableOpacity
+                    key={q}
+                    style={[styles.quarterCard, active && styles.quarterCardActive]}
+                    onPress={() => setSelectedQuarter(q)}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={[styles.quarterTitle, active && styles.quarterTitleActive]}>
+                      {prettifyQuarterLabel(q)}
+                    </Text>
+                    <Text style={[styles.quarterSub, active && styles.quarterSubActive]}>
+                      View marks
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
+      <View style={styles.fixedHeaderWrap}>{fixedHeaderCard}</View>
+      <View style={styles.fixedFilterWrap}>{fixedFilterCard}</View>
       <ScrollView
         contentContainerStyle={zoomedContentStyle}
         showsVerticalScrollIndicator={false}
-        stickyHeaderIndices={[1]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -695,128 +870,8 @@ export default function ClassMark() {
           />
         }
       >
-        <View style={styles.headerCard}>
-          <View style={styles.headerTop}>
-            <Image
-              source={{ uri: childUser?.profileImage || defaultProfile }}
-              style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
-                {childUser?.name || "Student"}
-              </Text>
-              <Text style={styles.subText}>
-                Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
-              </Text>
-
-              <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
-                <View style={[styles.statusDot, { backgroundColor: overallStatusColor }]} />
-                <Text style={[styles.statusText, { color: overallStatusColor }]}>{overallStatus}</Text>
-              </View>
-            </View>
-
-            {children.length > 1 && (
-              <TouchableOpacity onPress={() => setShowList((s) => !s)} style={styles.switchBtn}>
-                <Ionicons name={showList ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <View style={styles.metricRow}>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricLabel}>Rank</Text>
-              <Text style={styles.metricValue}>{rank ?? "--"}</Text>
-            </View>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricLabel}>Average</Text>
-              <Text style={styles.metricValue}>{stats.averagePoint || 0}</Text>
-            </View>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricLabel}>Percent</Text>
-              <Text style={[styles.metricValue, { color: overallStatusColor }]}>{stats.overallPercent}%</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.stickyHeaderShell}>
-          <View style={styles.academicTermCard}>
-            <View style={styles.stickyTabsWrap}>
-              <View
-                style={styles.filterTabs}
-                onLayout={(e) => setSemesterTabsWidth(e.nativeEvent.layout.width)}
-              >
-                {semesterTabsWidth > 0 && (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      styles.filterIndicator,
-                      {
-                        width: semesterTabsWidth / semesterOptions.length,
-                        transform: [
-                          {
-                            translateX: Animated.multiply(
-                              semesterAnim,
-                              semesterTabsWidth / semesterOptions.length
-                            ),
-                          },
-                        ],
-                      },
-                    ]}
-                  />
-                )}
-
-                {semesterOptions.map((semesterKey, index) => {
-                  const active = selectedSemester === semesterKey;
-                  const label = `Semester ${index + 1}`;
-                  return (
-                    <TouchableOpacity
-                      key={semesterKey}
-                      style={styles.filterTab}
-                      onPress={() => setSelectedSemester(semesterKey)}
-                      activeOpacity={0.86}
-                    >
-                      <Text style={[styles.filterText, active && styles.filterTextActive]}>{label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {isQuarterBasedSemester && (
-              <>
-                <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 2 }]}>Quarter</Text>
-
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.quarterRow}
-                >
-                  {visibleQuarterKeys.map((q) => {
-                    const active = effectiveQuarter === q;
-                    return (
-                      <TouchableOpacity
-                        key={q}
-                        style={[styles.quarterCard, active && styles.quarterCardActive]}
-                        onPress={() => setSelectedQuarter(q)}
-                        activeOpacity={0.88}
-                      >
-                        <Text style={[styles.quarterTitle, active && styles.quarterTitleActive]}>
-                          {prettifyQuarterLabel(q)}
-                        </Text>
-                        <Text style={[styles.quarterSub, active && styles.quarterSubActive]}>
-                          View marks
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </>
-            )}
-          </View>
-        </View>
-
         {showList && children.length > 1 && (
-          <View style={[styles.card, { marginTop: 12 }]}>
+          <View style={[styles.card, { marginTop: 8 }]}>
             <Text style={styles.sectionTitle}>Choose Child</Text>
             <View style={{ marginTop: 8 }}>
               {children.map((c, i) => {
@@ -846,16 +901,20 @@ export default function ClassMark() {
             effectiveQuarter
           );
 
-          if (!quarterMarks?.assessments) return null;
+          const selectedAssessments = getAssessmentItemsForSelection(
+            marksByCourse?.[course.courseId],
+            selectedSemester,
+            effectiveQuarter
+          );
+
+          if (!selectedAssessments.length) return null;
 
           let totalScore = 0;
           let totalMax = 0;
-          let totalCount = 0;
 
-          Object.values(quarterMarks.assessments).forEach((a) => {
+          selectedAssessments.forEach((a) => {
             totalScore += Number(a.score || 0);
             totalMax += Number(a.max || 0);
-            totalCount += 1;
           });
 
           const percent = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
@@ -863,7 +922,7 @@ export default function ClassMark() {
           const pcColor = chipColorByPercent(percent);
 
           return (
-            <View key={course.courseId} style={[styles.card, { marginTop: 12 }]}>
+            <View key={course.courseId} style={[styles.card, styles.subjectCard, { marginTop: 8 }]}>
               <TouchableOpacity
                 onPress={() =>
                   setExpanded((prev) => ({ ...prev, [course.courseId]: !prev[course.courseId] }))
@@ -884,8 +943,8 @@ export default function ClassMark() {
 
               {isOpen && (
                 <View style={{ marginTop: 10 }}>
-                  {Object.entries(quarterMarks.assessments).map(([k, a]) => (
-                    <View key={k} style={styles.assessRow}>
+                  {selectedAssessments.map((a, idx) => (
+                    <View key={`${course.courseId}-${idx}-${a.name || "assessment"}`} style={styles.assessRow}>
                       <Text style={styles.assessName}>{a.name}</Text>
                       <Text style={styles.assessScore}>{a.score}/{a.max}</Text>
                     </View>
@@ -902,14 +961,14 @@ export default function ClassMark() {
         })}
 
         {!courses.length && (
-          <View style={[styles.card, { marginTop: 12 }]}>
+          <View style={[styles.card, { marginTop: 8 }]}>
             <Text style={styles.sectionTitle}>Marks</Text>
             <Text style={styles.subText}>No courses or marks found for this child yet.</Text>
           </View>
         )}
 
         {refreshingBg && !refreshing && (
-          <View style={{ marginTop: 10, alignItems: "center" }}>
+          <View style={{ marginTop: 8, alignItems: "center" }}>
             <Text style={{ fontSize: 12, color: MUTED }}>Refreshing latest marks…</Text>
           </View>
         )}
@@ -920,14 +979,45 @@ export default function ClassMark() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
+  fixedHeaderWrap: {
+    paddingHorizontal: 14,
+    paddingTop: 4,
+    paddingBottom: 0,
+  },
+  fixedFilterWrap: {
+    paddingHorizontal: 14,
+  },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 24 },
 
   headerCard: {
-    backgroundColor: CARD,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: "#DDE8F7",
     padding: 16,
+    overflow: "hidden",
+    shadowColor: "#9FBFE6",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    elevation: 7,
+  },
+  headerGlowOne: {
+    position: "absolute",
+    width: 170,
+    height: 170,
+    borderRadius: 999,
+    backgroundColor: "rgba(30,144,255,0.08)",
+    top: -72,
+    right: -18,
+  },
+  headerGlowTwo: {
+    position: "absolute",
+    width: 118,
+    height: 118,
+    borderRadius: 999,
+    backgroundColor: "rgba(96,165,250,0.08)",
+    bottom: -34,
+    left: -20,
   },
   headerTop: { flexDirection: "row", alignItems: "center" },
   avatar: { marginRight: 12, backgroundColor: "#E5E7EB" },
@@ -949,9 +1039,9 @@ const styles = StyleSheet.create({
   metricPill: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "rgba(255,255,255,0.74)",
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: "rgba(220,233,250,0.95)",
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
@@ -965,6 +1055,10 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     padding: 14,
   },
+  subjectCard: {
+    borderRadius: 14,
+    padding: 10,
+  },
   sectionTitle: { fontSize: 14, color: TEXT, fontWeight: "800" },
 
   academicTermCard: {
@@ -976,10 +1070,10 @@ const styles = StyleSheet.create({
   },
 
   stickyHeaderShell: {
-    marginTop: 12,
+    marginTop: 2,
     backgroundColor: BG,
-    paddingTop: 10,
-    paddingBottom: 6,
+    paddingTop: 2,
+    paddingBottom: 4,
     zIndex: 5,
   },
 
@@ -1070,8 +1164,8 @@ const styles = StyleSheet.create({
   childName: { fontSize: 14, color: TEXT, fontWeight: "700" },
 
   courseHead: { flexDirection: "row", alignItems: "center" },
-  courseName: { fontSize: 16, color: TEXT, fontWeight: "800", textTransform: "capitalize" },
-  teacher: { marginTop: 3, fontSize: 13, color: MUTED, fontWeight: "600" },
+  courseName: { fontSize: 14, color: TEXT, fontWeight: "800", textTransform: "capitalize" },
+  teacher: { marginTop: 2, fontSize: 12, color: MUTED, fontWeight: "600" },
 
   courseMeta: {
     alignItems: "center",
@@ -1091,22 +1185,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ringPercent: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "800",
   },
   assessRow: {
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderBottomWidth: 1,
     borderBottomColor: "#F1F5F9",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  assessName: { color: TEXT, fontSize: 13, flex: 1, paddingRight: 10 },
-  assessScore: { color: TEXT, fontSize: 13, fontWeight: "700" },
+  assessName: { color: TEXT, fontSize: 12, flex: 1, paddingRight: 8 },
+  assessScore: { color: TEXT, fontSize: 12, fontWeight: "700" },
   assessTotalRow: {
-    marginTop: 8,
-    paddingTop: 10,
+    marginTop: 6,
+    paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: "#E2E8F0",
     flexDirection: "row",
@@ -1114,12 +1208,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   assessTotalLabel: {
-    fontSize: 13,
+    fontSize: 12,
     color: MUTED,
     fontWeight: "700",
   },
   assessTotalValue: {
-    fontSize: 13,
+    fontSize: 12,
     color: TEXT,
     fontWeight: "900",
   },

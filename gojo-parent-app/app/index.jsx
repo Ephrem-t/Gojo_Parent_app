@@ -22,6 +22,15 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, query, orderByChild, equalTo, get } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
+import BlockedAccountModal from "../components/ui/BlockedAccountModal";
+import {
+  BLOCKED_ACCOUNT_MESSAGE,
+  clearParentSession,
+  getBlockedContactCaption,
+  getParentAccessState,
+  getSchoolContactInfo,
+  normalizePhoneNumber,
+} from "./lib/accountAccess";
 
 export const options = { headerShown: false };
 
@@ -39,11 +48,47 @@ export default function LoginScreen() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [blockedNotice, setBlockedNotice] = useState({
+    visible: false,
+    schoolName: "",
+    phone: "",
+    phoneLabel: "",
+  });
+
+  const showBlockedAccountNotice = async (explicitSchoolKey = null) => {
+    const contact = await getSchoolContactInfo(explicitSchoolKey);
+    setBlockedNotice({
+      visible: true,
+      schoolName: contact.schoolName || "",
+      phone: contact.phone || "",
+      phoneLabel: contact.phoneLabel || "",
+    });
+  };
+
+  const openPhoneNumber = async (rawPhone) => {
+    const phone = normalizePhoneNumber(rawPhone);
+
+    if (!phone) {
+      Alert.alert("Unavailable", "School phone number is missing.");
+      return;
+    }
+
+    const tel = `tel:${phone}`;
+    const can = await Linking.canOpenURL(tel);
+
+    if (!can) {
+      Alert.alert("Unavailable", `Cannot open dialer for: ${phone}`);
+      return;
+    }
+
+    await Linking.openURL(tel);
+  };
 
   useEffect(() => {
     const checkSession = async () => {
       try {
         const userId = await AsyncStorage.getItem("userId");
+        const userNodeKey = await AsyncStorage.getItem("userNodeKey");
         const role = await AsyncStorage.getItem("role");
         const schoolKey = await AsyncStorage.getItem("schoolKey");
         const lastLogin = await AsyncStorage.getItem("lastLogin");
@@ -56,21 +101,30 @@ export default function LoginScreen() {
             const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
 
             if (!Number.isNaN(last) && now - last < threeDaysMs) {
-              router.replace("/dashboard/home");
+              const accessState = await getParentAccessState({
+                userId,
+                userNodeKey: userNodeKey || "",
+                role,
+                schoolKey,
+              });
+
+              if (accessState.status === "active") {
+                router.replace("/dashboard/home");
+                return;
+              }
+
+              await clearParentSession();
+
+              if (accessState.status === "blocked") {
+                await showBlockedAccountNotice(schoolKey || accessState.schoolKey || null);
+              }
+
               return;
             }
           }
 
           // if no lastLogin or expired, clear and continue login page
-          await AsyncStorage.multiRemove([
-            "userId",
-            "userNodeKey",
-            "username",
-            "role",
-            "parentId",
-            "schoolKey",
-            "lastLogin",
-          ]);
+          await clearParentSession();
         }
       } catch (e) {
         console.warn("[Parent Login] checkSession error:", e);
@@ -150,15 +204,7 @@ export default function LoginScreen() {
 
       const info = infoSnap.val() || {};
       const rawPhone = info.phone || info.alternativePhone || "";
-      const phone = String(rawPhone).replace(/[^\d+]/g, "");
-
-      if (!phone) return Alert.alert("Unavailable", "School phone number is missing.");
-
-      const tel = `tel:${phone}`;
-      const can = await Linking.canOpenURL(tel);
-      if (!can) return Alert.alert("Unavailable", `Cannot open dialer for: ${phone}`);
-
-      await Linking.openURL(tel);
+      await openPhoneNumber(rawPhone);
     } catch (e) {
       console.warn("[Parent Login] handleNeedHelp error:", e);
       Alert.alert("Error", "Could not open dialer.");
@@ -200,15 +246,14 @@ export default function LoginScreen() {
       }
 
       if (typeof user.isActive === "boolean" && !user.isActive) {
-        setError("Your account is inactive.");
+        await showBlockedAccountNotice(user._schoolKey || null);
         return;
       }
 
       const parentId = user.parentId || "";
 
       // clear old session keys and save fresh
-      const oldKeys = await AsyncStorage.getAllKeys();
-      if (oldKeys?.length) await AsyncStorage.multiRemove(oldKeys);
+      await clearParentSession();
 
       await AsyncStorage.multiSet([
         ["userId", user.userId || user._nodeKey || ""],
@@ -300,6 +345,16 @@ export default function LoginScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
+
+      <BlockedAccountModal
+        visible={blockedNotice.visible}
+        message={BLOCKED_ACCOUNT_MESSAGE}
+        caption={getBlockedContactCaption(blockedNotice)}
+        onPrimaryPress={() => openPhoneNumber(blockedNotice.phone || blockedNotice.phoneLabel)}
+        onSecondaryPress={() => setBlockedNotice((current) => ({ ...current, visible: false }))}
+        primaryDisabled={!blockedNotice.phone && !blockedNotice.phoneLabel}
+        secondaryLabel="OK"
+      />
     </SafeAreaView>
   );
 }

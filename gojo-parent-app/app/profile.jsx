@@ -431,7 +431,9 @@ export default function ParentProfile() {
             <View style={styles.heroAvatarSlot}>
               <View style={styles.avatarWrap}>
                 <View style={styles.photoCard}>
-                  <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.photoCardImage} />
+                  <View style={styles.photoCardImageClip}>
+                    <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.photoCardImage} />
+                  </View>
                   <TouchableOpacity style={styles.photoCardCamera} onPress={handleImagePicker} activeOpacity={0.9}>
                     <Ionicons name="camera" size={16} color="#fff" />
                   </TouchableOpacity>
@@ -482,18 +484,18 @@ export default function ParentProfile() {
                 <TouchableOpacity
                   style={[
                     styles.profileFilterBtn,
-                    profileSectionTab === "family" && styles.profileFilterBtnActive,
+                    profileSectionTab === "info" && styles.profileFilterBtnActive,
                   ]}
-                  onPress={() => setProfileSectionTab("family")}
+                  onPress={() => setProfileSectionTab("info")}
                   activeOpacity={0.85}
                 >
                   <Text
                     style={[
                       styles.profileFilterText,
-                      profileSectionTab === "family" && styles.profileFilterTextActive,
+                      profileSectionTab === "info" && styles.profileFilterTextActive,
                     ]}
                   >
-                    Family
+                    Info
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -501,64 +503,6 @@ export default function ParentProfile() {
           </View>
 
           {profileSectionTab === "main" ? (
-            <>
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Parent tools</Text>
-                <ActionRow
-                  icon="create-outline"
-                  title="Edit profile info"
-                  subtitle="Update your name, phone, or email"
-                  onPress={handleEditInfo}
-                />
-                <ActionRow
-                  icon="camera-outline"
-                  title="Change profile photo"
-                  subtitle="Upload a fresh profile picture"
-                  onPress={handleImagePicker}
-                />
-                <ActionRow
-                  icon="download-outline"
-                  title="Save current photo"
-                  subtitle="Download your profile image to the gallery"
-                  onPress={handleSaveProfilePhoto}
-                />
-                <ActionRow
-                  icon="key-outline"
-                  title="Change password"
-                  subtitle="Update your account password"
-                  onPress={() => setShowPasswordModal(true)}
-                />
-              </View>
-
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Profile info</Text>
-                <InfoRow label="Name" value={parentUser.name} />
-                <InfoRow label="Username" value={parentUser.username ? usernameHandle : null} />
-                <InfoRow label="Role" value="Parent" />
-                <InfoRow label="Status" value={isOnline ? "Online" : "Offline"} />
-                <InfoRow label="Children" value={`${children.length}`} />
-                <InfoRow label="Phone" value={parentUser.phone} />
-                <InfoRow label="Email" value={parentUser.email} />
-              </View>
-
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Account</Text>
-                <ActionRow
-                  icon="shield-checkmark-outline"
-                  title="Terms & Privacy"
-                  subtitle="Read the current privacy and usage policy"
-                  onPress={handleTerms}
-                />
-                <ActionRow
-                  icon="log-out-outline"
-                  title="Logout"
-                  subtitle="Sign out from this parent account"
-                  onPress={handleLogout}
-                  destructive
-                />
-              </View>
-            </>
-          ) : (
             <>
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>Children</Text>
@@ -587,6 +531,35 @@ export default function ParentProfile() {
                     <Text style={styles.noteStateText}>No linked children found yet.</Text>
                   </View>
                 )}
+              </View>
+
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Account</Text>
+                <ActionRow
+                  icon="shield-checkmark-outline"
+                  title="Terms & Privacy"
+                  subtitle="Read the current privacy and usage policy"
+                  onPress={handleTerms}
+                />
+                <ActionRow
+                  icon="key-outline"
+                  title="Change password"
+                  subtitle="Update your account password"
+                  onPress={() => setShowPasswordModal(true)}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Profile info</Text>
+                <InfoRow label="Name" value={parentUser.name} />
+                <InfoRow label="Username" value={parentUser.username ? usernameHandle : null} />
+                <InfoRow label="Role" value="Parent" />
+                <InfoRow label="Status" value={isOnline ? "Online" : "Offline"} />
+                <InfoRow label="Children" value={`${children.length}`} />
+                <InfoRow label="Phone" value={parentUser.phone} />
+                <InfoRow label="Email" value={parentUser.email} />
               </View>
 
               <View style={styles.card}>
@@ -810,7 +783,7 @@ const styles = StyleSheet.create({
   heroCard: {
     marginHorizontal: -14,
     backgroundColor: PALETTE.card,
-    marginBottom: 12,
+    marginBottom: 4,
     overflow: "hidden",
   },
   heroBanner: {
@@ -1070,7 +1043,7 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
-    overflow: "hidden",
+    overflow: "visible",
     borderWidth: 4,
     borderColor: "#FFFFFF",
     backgroundColor: "#fff",
@@ -1079,6 +1052,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 16,
     elevation: 4,
+  },
+  photoCardImageClip: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 44,
+    overflow: "hidden",
   },
   photoCardImage: {
     width: "100%",
@@ -1181,7 +1160,7 @@ const styles = StyleSheet.create({
 
   contentWrap: {
     paddingHorizontal: 14,
-    gap: 12,
+    gap: 4,
   },
 
   quickActions: {
