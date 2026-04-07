@@ -18,23 +18,46 @@ import { database } from "../constants/firebaseConfig";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-const PRIMARY = "#2563EB";
-const PRIMARY_DARK = "#1D4ED8";
-const PRIMARY_SOFT = "#EFF6FF";
-const BG = "#FFFFFF";
-const CARD = "#FFFFFF";
-const TEXT = "#0F172A";
-const MUTED = "#64748B";
-const BORDER = "#E2E8F0";
+import { useParentTheme } from "../hooks/use-parent-theme";
 
 const HEADER_MAX_HEIGHT = 210;
 const HEADER_MIN_HEIGHT = 58;
+
+const makePalette = (colors, isDark) => ({
+  primary: colors.primary,
+  primaryDark: colors.primaryDark,
+  primarySoft: colors.primarySoft,
+  background: colors.background,
+  card: colors.card,
+  text: colors.text,
+  muted: colors.muted,
+  mutedAlt: colors.mutedAlt,
+  border: colors.border,
+  overlayButton: colors.heroTopButtonAlt,
+  white: colors.white,
+  noticeBg: colors.infoSurface,
+  noticeBorder: colors.infoBorder,
+  noticeText: colors.primaryDark,
+  cardShadow: isDark ? "#000000" : "#0F172A",
+  cardBorderOnHero: colors.heroTopBorder,
+  inputBg: colors.inputBackground,
+  inputDisabledBg: colors.surfaceMuted,
+});
+
+function useEditMyInfoThemeConfig() {
+  const { colors, isDark } = useParentTheme();
+
+  const palette = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
+  const styles = useMemo(() => createStyles(palette), [palette]);
+
+  return { palette, styles };
+}
 
 export default function EditMyInfo() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const scrollY = useRef(new Animated.Value(0)).current;
+  const { palette, styles } = useEditMyInfoThemeConfig();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -209,7 +232,7 @@ export default function EditMyInfo() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={PRIMARY} />
+        <ActivityIndicator size="large" color={palette.primary} />
         <Text style={styles.loadingText}>Loading your profile...</Text>
       </View>
     );
@@ -221,7 +244,7 @@ export default function EditMyInfo() {
 
       <View style={[styles.topActionsRow, { top: insets.top + 6 }]}>
         <TouchableOpacity style={styles.topIcon} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={21} color="#fff" />
+          <Ionicons name="arrow-back" size={21} color={palette.white} />
         </TouchableOpacity>
 
         <Animated.View style={[styles.compactCenter, { opacity: compactBarOpacity }]}>
@@ -236,10 +259,10 @@ export default function EditMyInfo() {
           disabled={saving}
         >
           {saving ? (
-            <ActivityIndicator size="small" color="#fff" />
+            <ActivityIndicator size="small" color={palette.white} />
           ) : (
             <>
-              <Ionicons name="checkmark-circle-outline" size={15} color="#fff" style={{ marginRight: 4 }} />
+              <Ionicons name="checkmark-circle-outline" size={15} color={palette.white} style={{ marginRight: 4 }} />
               <Text style={styles.saveButtonText}>Save</Text>
             </>
           )}
@@ -260,7 +283,7 @@ export default function EditMyInfo() {
         >
           <View style={styles.heroCard}>
             <View style={styles.heroIconWrap}>
-              <Ionicons name="create-outline" size={28} color={PRIMARY} />
+              <Ionicons name="create-outline" size={28} color={palette.primary} />
             </View>
 
             <View style={{ flex: 1 }}>
@@ -270,7 +293,7 @@ export default function EditMyInfo() {
               </Text>
 
               <View style={styles.statusChip}>
-                <Ionicons name="shield-checkmark-outline" size={14} color={PRIMARY} />
+                <Ionicons name="shield-checkmark-outline" size={14} color={palette.primary} />
                 <Text style={styles.statusText}>Secure profile editing</Text>
               </View>
             </View>
@@ -297,7 +320,7 @@ export default function EditMyInfo() {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.noticeCard}>
-            <Ionicons name="lock-closed-outline" size={16} color={PRIMARY_DARK} />
+            <Ionicons name="lock-closed-outline" size={16} color={palette.primaryDark} />
             <Text style={styles.noticeText}>
               Name, Email, Phone Number, and Username are protected and cannot be changed.
             </Text>
@@ -370,10 +393,12 @@ export default function EditMyInfo() {
 }
 
 function SectionHeader({ title, icon }) {
+  const { palette, styles } = useEditMyInfoThemeConfig();
+
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionIconWrap}>
-        <Ionicons name={icon} size={16} color={PRIMARY_DARK} />
+        <Ionicons name={icon} size={16} color={palette.primaryDark} />
       </View>
       <Text style={styles.sectionTitle}>{title}</Text>
     </View>
@@ -391,6 +416,8 @@ function InputField({
   keyboardType = "default",
   maxLength,
 }) {
+  const { palette, styles } = useEditMyInfoThemeConfig();
+
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.label}>{label}</Text>
@@ -409,28 +436,28 @@ function InputField({
         numberOfLines={numberOfLines}
         keyboardType={keyboardType}
         maxLength={maxLength}
-        placeholderTextColor="#94A3B8"
+        placeholderTextColor={palette.muted}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: palette.background,
   },
 
   loadingContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: BG,
+    backgroundColor: palette.background,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 14,
-    color: MUTED,
+    color: palette.muted,
     fontWeight: "600",
   },
 
@@ -450,7 +477,7 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.20)",
+    backgroundColor: palette.overlayButton,
   },
   compactCenter: {
     position: "absolute",
@@ -460,7 +487,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   compactTitle: {
-    color: "#fff",
+    color: palette.white,
     fontSize: 15,
     fontWeight: "800",
   },
@@ -468,14 +495,14 @@ const styles = StyleSheet.create({
     minWidth: 78,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(255,255,255,0.20)",
+    backgroundColor: palette.overlayButton,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
     flexDirection: "row",
   },
   saveButtonText: {
-    color: "#fff",
+    color: palette.white,
     fontSize: 13,
     fontWeight: "800",
   },
@@ -485,13 +512,13 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
     zIndex: 10,
     overflow: "hidden",
   },
   headerOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
   },
   heroWrap: {
     position: "absolute",
@@ -500,10 +527,10 @@ const styles = StyleSheet.create({
     bottom: 12,
   },
   heroCard: {
-    backgroundColor: CARD,
+    backgroundColor: palette.card,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.45)",
+    borderColor: palette.cardBorderOnHero,
     padding: 16,
     flexDirection: "row",
     alignItems: "center",
@@ -512,7 +539,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 18,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: palette.primarySoft,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
@@ -520,11 +547,11 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 21,
     fontWeight: "900",
-    color: TEXT,
+    color: palette.text,
   },
   heroSub: {
     fontSize: 13,
-    color: MUTED,
+    color: palette.muted,
     marginTop: 3,
     lineHeight: 18,
     fontWeight: "500",
@@ -532,7 +559,7 @@ const styles = StyleSheet.create({
   statusChip: {
     marginTop: 10,
     alignSelf: "flex-start",
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: palette.primarySoft,
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 999,
@@ -542,16 +569,16 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 12,
     fontWeight: "800",
-    color: PRIMARY,
+    color: palette.primary,
     marginLeft: 6,
   },
 
   noticeCard: {
     flexDirection: "row",
     alignItems: "flex-start",
-    backgroundColor: "#EFF6FF",
+    backgroundColor: palette.noticeBg,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: palette.noticeBorder,
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
@@ -559,20 +586,20 @@ const styles = StyleSheet.create({
   noticeText: {
     marginLeft: 8,
     flex: 1,
-    color: "#1E3A8A",
+    color: palette.noticeText,
     fontSize: 12.5,
     fontWeight: "700",
     lineHeight: 18,
   },
 
   card: {
-    backgroundColor: CARD,
+    backgroundColor: palette.card,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: palette.border,
     borderRadius: 18,
     padding: 14,
     marginBottom: 12,
-    shadowColor: "rgba(15,23,42,0.04)",
+    shadowColor: palette.cardShadow,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.05,
     shadowRadius: 14,
@@ -588,7 +615,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: palette.primarySoft,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
@@ -596,7 +623,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 16,
     fontWeight: "800",
-    color: TEXT,
+    color: palette.text,
   },
 
   inputGroup: {
@@ -605,22 +632,22 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#334155",
+    color: palette.mutedAlt,
     marginBottom: 6,
   },
   input: {
     borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: "#F8FAFC",
+    borderColor: palette.border,
+    backgroundColor: palette.inputBg,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 15,
-    color: TEXT,
+    color: palette.text,
   },
   inputDisabled: {
-    backgroundColor: "#F1F5F9",
-    color: "#64748B",
+    backgroundColor: palette.inputDisabledBg,
+    color: palette.muted,
   },
   textArea: {
     minHeight: 110,

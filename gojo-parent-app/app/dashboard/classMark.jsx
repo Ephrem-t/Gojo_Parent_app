@@ -20,16 +20,52 @@ import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
 import { getLinkedChildrenForParent } from "../lib/parentChildren";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
-const PRIMARY = "#1E90FF";
-const BG = "#FFFFFF";
-const CARD = "#FFFFFF";
-const TEXT = "#0F172A";
-const MUTED = "#64748B";
-const BORDER = "#E5EAF2";
-const PRIMARY_SOFT = "#EEF4FF";
-const SUCCESS = "#16A34A";
-const WARNING = "#EA580C";
+const makePalette = (colors, isDark) => ({
+  background: colors.background,
+  card: colors.card,
+  cardMuted: colors.cardMuted,
+  surfaceMuted: colors.surfaceMuted,
+  accent: colors.primary,
+  accentDark: colors.primaryDark,
+  accentSoft: colors.primarySoft,
+  text: colors.text,
+  muted: colors.muted,
+  mutedAlt: colors.mutedAlt,
+  border: colors.border,
+  borderSoft: colors.borderSoft,
+  borderStrong: colors.borderStrong,
+  success: colors.success,
+  warning: colors.warning,
+  ringTrack: colors.borderSoft,
+  heroGradientStart: colors.heroSurface,
+  heroGradientMid: colors.cardMuted,
+  heroGradientEnd: colors.primarySoft,
+  heroBorder: isDark ? colors.borderStrong : "#DDE8F7",
+  heroGlowOne: colors.heroOrbPrimary,
+  heroGlowTwo: colors.heroOrbSecondary,
+  heroShadow: isDark ? "#000000" : "#9FBFE6",
+  avatarBg: colors.avatarPlaceholder,
+  metricSurface: isDark ? colors.cardMuted : "rgba(255,255,255,0.74)",
+  metricBorder: isDark ? colors.borderStrong : "rgba(220,233,250,0.95)",
+  filterTabsBg: isDark ? colors.cardMuted : "#E8EEF9",
+  filterTextInactive: colors.mutedAlt,
+  indicatorBorder: isDark ? colors.borderStrong : "#BFDBFE",
+  activeSurface: isDark ? "#102742" : "#EEF6FF",
+  activeBorder: isDark ? colors.borderStrong : "#BFDBFE",
+  line: colors.line,
+  lineStrong: colors.borderSoft,
+});
+
+function useClassMarkThemeConfig() {
+  const { colors, isDark } = useParentTheme();
+
+  const PALETTE = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
+  const styles = useMemo(() => createStyles(PALETTE), [PALETTE]);
+
+  return { PALETTE, styles };
+}
 
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "classMark_cache_v6";
@@ -45,10 +81,10 @@ const getPathPrefix = async () => {
   return sk ? `Platform1/Schools/${sk}/` : "";
 };
 
-const chipColorByPercent = (p) => {
-  if (p >= 75) return SUCCESS;
-  if (p >= 50) return PRIMARY;
-  return WARNING;
+const chipColorByPercent = (p, PALETTE) => {
+  if (p >= 75) return PALETTE.success;
+  if (p >= 50) return PALETTE.accent;
+  return PALETTE.warning;
 };
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
@@ -136,6 +172,7 @@ const prettifyQuarterLabel = (q) => {
 };
 
 const ProgressRing = ({ percent, color }) => {
+  const { PALETTE, styles } = useClassMarkThemeConfig();
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
   const dashOffset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * safePercent) / 100;
 
@@ -146,7 +183,7 @@ const ProgressRing = ({ percent, color }) => {
           cx={RING_SIZE / 2}
           cy={RING_SIZE / 2}
           r={RING_RADIUS}
-          stroke="#E2E8F0"
+          stroke={PALETTE.ringTrack}
           strokeWidth={RING_STROKE}
           fill="none"
         />
@@ -174,6 +211,7 @@ const ProgressRing = ({ percent, color }) => {
 export default function ClassMark() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { PALETTE, styles } = useClassMarkThemeConfig();
 
   const [parentId, setParentId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -698,7 +736,7 @@ export default function ClassMark() {
   if (loading && !childUser) {
     return (
       <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PRIMARY} />
+        <ActivityIndicator size="large" color={PALETTE.accent} />
       </View>
     );
   }
@@ -712,7 +750,7 @@ export default function ClassMark() {
     );
   }
 
-  const overallStatusColor = chipColorByPercent(stats.overallPercent);
+  const overallStatusColor = chipColorByPercent(stats.overallPercent, PALETTE);
   const overallStatus =
     stats.overallPercent >= 75
       ? "Great progress"
@@ -722,7 +760,7 @@ export default function ClassMark() {
   const isQuarterBasedSemester = selectedSemester !== AVERAGE_SEMESTER_KEY && visibleQuarterKeys.length > 0;
   const fixedHeaderCard = (
     <LinearGradient
-      colors={["#FFFFFF", "#F9FBFF", "#EEF5FF"]}
+      colors={[PALETTE.heroGradientStart, PALETTE.heroGradientMid, PALETTE.heroGradientEnd]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.headerCard}
@@ -751,7 +789,7 @@ export default function ClassMark() {
 
         {children.length > 1 && (
           <TouchableOpacity onPress={() => setShowList((s) => !s)} style={styles.switchBtn}>
-            <Ionicons name={showList ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
+            <Ionicons name={showList ? "chevron-up" : "chevron-down"} size={20} color={PALETTE.accent} />
           </TouchableOpacity>
         )}
       </View>
@@ -865,8 +903,8 @@ export default function ClassMark() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={[PRIMARY]}
-            tintColor={PRIMARY}
+            colors={[PALETTE.accent]}
+            tintColor={PALETTE.accent}
           />
         }
       >
@@ -883,10 +921,10 @@ export default function ClassMark() {
                     onPress={() => switchChild(c, i)}
                     activeOpacity={0.85}
                   >
-                    <Text style={[styles.childName, active && { color: PRIMARY }]}>
+                    <Text style={[styles.childName, active && { color: PALETTE.accent }]}>
                       {c.name || `Child ${i + 1}`}
                     </Text>
-                    {active && <Ionicons name="checkmark-circle" size={18} color={PRIMARY} />}
+                    {active && <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} />}
                   </TouchableOpacity>
                 );
               })}
@@ -919,7 +957,7 @@ export default function ClassMark() {
 
           const percent = totalMax > 0 ? Math.round((totalScore / totalMax) * 100) : 0;
           const isOpen = !!expanded[course.courseId];
-          const pcColor = chipColorByPercent(percent);
+          const pcColor = chipColorByPercent(percent, PALETTE);
 
           return (
             <View key={course.courseId} style={[styles.card, styles.subjectCard, { marginTop: 8 }]}>
@@ -969,7 +1007,7 @@ export default function ClassMark() {
 
         {refreshingBg && !refreshing && (
           <View style={{ marginTop: 8, alignItems: "center" }}>
-            <Text style={{ fontSize: 12, color: MUTED }}>Refreshing latest marks…</Text>
+            <Text style={{ fontSize: 12, color: PALETTE.muted }}>Refreshing latest marks…</Text>
           </View>
         )}
       </ScrollView>
@@ -977,8 +1015,8 @@ export default function ClassMark() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+const createStyles = (PALETTE) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: PALETTE.background },
   fixedHeaderWrap: {
     paddingHorizontal: 14,
     paddingTop: 4,
@@ -992,10 +1030,10 @@ const styles = StyleSheet.create({
   headerCard: {
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#DDE8F7",
+    borderColor: PALETTE.heroBorder,
     padding: 16,
     overflow: "hidden",
-    shadowColor: "#9FBFE6",
+    shadowColor: PALETTE.heroShadow,
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.18,
     shadowRadius: 24,
@@ -1006,7 +1044,7 @@ const styles = StyleSheet.create({
     width: 170,
     height: 170,
     borderRadius: 999,
-    backgroundColor: "rgba(30,144,255,0.08)",
+    backgroundColor: PALETTE.heroGlowOne,
     top: -72,
     right: -18,
   },
@@ -1015,19 +1053,19 @@ const styles = StyleSheet.create({
     width: 118,
     height: 118,
     borderRadius: 999,
-    backgroundColor: "rgba(96,165,250,0.08)",
+    backgroundColor: PALETTE.heroGlowTwo,
     bottom: -34,
     left: -20,
   },
   headerTop: { flexDirection: "row", alignItems: "center" },
-  avatar: { marginRight: 12, backgroundColor: "#E5E7EB" },
-  name: { color: TEXT, fontWeight: "800" },
-  subText: { color: MUTED, fontSize: 13, marginTop: 2 },
+  avatar: { marginRight: 12, backgroundColor: PALETTE.avatarBg },
+  name: { color: PALETTE.text, fontWeight: "800" },
+  subText: { color: PALETTE.muted, fontSize: 13, marginTop: 2 },
   switchBtn: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "#EEF4FF",
+    backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1039,27 +1077,27 @@ const styles = StyleSheet.create({
   metricPill: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.74)",
+    backgroundColor: PALETTE.metricSurface,
     borderWidth: 1,
-    borderColor: "rgba(220,233,250,0.95)",
+    borderColor: PALETTE.metricBorder,
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
-  metricLabel: { fontSize: 12, color: MUTED, fontWeight: "600" },
-  metricValue: { marginTop: 3, fontSize: 16, color: TEXT, fontWeight: "800" },
+  metricLabel: { fontSize: 12, color: PALETTE.muted, fontWeight: "600" },
+  metricValue: { marginTop: 3, fontSize: 16, color: PALETTE.text, fontWeight: "800" },
 
   card: {
-    backgroundColor: CARD,
+    backgroundColor: PALETTE.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: PALETTE.border,
     padding: 14,
   },
   subjectCard: {
     borderRadius: 14,
     padding: 10,
   },
-  sectionTitle: { fontSize: 14, color: TEXT, fontWeight: "800" },
+  sectionTitle: { fontSize: 14, color: PALETTE.text, fontWeight: "800" },
 
   academicTermCard: {
     width: "92%",
@@ -1071,7 +1109,7 @@ const styles = StyleSheet.create({
 
   stickyHeaderShell: {
     marginTop: 2,
-    backgroundColor: BG,
+    backgroundColor: PALETTE.background,
     paddingTop: 2,
     paddingBottom: 4,
     zIndex: 5,
@@ -1083,7 +1121,7 @@ const styles = StyleSheet.create({
   filterTabs: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8EEF9",
+    backgroundColor: PALETTE.filterTabsBg,
     borderRadius: 14,
     overflow: "hidden",
     position: "relative",
@@ -1097,21 +1135,21 @@ const styles = StyleSheet.create({
   filterText: {
     fontWeight: "700",
     fontSize: 12,
-    color: "#475569",
+    color: PALETTE.filterTextInactive,
     letterSpacing: 0.2,
   },
   filterTextActive: {
-    color: TEXT,
+    color: PALETTE.text,
   },
   filterIndicator: {
     position: "absolute",
     top: 4,
     bottom: 4,
     left: 0,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: PALETTE.accentSoft,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: PALETTE.indicatorBorder,
   },
 
   quarterRow: {
@@ -1121,33 +1159,33 @@ const styles = StyleSheet.create({
   },
   quarterCard: {
     minWidth: 124,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: PALETTE.surfaceMuted,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: PALETTE.border,
     borderRadius: 14,
     paddingVertical: 12,
     paddingHorizontal: 14,
   },
   quarterCardActive: {
-    backgroundColor: "#EEF6FF",
-    borderColor: "#BFDBFE",
+    backgroundColor: PALETTE.activeSurface,
+    borderColor: PALETTE.activeBorder,
   },
   quarterTitle: {
     fontSize: 13,
     fontWeight: "800",
-    color: TEXT,
+    color: PALETTE.text,
   },
   quarterTitleActive: {
-    color: PRIMARY,
+    color: PALETTE.accent,
   },
   quarterSub: {
     fontSize: 11,
-    color: MUTED,
+    color: PALETTE.muted,
     marginTop: 3,
     fontWeight: "600",
   },
   quarterSubActive: {
-    color: PRIMARY,
+    color: PALETTE.accent,
   },
 
   childRow: {
@@ -1160,12 +1198,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  childRowActive: { backgroundColor: "#EEF4FF", borderColor: "#BFDBFE" },
-  childName: { fontSize: 14, color: TEXT, fontWeight: "700" },
+  childRowActive: { backgroundColor: PALETTE.activeSurface, borderColor: PALETTE.activeBorder },
+  childName: { fontSize: 14, color: PALETTE.text, fontWeight: "700" },
 
   courseHead: { flexDirection: "row", alignItems: "center" },
-  courseName: { fontSize: 14, color: TEXT, fontWeight: "800", textTransform: "capitalize" },
-  teacher: { marginTop: 2, fontSize: 12, color: MUTED, fontWeight: "600" },
+  courseName: { fontSize: 14, color: PALETTE.text, fontWeight: "800", textTransform: "capitalize" },
+  teacher: { marginTop: 2, fontSize: 12, color: PALETTE.muted, fontWeight: "600" },
 
   courseMeta: {
     alignItems: "center",
@@ -1191,33 +1229,33 @@ const styles = StyleSheet.create({
   assessRow: {
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: PALETTE.line,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  assessName: { color: TEXT, fontSize: 12, flex: 1, paddingRight: 8 },
-  assessScore: { color: TEXT, fontSize: 12, fontWeight: "700" },
+  assessName: { color: PALETTE.text, fontSize: 12, flex: 1, paddingRight: 8 },
+  assessScore: { color: PALETTE.text, fontSize: 12, fontWeight: "700" },
   assessTotalRow: {
     marginTop: 6,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
+    borderTopColor: PALETTE.lineStrong,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   assessTotalLabel: {
     fontSize: 12,
-    color: MUTED,
+    color: PALETTE.muted,
     fontWeight: "700",
   },
   assessTotalValue: {
     fontSize: 12,
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "900",
   },
 
-  emptyTitle: { fontSize: 18, color: TEXT, fontWeight: "800", textAlign: "center" },
-  emptySubtitle: { fontSize: 14, color: MUTED, textAlign: "center", marginTop: 6 },
+  emptyTitle: { fontSize: 18, color: PALETTE.text, fontWeight: "800", textAlign: "center" },
+  emptySubtitle: { fontSize: 14, color: PALETTE.muted, textAlign: "center", marginTop: 6 },
 });

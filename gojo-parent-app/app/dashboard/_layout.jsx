@@ -3,33 +3,40 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Tabs, useRouter } from "expo-router";
 import * as NavigationBar from "expo-navigation-bar";
 import { ref, onValue, off, get } from "firebase/database";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { Image, Text, TouchableOpacity, View, StyleSheet, Animated, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
-const TAB_COLORS = {
-  text: "#11181C",
-  background: "#F6F8FC",
-  border: "#E4EAF5",
-  muted: "#6B7894",
-  primary: "#007AFB",
-  soft: "#EEF5FF",
-  tabBar: "#FFFFFF",
-  tabInactive: "#6B7280",
-  danger: "#F87171",
-  tabGlass: "rgba(255,255,255,0.9)",
-  tabGlassBorder: "rgba(221,228,240,0.95)",
-  tabGlassHighlight: "rgba(255,255,255,0.72)",
-  tabGlassActive: "rgba(0,122,251,0.08)",
-  white: "#FFFFFF",
-};
 
 export default function DashboardLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors, expoStatusBarStyle, navigationBarButtonStyle } = useParentTheme();
+
+  const tabColors = useMemo(
+    () => ({
+      text: colors.textStrong,
+      background: colors.backgroundAlt,
+      border: colors.border,
+      muted: colors.mutedAlt,
+      primary: colors.primary,
+      soft: colors.primarySoft,
+      tabBar: colors.tabBar,
+      tabInactive: colors.tabInactive,
+      danger: colors.danger,
+      tabGlass: colors.tabBarSurface,
+      tabGlassBorder: colors.tabBarBorder,
+      tabGlassHighlight: colors.tabBarHighlight,
+      tabGlassActive: colors.tabBarActive,
+      white: colors.white,
+    }),
+    [colors]
+  );
+  const styles = useMemo(() => createStyles(tabColors), [tabColors]);
 
   const [schoolName, setSchoolName] = useState("");
   const [schoolKey, setSchoolKey] = useState(null);
@@ -58,7 +65,7 @@ export default function DashboardLayout() {
         await NavigationBar.setPositionAsync("absolute");
         await NavigationBar.setBackgroundColorAsync("#00000000");
         await NavigationBar.setBorderColorAsync("#00000000");
-        await NavigationBar.setButtonStyleAsync("dark");
+        await NavigationBar.setButtonStyleAsync(navigationBarButtonStyle);
       } catch (error) {
         console.warn("Navigation bar style error:", error);
       }
@@ -67,14 +74,14 @@ export default function DashboardLayout() {
     return () => {
       (async () => {
         try {
-          await NavigationBar.setBackgroundColorAsync(TAB_COLORS.tabBar);
-          await NavigationBar.setBorderColorAsync(TAB_COLORS.border);
+          await NavigationBar.setBackgroundColorAsync(tabColors.tabBar);
+          await NavigationBar.setBorderColorAsync(tabColors.border);
           await NavigationBar.setPositionAsync("relative");
-          await NavigationBar.setButtonStyleAsync("dark");
+          await NavigationBar.setButtonStyleAsync(navigationBarButtonStyle);
         } catch {}
       })();
     };
-  }, []);
+  }, [navigationBarButtonStyle, tabColors.border, tabColors.tabBar]);
 
   const schoolAwarePath = useCallback(
     (subPath, key = schoolKey) => {
@@ -333,7 +340,7 @@ export default function DashboardLayout() {
           <MessageIconSkeleton />
         ) : (
           <View style={styles.chatIconWrap}>
-            <Ionicons name="paper-plane-outline" size={19} color={TAB_COLORS.text} />
+            <Ionicons name="paper-plane-outline" size={19} color={tabColors.text} />
             {totalUnread > 0 && (
               <View style={styles.unreadBadge}>
                 <Text style={styles.unreadText}>{totalUnread > 99 ? "99+" : totalUnread}</Text>
@@ -403,7 +410,7 @@ export default function DashboardLayout() {
           if (options.href === null) return null;
 
           const focused = state.index === index;
-          const color = focused ? TAB_COLORS.primary : TAB_COLORS.tabInactive;
+          const color = focused ? tabColors.primary : tabColors.tabInactive;
           const label = typeof options.tabBarLabel === "string"
             ? options.tabBarLabel
             : typeof options.title === "string"
@@ -468,16 +475,16 @@ export default function DashboardLayout() {
 
   return (
     <>
-      <StatusBar style="dark" backgroundColor={TAB_COLORS.tabBar} translucent={false} />
+      <StatusBar style={expoStatusBarStyle} backgroundColor={tabColors.tabBar} translucent={false} />
       <Tabs
         initialRouteName="home"
         tabBar={(props) => <DashboardTabBar {...props} />}
         screenOptions={{
-          headerStyle: { backgroundColor: TAB_COLORS.tabBar },
+          headerStyle: { backgroundColor: tabColors.tabBar },
           headerShadowVisible: false,
           headerTitleAlign: "left",
-          headerTintColor: TAB_COLORS.text,
-          sceneStyle: { backgroundColor: TAB_COLORS.background },
+          headerTintColor: tabColors.text,
+          sceneStyle: { backgroundColor: tabColors.background },
         }}
       >
         <Tabs.Screen
@@ -545,7 +552,7 @@ export default function DashboardLayout() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (tabColors) => StyleSheet.create({
   titleRow: {
     flexDirection: "row",
     alignItems: "baseline",
@@ -554,14 +561,14 @@ const styles = StyleSheet.create({
 
   titleText: {
     fontSize: 22,
-    color: TAB_COLORS.text,
+    color: tabColors.text,
     fontWeight: "800",
     letterSpacing: -0.3,
   },
 
   titleAccent: {
     fontSize: 22,
-    color: TAB_COLORS.primary,
+    color: tabColors.primary,
     fontWeight: "800",
     letterSpacing: -0.3,
     marginLeft: 4,
@@ -584,9 +591,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 6,
-    backgroundColor: TAB_COLORS.tabGlass,
+    backgroundColor: tabColors.tabGlass,
     borderWidth: 1,
-    borderColor: TAB_COLORS.tabGlassBorder,
+    borderColor: tabColors.tabGlassBorder,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.045,
@@ -601,7 +608,7 @@ const styles = StyleSheet.create({
     top: 1,
     height: 1,
     borderRadius: 999,
-    backgroundColor: TAB_COLORS.tabGlassHighlight,
+    backgroundColor: tabColors.tabGlassHighlight,
   },
 
   telegramTabItem: {
@@ -619,7 +626,7 @@ const styles = StyleSheet.create({
   },
 
   telegramTabItemActive: {
-    backgroundColor: TAB_COLORS.tabGlassActive,
+    backgroundColor: tabColors.tabGlassActive,
   },
 
   telegramTabIconWrap: {
@@ -688,17 +695,17 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: TAB_COLORS.danger,
+    backgroundColor: tabColors.danger,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 4,
     borderWidth: 1.5,
-    borderColor: TAB_COLORS.tabBar,
+    borderColor: tabColors.tabBar,
     zIndex: 20,
     elevation: 20,
   },
   unreadText: {
-    color: TAB_COLORS.white,
+    color: tabColors.white,
     fontSize: 10,
     fontWeight: "700",
   },
@@ -715,7 +722,7 @@ const styles = StyleSheet.create({
   schoolTitle: {
     fontSize: 20,
     fontWeight: "bold",
-    color: TAB_COLORS.text,
+    color: tabColors.text,
     marginLeft: 8,
   },
 
@@ -741,6 +748,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1.5,
     borderColor: "transparent",
-    backgroundColor: TAB_COLORS.soft,
+    backgroundColor: tabColors.soft,
   },
 });

@@ -1,17 +1,42 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-
-const PRIMARY = "#1E90FF";
-const TEXT = "#0F172A";
-const MUTED = "#64748B";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
 export default function PaymentsTab() {
+  const { colors, isDark } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      primary: colors.primary,
+      text: colors.text,
+      muted: colors.muted,
+      card: colors.card,
+      border: colors.border,
+      heroGradientStart: colors.heroSurface,
+      heroGradientMid: colors.cardMuted,
+      heroGradientEnd: colors.primarySoft,
+      heroBorder: isDark ? colors.borderStrong : "#E3EDF9",
+      heroShadow: isDark ? "#000000" : "#9FBFE6",
+      heroGlowOne: colors.heroOrbPrimary,
+      heroGlowTwo: colors.heroOrbSecondary,
+      statusCardBg: colors.inputBackground,
+      statusCardBorder: colors.infoBorder,
+      warningText: colors.warning,
+      warningBg: colors.warningSoft,
+      featureChipBg: colors.primarySoftAlt,
+      featureChipBorder: colors.infoBorder,
+      buttonBorder: colors.primaryDark,
+      white: colors.white,
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
+
   return (
     <View>
       <LinearGradient
-        colors={["#FFFFFF", "#F9FBFF", "#F1F7FF"]}
+        colors={[palette.heroGradientStart, palette.heroGradientMid, palette.heroGradientEnd]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.heroCard}
@@ -32,21 +57,21 @@ export default function PaymentsTab() {
 
         <View style={styles.heroFeatureRow}>
           <View style={styles.heroFeatureChip}>
-            <Ionicons name="card-outline" size={13} color={PRIMARY} />
+            <Ionicons name="card-outline" size={13} color={palette.primary} />
             <Text style={styles.heroFeatureText}>Card</Text>
           </View>
           <View style={styles.heroFeatureChip}>
-            <Ionicons name="phone-portrait-outline" size={13} color={PRIMARY} />
+            <Ionicons name="phone-portrait-outline" size={13} color={palette.primary} />
             <Text style={styles.heroFeatureText}>Wallet</Text>
           </View>
           <View style={styles.heroFeatureChip}>
-            <Ionicons name="business-outline" size={13} color={PRIMARY} />
+            <Ionicons name="business-outline" size={13} color={palette.primary} />
             <Text style={styles.heroFeatureText}>Bank</Text>
           </View>
         </View>
 
         <TouchableOpacity style={styles.heroPrimaryBtn} disabled activeOpacity={0.9}>
-          <Ionicons name="lock-closed-outline" size={16} color="#FFFFFF" style={styles.heroPrimaryBtnIcon} />
+          <Ionicons name="lock-closed-outline" size={16} color={palette.white} style={styles.heroPrimaryBtnIcon} />
           <Text style={styles.heroPrimaryBtnText}>Pay Now (Disabled)</Text>
         </TouchableOpacity>
       </LinearGradient>
@@ -61,15 +86,15 @@ export default function PaymentsTab() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette) => StyleSheet.create({
   heroCard: {
     borderRadius: 22,
     padding: 18,
     marginBottom: 14,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: "#E3EDF9",
-    shadowColor: "#9FBFE6",
+    borderColor: palette.heroBorder,
+    shadowColor: palette.heroShadow,
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.2,
     shadowRadius: 24,
@@ -80,7 +105,7 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 999,
-    backgroundColor: "rgba(30,144,255,0.08)",
+    backgroundColor: palette.heroGlowOne,
     top: -70,
     right: -30,
   },
@@ -89,20 +114,20 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 999,
-    backgroundColor: "rgba(59,130,246,0.06)",
+    backgroundColor: palette.heroGlowTwo,
     bottom: -38,
     left: -18,
   },
   heroTitle: {
     fontSize: 23,
     fontWeight: "900",
-    color: TEXT,
+    color: palette.text,
     letterSpacing: 0.2,
   },
   heroSub: {
     fontSize: 13,
     lineHeight: 20,
-    color: MUTED,
+    color: palette.muted,
     marginTop: 8,
   },
   heroStatusCard: {
@@ -111,16 +136,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 13,
     borderRadius: 16,
-    backgroundColor: "#F7FAFF",
+    backgroundColor: palette.statusCardBg,
     borderWidth: 1,
-    borderColor: "#DCE9FA",
+    borderColor: palette.statusCardBorder,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
   },
   heroStatusLabel: {
-    color: MUTED,
+    color: palette.muted,
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -128,17 +153,17 @@ const styles = StyleSheet.create({
   },
   heroStatusValue: {
     marginTop: 4,
-    color: TEXT,
+    color: palette.text,
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 18,
     maxWidth: 200,
   },
   heroStatusBadge: {
-    color: "#FFF7ED",
-    backgroundColor: "rgba(249,115,22,0.22)",
+    color: palette.warningText,
+    backgroundColor: palette.warningBg,
     borderWidth: 1,
-    borderColor: "rgba(255,214,170,0.28)",
+    borderColor: palette.statusCardBorder,
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 999,
@@ -158,12 +183,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 11,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: "#F3F8FF",
+    backgroundColor: palette.featureChipBg,
     borderWidth: 1,
-    borderColor: "#D9E8FB",
+    borderColor: palette.featureChipBorder,
   },
   heroFeatureText: {
-    color: TEXT,
+    color: palette.text,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -174,31 +199,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
     borderWidth: 1,
-    borderColor: "#1978DA",
+    borderColor: palette.buttonBorder,
     opacity: 0.72,
   },
   heroPrimaryBtnIcon: {
     marginRight: 8,
   },
   heroPrimaryBtnText: {
-    color: "#FFFFFF",
+    color: palette.white,
     fontWeight: "800",
     fontSize: 14,
   },
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: palette.card,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: palette.border,
     borderRadius: 14,
     padding: 14,
     marginBottom: 12,
   },
-  cardTitle: { fontSize: 16, fontWeight: "800", color: TEXT },
-  cardSub: { fontSize: 13, color: MUTED, marginTop: 4, marginBottom: 10 },
+  cardTitle: { fontSize: 16, fontWeight: "800", color: palette.text },
+  cardSub: { fontSize: 13, color: palette.muted, marginTop: 4, marginBottom: 10 },
 
-  bullet: { fontSize: 13, color: TEXT, marginBottom: 6 },
+  bullet: { fontSize: 13, color: palette.text, marginBottom: 6 },
 
   infoRow: {
     flexDirection: "row",
@@ -206,11 +231,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     alignItems: "center",
   },
-  infoLabel: { fontSize: 13, color: MUTED },
+  infoLabel: { fontSize: 13, color: palette.muted },
   badgePending: {
     fontSize: 12,
-    color: "#9A3412",
-    backgroundColor: "#FFEDD5",
+    color: palette.warningText,
+    backgroundColor: palette.warningBg,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
@@ -219,12 +244,12 @@ const styles = StyleSheet.create({
 
   primaryBtn: {
     marginTop: 4,
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
     borderRadius: 10,
     paddingVertical: 11,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
   },
-  primaryBtnText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  primaryBtnText: { color: palette.white, fontWeight: "700", fontSize: 14 },
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { addNetworkStateListener, getNetworkStateAsync } from "expo-network";
 import {
   View,
@@ -6,7 +6,6 @@ import {
   Image,
   TouchableOpacity,
   StyleSheet,
-  Dimensions,
   Animated,
   StatusBar,
   Alert,
@@ -14,7 +13,6 @@ import {
   Modal,
   Linking,
   ActivityIndicator,
-  ScrollView,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -27,32 +25,63 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getLinkedChildrenForParent } from "./lib/parentChildren";
+import { useParentTheme } from "../hooks/use-parent-theme";
+const makePalette = (colors, isDark) => ({
+  background: colors.background,
+  card: colors.card,
+  cardMuted: colors.cardMuted,
+  surfaceMuted: colors.surfaceMuted,
+  inputBackground: colors.inputBackground,
+  accent: colors.primary,
+  accentDark: colors.primaryDark,
+  accentSoft: colors.primarySoft,
+  text: colors.text,
+  subtext: colors.mutedAlt,
+  muted: colors.muted,
+  border: colors.border,
+  borderSoft: colors.borderSoft,
+  line: colors.line,
+  white: colors.white,
+  danger: colors.danger,
+  dangerSoft: colors.dangerSoft,
+  success: colors.success,
+  successSoft: colors.successSoft,
+  offline: colors.offline,
+  overlay: colors.overlay,
+  heroSurface: colors.heroSurface,
+  heroBannerTint: colors.heroBannerTint,
+  heroOrbPrimary: colors.heroOrbPrimary,
+  heroOrbSecondary: colors.heroOrbSecondary,
+  heroTopButton: colors.heroTopButton,
+  heroTopBorder: colors.heroTopBorder,
+  heroPillBg: colors.heroPillBg,
+  heroPillBorder: colors.heroPillBorder,
+  heroPillText: colors.heroPillText,
+  heroSubtleText: colors.heroSubtleText,
+  shadowBlue: isDark ? "#000000" : "#BED3EE",
+  shadowSoft: isDark ? "#000000" : "#D9E7F6",
+  topIconSurface: isDark ? colors.cardMuted : "rgba(255,255,255,0.96)",
+  purpleAction: isDark ? colors.primary : "#5865F2",
+  onlineBorder: isDark ? "#14532D" : "#CFF7E0",
+  onlineText: isDark ? "#6EE7B7" : "#0F766E",
+  error: isDark ? "#F87171" : "#DC2626",
+});
 
-const { width } = Dimensions.get("window");
+function useProfileThemeConfig() {
+  const { colors, isDark, statusBarStyle, toggleTheme } = useParentTheme();
 
-const HEADER_MAX_HEIGHT = Math.max(220, Math.min(280, width * 0.68));
-const HEADER_MIN_HEIGHT = 58;
-const PALETTE = {
-  background: "#ffffff",
-  card: "#FFFFFF",
-  accent: "#2296F3",
-  accentDark: "#0B72C7",
-  accentSoft: "#EAF5FF",
-  text: "#0F172A",
-  subtext: "#475569",
-  muted: "#64748B",
-  border: "#E5EDF5",
-  white: "#FFFFFF",
-  danger: "#E53935",
-  success: "#10B981",
-  offline: "#94A3B8",
-};
+  const PALETTE = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
+  const styles = useMemo(() => createStyles(PALETTE), [PALETTE]);
+
+  return { PALETTE, styles, isDark, statusBarStyle, toggleTheme };
+}
 
 const TERMS_URL = "https://example.com/terms";
 
 export default function ParentProfile() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { PALETTE, styles, isDark, statusBarStyle, toggleTheme } = useProfileThemeConfig();
 
   const [schoolKey, setSchoolKey] = useState(null);
   const [parentNodeId, setParentNodeId] = useState(null);
@@ -73,6 +102,7 @@ export default function ParentProfile() {
   const [currentPasswordError, setCurrentPasswordError] = useState("");
   const [newPasswordError, setNewPasswordError] = useState("");
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -191,13 +221,20 @@ export default function ParentProfile() {
 
   const handleEditInfo = () => {
     setShowMenu(false);
+    setShowEditModal(false);
     router.push("/editMyInfo");
   };
 
+  const handleDarkModePress = useCallback(() => {
+    toggleTheme();
+  }, [toggleTheme]);
+
   const handleImagePicker = async () => {
     try {
+      setShowMenu(false);
+      setShowEditModal(false);
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.75,
@@ -337,6 +374,39 @@ export default function ParentProfile() {
     setConfirmPasswordError("");
   };
 
+  const openEditModal = useCallback(() => {
+    setShowMenu(false);
+    setShowEditModal(true);
+  }, []);
+
+  const closeEditModal = useCallback(() => {
+    setShowEditModal(false);
+  }, []);
+
+  const openPasswordModalFromActions = useCallback(() => {
+    setShowMenu(false);
+    setShowEditModal(false);
+    setShowPasswordModal(true);
+  }, []);
+
+  const pullY = scrollY.interpolate({
+    inputRange: [-220, 0],
+    outputRange: [220, 0],
+    extrapolate: "clamp",
+  });
+
+  const stretchHeight = pullY.interpolate({
+    inputRange: [0, 220],
+    outputRange: [0, 300],
+    extrapolate: "clamp",
+  });
+
+  const stretchOpacity = pullY.interpolate({
+    inputRange: [0, 30, 220],
+    outputRange: [0, 0.35, 1],
+    extrapolate: "clamp",
+  });
+
   if (loading) {
     return (
       <View style={styles.loadingWrap}>
@@ -365,10 +435,30 @@ export default function ParentProfile() {
       ? String(parentUser.username)
       : `@${parentUser.username}`
     : "@parent";
+  const joinedDate = parentUser.createdAt
+    ? new Date(parentUser.createdAt).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "Recently joined";
 
   return (
     <View style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="dark-content" />
+      <StatusBar translucent backgroundColor="transparent" barStyle={statusBarStyle} />
+
+      <Animated.View
+        style={[
+          styles.stretchContainer,
+          {
+            height: stretchHeight,
+            opacity: stretchOpacity,
+            pointerEvents: "none",
+          },
+        ]}
+      >
+        <View style={styles.stretchFill} />
+      </Animated.View>
 
       {showMenu && (
         <>
@@ -378,7 +468,10 @@ export default function ParentProfile() {
               <Text style={styles.menuText}>Edit Info</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={handleImagePicker}>
-              <Text style={styles.menuText}>Set Profile Photo</Text>
+              <Text style={styles.menuText}>Change Photo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.menuItem} onPress={openPasswordModalFromActions}>
+              <Text style={styles.menuText}>Change Password</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={handleSaveProfilePhoto}>
               <Text style={styles.menuText}>Save to Gallery</Text>
@@ -393,14 +486,19 @@ export default function ParentProfile() {
         </>
       )}
 
-      <ScrollView
-        contentContainerStyle={{
-          paddingBottom: Math.max(28, insets.bottom + 16),
-        }}
+      <Animated.ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          { paddingBottom: Math.max(88, insets.bottom + 64) },
+        ]}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+          useNativeDriver: false,
+        })}
+        scrollEventThrottle={16}
+        bounces
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.contentWrap}>
-          <View style={styles.heroCard}>
+        <View style={styles.heroCard}>
             <View style={[styles.heroBanner, { height: 110 + insets.top }]}> 
               <View style={styles.heroBannerFallback}>
                 <View style={styles.heroBannerOrbPrimary} />
@@ -420,6 +518,14 @@ export default function ParentProfile() {
                       text={`${children.length} ${children.length === 1 ? "Child" : "Children"}`}
                     />
                   </View>
+
+                  <TouchableOpacity
+                    style={[styles.heroTopIconBtn, styles.heroTopIconBtnSpacing]}
+                    onPress={handleDarkModePress}
+                    activeOpacity={0.88}
+                  >
+                    <Ionicons name={isDark ? "sunny-outline" : "moon-outline"} size={17} color={PALETTE.white} />
+                  </TouchableOpacity>
 
                   <TouchableOpacity style={styles.heroTopIconBtn} onPress={() => setShowMenu((v) => !v)}>
                     <Ionicons name="ellipsis-horizontal" size={18} color={PALETTE.white} />
@@ -458,7 +564,7 @@ export default function ParentProfile() {
                 />
               </View>
 
-              <TouchableOpacity style={styles.editProfileBtn} onPress={handleEditInfo} activeOpacity={0.88}>
+              <TouchableOpacity style={styles.editProfileBtn} onPress={openEditModal} activeOpacity={0.88}>
                 <Text style={styles.editProfileText}>Edit Profile</Text>
               </TouchableOpacity>
 
@@ -500,193 +606,201 @@ export default function ParentProfile() {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
-
-          {profileSectionTab === "main" ? (
-            <>
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Children</Text>
-                {children.length ? (
-                  children.map((child) => (
-                    <TouchableOpacity
-                      key={child.studentId}
-                      style={styles.childCard}
-                      onPress={() => handleChildPress(child)}
-                      activeOpacity={0.88}
-                    >
-                      <Image source={{ uri: child.profileImage }} style={styles.childImage} />
-                      <View style={styles.childBody}>
-                        <Text style={styles.childName}>{child.name}</Text>
-                        <Text style={styles.childMeta}>
-                          Grade {child.grade} • Section {child.section}
-                        </Text>
-                        <Text style={styles.childMeta}>Relation: {child.relationship}</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={18} color="#8EA1B5" />
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <View style={styles.noteStateCard}>
-                    <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
-                    <Text style={styles.noteStateText}>No linked children found yet.</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Account</Text>
-                <ActionRow
-                  icon="shield-checkmark-outline"
-                  title="Terms & Privacy"
-                  subtitle="Read the current privacy and usage policy"
-                  onPress={handleTerms}
-                />
-                <ActionRow
-                  icon="key-outline"
-                  title="Change password"
-                  subtitle="Update your account password"
-                  onPress={() => setShowPasswordModal(true)}
-                />
-              </View>
-            </>
-          ) : (
-            <>
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Profile info</Text>
-                <InfoRow label="Name" value={parentUser.name} />
-                <InfoRow label="Username" value={parentUser.username ? usernameHandle : null} />
-                <InfoRow label="Role" value="Parent" />
-                <InfoRow label="Status" value={isOnline ? "Online" : "Offline"} />
-                <InfoRow label="Children" value={`${children.length}`} />
-                <InfoRow label="Phone" value={parentUser.phone} />
-                <InfoRow label="Email" value={parentUser.email} />
-              </View>
-
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Support</Text>
-                <ActionRow
-                  icon="paper-plane-outline"
-                  title="Telegram"
-                  subtitle="Chat with the Gojo team on Telegram"
-                  onPress={() => Linking.openURL("https://t.me/gojo_edu")}
-                />
-                <ActionRow
-                  icon="mail-outline"
-                  title="Email"
-                  subtitle="Send us a message by email"
-                  onPress={() => Linking.openURL("mailto:gojo.education1@gmail.com")}
-                />
-              </View>
-            </>
-          )}
         </View>
-      </ScrollView>
 
-      <Modal visible={showPasswordModal} transparent animationType="slide" onRequestClose={handleClosePasswordModal}>
-        <View style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}>
-            <View style={styles.modalContainer}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Change Password</Text>
-                <TouchableOpacity onPress={handleClosePasswordModal}>
-                  <Ionicons name="close" size={22} color="#64748B" />
-                </TouchableOpacity>
-              </View>
+        {profileSectionTab === "main" ? (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Family overview</Text>
 
-              <View style={styles.modalContent}>
-                <Field
-                  label="Current Password"
-                  value={currentPassword}
-                  onChangeText={(text) => {
-                    setCurrentPassword(text);
-                    setCurrentPasswordError("");
-                  }}
-                  secureTextEntry
-                  placeholder="Enter current password"
-                  error={currentPasswordError}
-                />
+              <TouchableOpacity style={styles.featureCard} activeOpacity={0.9} onPress={openEditModal}>
+                <View style={styles.featureTop}>
+                  <View style={styles.featureIconWrap}>
+                    <Ionicons name="people-outline" size={18} color={PALETTE.accent} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.featureTitle}>Parent account</Text>
+                    <Text numberOfLines={1} style={styles.featureSub}>
+                      {children.length
+                        ? `${children.length} linked ${children.length === 1 ? "child" : "children"} • ${joinedDate}`
+                        : `No linked children yet • ${joinedDate}`}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
+                </View>
+              </TouchableOpacity>
 
-                <Field
-                  label="New Password"
-                  value={newPassword}
-                  onChangeText={(text) => {
-                    setNewPassword(text);
-                    setNewPasswordError("");
-                    if (confirmPassword && text !== confirmPassword) {
-                      setConfirmPasswordError("Passwords do not match");
-                    } else {
-                      setConfirmPasswordError("");
-                    }
-                  }}
-                  secureTextEntry
-                  placeholder="Enter new password (min 6 characters)"
-                  error={newPasswordError}
-                />
-
-                <Field
-                  label="Confirm New Password"
-                  value={confirmPassword}
-                  onChangeText={(text) => {
-                    setConfirmPassword(text);
-                    if (newPassword && text !== newPassword) {
-                      setConfirmPasswordError("Passwords do not match");
-                    } else {
-                      setConfirmPasswordError("");
-                    }
-                  }}
-                  secureTextEntry
-                  placeholder="Confirm new password"
-                  error={confirmPasswordError}
-                />
-              </View>
-
-              <View style={styles.modalActions}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={handleClosePasswordModal}
-                  disabled={isChangingPassword}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.confirmButton]}
-                  onPress={handleChangePassword}
-                  disabled={isChangingPassword}
-                >
-                  <Text style={styles.confirmButtonText}>{isChangingPassword ? "Saving..." : "Save"}</Text>
-                </TouchableOpacity>
-              </View>
+              {children.length ? (
+                children.map((child) => (
+                  <TouchableOpacity
+                    key={child.studentId}
+                    style={styles.childCard}
+                    onPress={() => handleChildPress(child)}
+                    activeOpacity={0.88}
+                  >
+                    <Image source={{ uri: child.profileImage }} style={styles.childImage} />
+                    <View style={styles.childBody}>
+                      <View style={styles.childTopRow}>
+                        <Text style={styles.childName}>{child.name}</Text>
+                        <View style={styles.childRolePill}>
+                          <Text style={styles.childRoleText}>{child.relationship || "Child"}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.childMeta}>
+                        Grade {child.grade || "--"} • Section {child.section || "--"}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={styles.noteStateCard}>
+                  <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
+                  <Text style={styles.noteStateText}>No linked children found yet.</Text>
+                </View>
+              )}
             </View>
-          </ScrollView>
+
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Support</Text>
+              <ActionRow
+                icon="paper-plane-outline"
+                title="Telegram"
+                subtitle="Chat with the Gojo team on Telegram"
+                onPress={() => Linking.openURL("https://t.me/gojo_edu")}
+              />
+              <ActionRow
+                icon="mail-outline"
+                title="Email"
+                subtitle="Send us a message by email"
+                onPress={() => Linking.openURL("mailto:gojo.education1@gmail.com")}
+              />
+            </View>
+          </>
+        ) : (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.sectionTitle}>Profile info</Text>
+              <InfoRow label="Name" value={parentUser.name} />
+              <InfoRow label="Username" value={parentUser.username ? usernameHandle : null} />
+              <InfoRow label="Role" value="Parent" />
+              <InfoRow label="Status" value={isOnline ? "Online" : "Offline"} />
+              <InfoRow label="Children" value={`${children.length}`} />
+              <InfoRow label="Phone" value={parentUser.phone} />
+              <InfoRow label="Email" value={parentUser.email} />
+            </View>
+          </>
+        )}
+      </Animated.ScrollView>
+
+      <Modal visible={showEditModal} transparent animationType="fade" onRequestClose={closeEditModal}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Edit Profile</Text>
+
+            <TouchableOpacity style={styles.editOptionBtn} onPress={handleEditInfo} activeOpacity={0.88}>
+              <Ionicons name="create-outline" size={18} color={PALETTE.text} />
+              <Text style={styles.editOptionText}>Edit Info</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.editOptionBtn} onPress={handleImagePicker} activeOpacity={0.88}>
+              <Ionicons name="image-outline" size={18} color={PALETTE.text} />
+              <Text style={styles.editOptionText}>Change Photo</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.editOptionBtn} onPress={openPasswordModalFromActions} activeOpacity={0.88}>
+              <Ionicons name="key-outline" size={18} color={PALETTE.text} />
+              <Text style={styles.editOptionText}>Change Password</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.editOptionBtn, styles.editOptionCancel]}
+              onPress={closeEditModal}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="close-outline" size={18} color={PALETTE.muted} />
+              <Text style={[styles.editOptionText, styles.editOptionCancelText]}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showPasswordModal} transparent animationType="fade" onRequestClose={handleClosePasswordModal}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Change Password</Text>
+
+            <Field
+              label="Current Password"
+              value={currentPassword}
+              onChangeText={(text) => {
+                setCurrentPassword(text);
+                setCurrentPasswordError("");
+              }}
+              secureTextEntry
+              placeholder="Enter current password"
+              error={currentPasswordError}
+            />
+
+            <Field
+              label="New Password"
+              value={newPassword}
+              onChangeText={(text) => {
+                setNewPassword(text);
+                setNewPasswordError("");
+                if (confirmPassword && text !== confirmPassword) {
+                  setConfirmPasswordError("Passwords do not match");
+                } else {
+                  setConfirmPasswordError("");
+                }
+              }}
+              secureTextEntry
+              placeholder="Enter new password (min 6 characters)"
+              error={newPasswordError}
+            />
+
+            <Field
+              label="Confirm New Password"
+              value={confirmPassword}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                if (newPassword && text !== newPassword) {
+                  setConfirmPasswordError("Passwords do not match");
+                } else {
+                  setConfirmPasswordError("");
+                }
+              }}
+              secureTextEntry
+              placeholder="Confirm new password"
+              error={confirmPasswordError}
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={handleClosePasswordModal}
+                disabled={isChangingPassword}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={handleChangePassword}
+                disabled={isChangingPassword}
+              >
+                <Text style={styles.confirmButtonText}>{isChangingPassword ? "Saving..." : "Save"}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
     </View>
   );
 }
 
-function SectionHeader({ title, icon }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionIconWrap}>
-        <Ionicons name={icon} size={16} color={PALETTE.accentDark} />
-      </View>
-      <Text style={styles.sectionTitle}>{title}</Text>
-    </View>
-  );
-}
-
-function QuickAction({ icon, label, onPress }) {
-  return (
-    <TouchableOpacity style={styles.quickActionItem} onPress={onPress} activeOpacity={0.88}>
-      <View style={styles.quickActionIcon}>
-        <Ionicons name={icon} size={18} color={PALETTE.accentDark} />
-      </View>
-      <Text style={styles.quickActionLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
 function MiniPill({ icon, text, compact = false }) {
+  const { PALETTE, styles } = useProfileThemeConfig();
+
   return (
     <View style={[styles.miniPill, compact && styles.miniPillCompact]}>
       <Ionicons name={icon} size={compact ? 10 : 13} color={compact ? PALETTE.accent : "#F8FAFC"} />
@@ -696,6 +810,8 @@ function MiniPill({ icon, text, compact = false }) {
 }
 
 function ActionRow({ icon, title, subtitle, onPress, destructive = false }) {
+  const { PALETTE, styles } = useProfileThemeConfig();
+
   return (
     <TouchableOpacity style={styles.actionRow} onPress={onPress} activeOpacity={0.8}>
       <View
@@ -720,6 +836,8 @@ function ActionRow({ icon, title, subtitle, onPress, destructive = false }) {
 }
 
 function InfoRow({ label, value }) {
+  const { styles } = useProfileThemeConfig();
+
   if (!value) return null;
   return (
     <View style={styles.infoRow}>
@@ -730,6 +848,8 @@ function InfoRow({ label, value }) {
 }
 
 function Field({ label, value, onChangeText, placeholder, secureTextEntry, error }) {
+  const { styles } = useProfileThemeConfig();
+
   return (
     <View style={styles.inputGroup}>
       <Text style={styles.inputLabel}>{label}</Text>
@@ -746,8 +866,23 @@ function Field({ label, value, onChangeText, placeholder, secureTextEntry, error
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (PALETTE) => StyleSheet.create({
   container: { flex: 1, backgroundColor: PALETTE.background },
+  scroll: { padding: 14, paddingBottom: 28, paddingTop: 0 },
+
+  stretchContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    overflow: "hidden",
+    backgroundColor: PALETTE.accentSoft,
+  },
+  stretchFill: {
+    flex: 1,
+    backgroundColor: PALETTE.heroSurface,
+  },
 
   loadingWrap: {
     flex: 1,
@@ -781,19 +916,23 @@ const styles = StyleSheet.create({
   },
 
   heroCard: {
+    marginTop: 0,
     marginHorizontal: -14,
     backgroundColor: PALETTE.card,
-    marginBottom: 4,
+    borderRadius: 0,
+    marginBottom: 12,
+    zIndex: 3,
+    borderWidth: 0,
     overflow: "hidden",
   },
   heroBanner: {
-    backgroundColor: PALETTE.white,
+    backgroundColor: PALETTE.heroSurface,
     position: "relative",
     overflow: "hidden",
   },
   heroBannerFallback: {
     flex: 1,
-    backgroundColor: PALETTE.white,
+    backgroundColor: PALETTE.heroSurface,
     overflow: "hidden",
   },
   heroBannerOrbPrimary: {
@@ -801,7 +940,7 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: "rgba(34,150,243,0.08)",
+    backgroundColor: PALETTE.heroOrbPrimary,
     top: -40,
     right: -20,
   },
@@ -810,7 +949,7 @@ const styles = StyleSheet.create({
     width: 160,
     height: 160,
     borderRadius: 80,
-    backgroundColor: "rgba(34,150,243,0.04)",
+    backgroundColor: PALETTE.heroOrbSecondary,
     bottom: -60,
     left: -20,
   },
@@ -841,6 +980,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.16)",
   },
+  heroTopIconBtnSpacing: {
+    marginRight: 8,
+  },
   heroQuickStats: {
     flexDirection: "row",
     alignItems: "center",
@@ -864,7 +1006,7 @@ const styles = StyleSheet.create({
   },
   miniPillText: {
     marginLeft: 5,
-    color: "#F8FAFC",
+    color: PALETTE.heroPillText,
     fontSize: 11,
     fontWeight: "700",
   },
@@ -886,7 +1028,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 14,
     paddingHorizontal: 4,
     paddingVertical: 2,
-    paddingBottom: 14,
+    paddingBottom: 0,
   },
   identityTopRow: {
     flexDirection: "row",
@@ -914,7 +1056,7 @@ const styles = StyleSheet.create({
   editProfileBtn: {
     marginTop: 10,
     width: "100%",
-    backgroundColor: "#5865F2",
+    backgroundColor: PALETTE.purpleAction,
     borderRadius: 8,
     paddingHorizontal: 14,
     paddingVertical: 8,
@@ -929,7 +1071,7 @@ const styles = StyleSheet.create({
   },
   profileFilterRow: {
     flexDirection: "row",
-    backgroundColor: "#F8FBFF",
+    backgroundColor: PALETTE.inputBackground,
     borderWidth: 1,
     borderColor: PALETTE.border,
     borderRadius: 12,
@@ -971,12 +1113,12 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "rgba(255,255,255,0.96)",
+    backgroundColor: PALETTE.topIconSurface,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: PALETTE.border,
-    shadowColor: "#BED3EE",
+    shadowColor: PALETTE.shadowBlue,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 10,
@@ -991,24 +1133,24 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: PALETTE.white,
+    backgroundColor: PALETTE.heroSurface,
     zIndex: 10,
     overflow: "hidden",
     borderBottomLeftRadius: 28,
     borderBottomRightRadius: 28,
     borderBottomWidth: 1,
-    borderColor: "#E7EEFF",
+    borderColor: PALETTE.borderSoft,
   },
   headerBgFallback: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: PALETTE.heroSurface,
   },
   headerOrbPrimary: {
     position: "absolute",
     width: 220,
     height: 220,
     borderRadius: 110,
-    backgroundColor: "rgba(34,150,243,0.08)",
+    backgroundColor: PALETTE.heroOrbPrimary,
     top: -72,
     right: -36,
   },
@@ -1017,7 +1159,7 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: "rgba(34,150,243,0.05)",
+    backgroundColor: PALETTE.heroOrbSecondary,
     bottom: -72,
     left: -30,
   },
@@ -1027,7 +1169,7 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
     height: 116,
-    backgroundColor: "#F6FAFF",
+    backgroundColor: PALETTE.heroBannerTint,
   },
 
   heroWrap: {
@@ -1045,9 +1187,9 @@ const styles = StyleSheet.create({
     borderRadius: 48,
     overflow: "visible",
     borderWidth: 4,
-    borderColor: "#FFFFFF",
-    backgroundColor: "#fff",
-    shadowColor: "#BED3EE",
+    borderColor: PALETTE.white,
+    backgroundColor: PALETTE.card,
+    shadowColor: PALETTE.shadowBlue,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
     shadowRadius: 16,
@@ -1074,7 +1216,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "#fff",
+    borderColor: PALETTE.heroSurface,
   },
 
   identitySide: {
@@ -1117,11 +1259,11 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.border,
   },
   metaPillOnline: {
-    backgroundColor: "#ECFDF3",
-    borderColor: "#CFF7E0",
+    backgroundColor: PALETTE.successSoft,
+    borderColor: PALETTE.onlineBorder,
   },
   metaPillOffline: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: PALETTE.surfaceMuted,
   },
   metaDot: {
     width: 8,
@@ -1136,7 +1278,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   metaPillTextOnline: {
-    color: "#0F766E",
+    color: PALETTE.onlineText,
   },
   metaPillTextOffline: {
     color: PALETTE.muted,
@@ -1159,21 +1301,28 @@ const styles = StyleSheet.create({
   },
 
   contentWrap: {
+    flex: 1,
     paddingHorizontal: 14,
+    gap: 4,
+  },
+  sectionScroll: {
+    flex: 1,
+  },
+  sectionScrollContent: {
     gap: 4,
   },
 
   quickActions: {
-    backgroundColor: "#FCFEFF",
+    backgroundColor: PALETTE.cardMuted,
     borderWidth: 1,
-    borderColor: "#E7EEFF",
+    borderColor: PALETTE.borderSoft,
     borderRadius: 20,
     paddingVertical: 10,
     paddingHorizontal: 10,
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 8,
-    shadowColor: "#BED3EE",
+    shadowColor: PALETTE.shadowBlue,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.08,
     shadowRadius: 18,
@@ -1183,10 +1332,10 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#F7FAFF",
+    backgroundColor: PALETTE.inputBackground,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E7EEFF",
+    borderColor: PALETTE.borderSoft,
     paddingVertical: 10,
   },
   quickActionIcon: {
@@ -1201,7 +1350,7 @@ const styles = StyleSheet.create({
   quickActionLabel: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#33506D",
+    color: PALETTE.text,
   },
 
   card: {
@@ -1211,6 +1360,7 @@ const styles = StyleSheet.create({
     borderColor: PALETTE.border,
     paddingHorizontal: 14,
     paddingVertical: 14,
+    marginBottom: 12,
   },
 
   sectionHeader: {
@@ -1232,6 +1382,38 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: PALETTE.text,
     marginBottom: 10,
+  },
+
+  featureCard: {
+    backgroundColor: PALETTE.inputBackground,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    padding: 14,
+    marginBottom: 12,
+  },
+  featureTop: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  featureIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: PALETTE.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  featureTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  featureSub: {
+    marginTop: 2,
+    fontSize: 12,
+    color: PALETTE.muted,
   },
 
   actionRow: {
@@ -1277,7 +1459,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#EFF4FA",
+    borderBottomColor: PALETTE.line,
   },
   infoLabel: {
     color: PALETTE.muted,
@@ -1295,35 +1477,53 @@ const styles = StyleSheet.create({
   childCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
-    padding: 13,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: PALETTE.card,
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#EAF0F8",
-    shadowColor: "#D9E7F6",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 2,
+    borderColor: PALETTE.border,
+    marginTop: 6,
+    shadowColor: PALETTE.shadowBlue,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+    elevation: 1,
   },
   childImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
-  childBody: { flex: 1, marginLeft: 12 },
+  childBody: { flex: 1, marginLeft: 10 },
+  childTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
   childName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     color: PALETTE.text,
   },
+  childRolePill: {
+    backgroundColor: PALETTE.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  childRoleText: {
+    color: PALETTE.accent,
+    fontSize: 10,
+    fontWeight: "800",
+  },
   childMeta: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     color: PALETTE.muted,
-    marginTop: 2,
+    marginTop: 1,
   },
 
   accountItem: {
@@ -1331,10 +1531,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 13,
     paddingHorizontal: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: PALETTE.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#EAF0F8",
+    borderColor: PALETTE.borderSoft,
     marginBottom: 10,
   },
   accountItemNoBorder: {
@@ -1359,7 +1559,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: PALETTE.inputBackground,
     paddingVertical: 18,
     paddingHorizontal: 14,
     alignItems: "center",
@@ -1397,7 +1597,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: PALETTE.line,
   },
   menuItemNoBorder: { borderBottomWidth: 0 },
   menuText: {
@@ -1408,37 +1608,31 @@ const styles = StyleSheet.create({
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(2,6,23,0.35)",
+    backgroundColor: PALETTE.overlay,
+    alignItems: "center",
     justifyContent: "center",
-    padding: 14,
+    padding: 20,
   },
   modalContainer: {
+    width: "100%",
     backgroundColor: PALETTE.card,
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    overflow: "hidden",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: PALETTE.border,
+    padding: 14,
   },
   modalTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "800",
     color: PALETTE.text,
+    marginBottom: 10,
   },
-  modalContent: { padding: 16 },
 
   inputGroup: { marginBottom: 14 },
   inputLabel: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#334155",
+    color: PALETTE.text,
     marginBottom: 7,
   },
   textInput: {
@@ -1448,15 +1642,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 15,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: PALETTE.cardMuted,
     color: PALETTE.text,
   },
   errorInput: {
-    borderColor: "#DC2626",
+    borderColor: PALETTE.error,
     borderWidth: 1.5,
   },
   errorText: {
-    color: "#DC2626",
+    color: PALETTE.error,
     fontSize: 12,
     marginTop: 4,
     fontWeight: "600",
@@ -1464,19 +1658,20 @@ const styles = StyleSheet.create({
 
   modalActions: {
     flexDirection: "row",
-    padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: PALETTE.border,
-    gap: 10,
+    justifyContent: "flex-end",
+    marginTop: 4,
+    gap: 8,
   },
   modalButton: {
-    flex: 1,
-    paddingVertical: 11,
-    borderRadius: 11,
+    minWidth: 90,
+    height: 40,
+    borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
   },
   cancelButton: {
-    backgroundColor: "#F8FAFC",
+    backgroundColor: PALETTE.surfaceMuted,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
@@ -1490,5 +1685,30 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: "#fff",
+  },
+
+  editOptionBtn: {
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: PALETTE.inputBackground,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  editOptionText: {
+    marginLeft: 10,
+    fontSize: 14,
+    fontWeight: "700",
+    color: PALETTE.text,
+  },
+  editOptionCancel: {
+    marginBottom: 0,
+    backgroundColor: PALETTE.surfaceMuted,
+  },
+  editOptionCancelText: {
+    color: PALETTE.muted,
   },
 });

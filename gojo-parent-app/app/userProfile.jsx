@@ -1,14 +1,13 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Animated,
-  Dimensions,
   Image,
   Linking,
   Modal,
+  Platform,
   ScrollView,
   Share,
   StatusBar,
@@ -22,48 +21,77 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { child, get, push, ref, set } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useParentTheme } from "../hooks/use-parent-theme";
 
-const { width } = Dimensions.get("window");
-
-const HEADER_MAX_HEIGHT = Math.max(220, Math.min(280, width * 0.68));
-const HEADER_MIN_HEIGHT = 58;
-const MINI_AVATAR = 34;
-
-const PALETTE = {
-  background: "#FFFFFF",
-  card: "#FFFFFF",
-  accent: "#2296F3",
-  accentDark: "#0B72C7",
-  accentSoft: "#EAF5FF",
-  text: "#0F172A",
-  subtext: "#475569",
-  muted: "#64748B",
-  border: "#E5EDF5",
-  white: "#FFFFFF",
-  danger: "#E53935",
-  success: "#10B981",
-  offline: "#94A3B8",
-};
+const makePalette = (colors, isDark) => ({
+  background: colors.background,
+  card: colors.card,
+  cardMuted: colors.cardMuted,
+  surfaceMuted: colors.surfaceMuted,
+  inputBackground: colors.inputBackground,
+  accent: colors.primary,
+  accentDark: colors.primaryDark,
+  accentSoft: colors.primarySoft,
+  text: colors.text,
+  subtext: colors.mutedAlt,
+  muted: colors.muted,
+  border: colors.border,
+  borderSoft: colors.borderSoft,
+  line: colors.line,
+  white: colors.white,
+  danger: colors.danger,
+  dangerSoft: colors.dangerSoft,
+  success: colors.success,
+  successSoft: colors.successSoft,
+  offline: colors.offline,
+  overlay: colors.overlay,
+  overlayStrong: colors.overlayStrong,
+  heroSurface: colors.heroSurface,
+  heroBannerTint: colors.heroBannerTint,
+  heroOrbPrimary: colors.heroOrbPrimary,
+  heroOrbSecondary: colors.heroOrbSecondary,
+  heroTopButton: colors.heroTopButton,
+  heroTopBorder: colors.heroTopBorder,
+  heroPillBg: colors.heroPillBg,
+  heroPillBorder: colors.heroPillBorder,
+  heroPillText: colors.heroPillText,
+  heroSubtleText: colors.heroSubtleText,
+  shadowBlue: isDark ? "#000000" : "#BED3EE",
+  shadowSoft: isDark ? "#000000" : "#D9E7F6",
+  topIconSurface: isDark ? colors.cardMuted : "rgba(15, 23, 42, 0.28)",
+  topIconBorder: isDark ? colors.border : "rgba(255,255,255,0.24)",
+  purpleAction: isDark ? colors.primary : "#5865F2",
+  darkSurface: isDark ? "#08182E" : "#0F172A",
+  darkSurfaceSubtext: isDark ? "#C8DBF6" : "#CBD5E1",
+  badgeSurface: isDark ? "#102742" : "#E0F2FE",
+  scheduleSurface: isDark ? colors.cardMuted : "#F7FBFF",
+  scheduleSurfaceAlt: isDark ? colors.cardMuted : "#F4F9FF",
+  scheduleActiveSurface: isDark ? "#102742" : "#EEF6FF",
+});
 
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-const WEEK_DAY_SHORT = {
-  Monday: "Mon",
-  Tuesday: "Tue",
-  Wednesday: "Wed",
-  Thursday: "Thu",
-  Friday: "Fri",
-};
+const MINI_AVATAR = 18;
 
 function getPeriodOrder(periodName) {
   const match = String(periodName || "").match(/\d+/);
   return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 }
 
+function useUserProfileThemeConfig() {
+  const { colors, isDark, statusBarStyle } = useParentTheme();
+
+  const PALETTE = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
+  const styles = useMemo(() => createStyles(PALETTE), [PALETTE]);
+
+  return { PALETTE, styles, statusBarStyle };
+}
+
 export default function UserProfile() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
+  const { PALETTE, styles, statusBarStyle } = useUserProfileThemeConfig();
 
   const { recordId: paramRecordId, userId: paramUserId, roleName: paramRoleName } = params ?? {};
 
@@ -84,11 +112,11 @@ export default function UserProfile() {
   const [studentWeeklySchedule, setStudentWeeklySchedule] = useState({});
   const [studentGradeSection, setStudentGradeSection] = useState(null);
   const [selectedScheduleDay, setSelectedScheduleDay] = useState(null);
+  const [expandedScheduleDays, setExpandedScheduleDays] = useState({});
   const [scheduleSheetVisible, setScheduleSheetVisible] = useState(false);
 
   const [showMenu, setShowMenu] = useState(false);
-
-  const scrollY = useRef(new Animated.Value(0)).current;
+  const [profileSectionTab, setProfileSectionTab] = useState("main");
 
   const schoolAwarePath = useCallback(
     (subPath) => (schoolKey ? `Platform1/Schools/${schoolKey}/${subPath}` : subPath),
@@ -404,39 +432,55 @@ export default function UserProfile() {
     };
   }, [selectedDayPeriods]);
 
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT],
-    outputRange: [HEADER_MAX_HEIGHT + insets.top, HEADER_MIN_HEIGHT + insets.top],
-    extrapolate: "clamp",
-  });
+  const todayName = useMemo(() => {
+    const currentDay = new Date().toLocaleDateString("en-US", { weekday: "long" });
+    return WEEK_DAYS.includes(currentDay) ? currentDay : "Monday";
+  }, []);
 
-  const compactBarOpacity = scrollY.interpolate({
-    inputRange: [0, 65, 125],
-    outputRange: [0, 0.25, 1],
-    extrapolate: "clamp",
-  });
+  const previewScheduleDay = selectedScheduleDay || todayName;
 
-  const heroTranslateY = scrollY.interpolate({
-    inputRange: [0, 120],
-    outputRange: [0, -16],
-    extrapolate: "clamp",
-  });
+  const previewScheduleSubtitle = useMemo(() => {
+    if (selectedDaySummary.total) {
+      return previewScheduleDay === todayName
+        ? `${selectedDaySummary.total} period${selectedDaySummary.total === 1 ? "" : "s"} today`
+        : `${selectedDaySummary.total} period${selectedDaySummary.total === 1 ? "" : "s"} on ${previewScheduleDay}`;
+    }
 
-  const heroScale = scrollY.interpolate({
-    inputRange: [0, 120],
-    outputRange: [1, 0.96],
-    extrapolate: "clamp",
-  });
+    return previewScheduleDay === todayName
+      ? "No classes scheduled today"
+      : `No classes scheduled on ${previewScheduleDay}`;
+  }, [previewScheduleDay, selectedDaySummary.total, todayName]);
 
-  const heroOpacity = scrollY.interpolate({
-    inputRange: [0, 110, 180],
-    outputRange: [1, 0.7, 0],
-    extrapolate: "clamp",
-  });
+  const openScheduleSheet = useCallback(() => {
+    const focusDay = WEEK_DAYS.includes(previewScheduleDay) ? previewScheduleDay : todayName;
+    setSelectedScheduleDay(focusDay);
+    setExpandedScheduleDays(
+      WEEK_DAYS.reduce((acc, day) => {
+        acc[day] = day === focusDay;
+        return acc;
+      }, {})
+    );
+    setScheduleSheetVisible(true);
+  }, [previewScheduleDay, todayName]);
+
+  const closeScheduleSheet = useCallback(() => {
+    setScheduleSheetVisible(false);
+  }, []);
+
+  const toggleScheduleDay = useCallback((day) => {
+    setSelectedScheduleDay(day);
+    setExpandedScheduleDays((prev) => ({
+      ...prev,
+      [day]: !prev[day],
+    }));
+  }, []);
 
   const handleBack = useCallback(() => {
-    if (router?.canGoBack && router.canGoBack()) router.back();
-    else router.replace("/");
+    if (router?.canGoBack && router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace("/dashboard/home");
   }, [router]);
 
   const openChat = () => {
@@ -498,6 +542,277 @@ export default function UserProfile() {
     }
   };
 
+  const usernameHandle = useMemo(() => {
+    if (!user?.username) return null;
+    return String(user.username).startsWith("@") ? String(user.username) : `@${user.username}`;
+  }, [user?.username]);
+
+  const heroQuickStat = useMemo(() => {
+    if (roleName === "Student") {
+      const contactCount = parents.length + teachers.length;
+      return `${contactCount} ${contactCount === 1 ? "Contact" : "Contacts"}`;
+    }
+    if (roleName === "Teacher") {
+      const subjectCount = teacherCourses.length;
+      return `${subjectCount} ${subjectCount === 1 ? "Subject" : "Subjects"}`;
+    }
+    if (roleName === "Parent") return "Parent";
+    if (roleName === "Admin") return "Admin";
+    return "Profile";
+  }, [parents.length, roleName, teacherCourses.length, teachers.length]);
+
+  const heroQuickStatIcon = useMemo(() => {
+    if (roleName === "Student") return "people-outline";
+    if (roleName === "Teacher") return "book-outline";
+    if (roleName === "Parent") return "person-outline";
+    return "briefcase-outline";
+  }, [roleName]);
+
+  const heroRoleIcon = useMemo(() => {
+    if (roleName === "Student") return "school-outline";
+    if (roleName === "Teacher") return "book-outline";
+    if (roleName === "Parent") return "people-outline";
+    return "briefcase-outline";
+  }, [roleName]);
+
+  const heroSecondaryMeta = useMemo(() => {
+    if (roleName === "Student" && studentGradeSection?.grade) {
+      return `Grade ${studentGradeSection.grade}${studentGradeSection.section || ""}`;
+    }
+    if (roleName === "Teacher") {
+      return teacherCourses.length ? `${teacherCourses.length} assigned` : "Teacher";
+    }
+    if (roleName === "Parent") {
+      return user?.phone ? "Reachable" : "Profile";
+    }
+    if (roleName === "Admin") {
+      return "School";
+    }
+    return null;
+  }, [roleName, studentGradeSection, teacherCourses.length, user?.phone]);
+
+  const heroSecondaryIcon = useMemo(() => {
+    if (roleName === "Student") return "layers-outline";
+    if (roleName === "Teacher") return "albums-outline";
+    if (roleName === "Parent") return "call-outline";
+    return "sparkles-outline";
+  }, [roleName]);
+
+  const primaryActionLabel = canMessageMain ? "Send Message" : user?.phone ? "Call User" : "Share Profile";
+  const handlePrimaryAction = canMessageMain ? openChat : user?.phone ? handleCall : handleShare;
+
+  const renderActionRows = (includeReport = false) => (
+    <>
+      {canMessageMain && (
+        <ActionRow
+          icon="chatbubble-ellipses-outline"
+          title="Send message"
+          subtitle={`Start a chat with ${user?.name || "this user"}`}
+          onPress={openChat}
+        />
+      )}
+
+      {!!user?.phone && (
+        <ActionRow
+          icon="call-outline"
+          title="Call user"
+          subtitle="Reach this profile by phone"
+          onPress={handleCall}
+        />
+      )}
+
+      <ActionRow
+        icon="share-social-outline"
+        title="Share profile"
+        subtitle="Send a link to this profile"
+        onPress={handleShare}
+      />
+
+      {includeReport && !isSelfProfile && (
+        <ActionRow
+          icon="flag-outline"
+          title="Report user"
+          subtitle="Send a review request for this profile"
+          onPress={handleReport}
+          destructive
+        />
+      )}
+    </>
+  );
+
+  const renderMainSection = () => {
+    if (roleName === "Student") {
+      return (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Today at school</Text>
+
+            <TouchableOpacity style={styles.scheduleCard} activeOpacity={0.9} onPress={openScheduleSheet}>
+              <View style={styles.scheduleTop}>
+                <View style={styles.scheduleIconWrap}>
+                  <Ionicons name="time-outline" size={18} color={PALETTE.accent} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.scheduleTitle}>{previewScheduleDay} Schedule</Text>
+                  <Text numberOfLines={1} style={styles.scheduleSub}>
+                    {previewScheduleSubtitle}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Parents</Text>
+            {parents.length ? (
+              parents.map((parent) => (
+                <PersonRow
+                  key={parent.parentId}
+                  name={parent.name}
+                  subtitle={`Relation: ${parent.relationship}`}
+                  image={parent.profileImage}
+                  onPress={() => {
+                    if (parentRecordId && parent.parentId === parentRecordId) router.push("/dashboard/profile");
+                    else router.push(`/userProfile?recordId=${parent.parentId}`);
+                  }}
+                  onMessage={
+                    parent.userId && (!parentUserId || String(parent.userId) !== String(parentUserId))
+                      ? () => openChatWith(parent.userId, parent.name)
+                      : null
+                  }
+                />
+              ))
+            ) : (
+              <View style={styles.noteStateCard}>
+                <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
+                <Text style={styles.noteStateText}>No linked parents found.</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Teachers</Text>
+            {teachers.length ? (
+              teachers.map((teacher) => (
+                <PersonRow
+                  key={teacher.teacherId || teacher.name}
+                  name={teacher.name}
+                  subtitle={teacher.subjects?.length ? teacher.subjects.join(", ") : "Teacher"}
+                  image={teacher.profileImage}
+                  onPress={() =>
+                    teacher.teacherId ? router.push(`/userProfile?recordId=${teacher.teacherId}`) : null
+                  }
+                  onMessage={
+                    teacher.userId && (!parentUserId || String(teacher.userId) !== String(parentUserId))
+                      ? () => openChatWith(teacher.userId, teacher.name)
+                      : null
+                  }
+                />
+              ))
+            ) : (
+              <View style={styles.noteStateCard}>
+                <Ionicons name="school-outline" size={18} color={PALETTE.muted} />
+                <Text style={styles.noteStateText}>No assigned teachers found.</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Account</Text>
+            {renderActionRows(false)}
+          </View>
+        </>
+      );
+    }
+
+    if (roleName === "Teacher") {
+      return (
+        <>
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Subjects</Text>
+            {teacherCourses.length ? (
+              teacherCourses.map((course) => (
+                <View key={course.courseId} style={styles.subjectRow}>
+                  <Text style={styles.subjectName}>{course.subject}</Text>
+                  <Text style={styles.subjectMeta}>Grade {course.grade} • Section {course.section}</Text>
+                </View>
+              ))
+            ) : (
+              <View style={styles.noteStateCard}>
+                <Ionicons name="book-outline" size={18} color={PALETTE.muted} />
+                <Text style={styles.noteStateText}>No assigned subjects found.</Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Account</Text>
+            {renderActionRows(true)}
+          </View>
+        </>
+      );
+    }
+
+    return (
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Account</Text>
+        {renderActionRows(true)}
+      </View>
+    );
+  };
+
+  const renderInfoSection = () => (
+    <>
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Profile info</Text>
+        <InfoRow label="Name" value={user?.name} />
+        <InfoRow label="Username" value={usernameHandle} />
+        <InfoRow label="Role" value={roleName || "Profile"} />
+        <InfoRow label="Summary" value={profileSubtitle} />
+        {roleName === "Student" && <InfoRow label="Class" value={studentGradeSection?.key} />}
+        {roleName === "Teacher" && (
+          <InfoRow label="Assigned subjects" value={String(teacherCourses.length)} />
+        )}
+        <InfoRow label="Phone" value={user?.phone} />
+        <InfoRow label="Email" value={user?.email} />
+      </View>
+
+      {roleName === "Student" && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Class overview</Text>
+          <InfoRow label="Today" value={selectedScheduleDay || "Monday"} />
+          <InfoRow label="Planned periods" value={String(selectedDaySummary.total)} />
+          <InfoRow label="Classes" value={String(selectedDaySummary.classCount)} />
+          <InfoRow label="Free periods" value={String(selectedDaySummary.freeCount)} />
+          <InfoRow label="Teachers" value={String(teachers.length)} />
+          <InfoRow label="Parents" value={String(parents.length)} />
+        </View>
+      )}
+
+      {roleName === "Teacher" && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>Teaching overview</Text>
+          <InfoRow label="Assigned subjects" value={String(teacherCourses.length)} />
+          <InfoRow label="First subject" value={teacherCourses[0]?.subject} />
+          <InfoRow
+            label="Primary class"
+            value={
+              teacherCourses[0]
+                ? `Grade ${teacherCourses[0].grade} • Section ${teacherCourses[0].section}`
+                : null
+            }
+          />
+        </View>
+      )}
+
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Actions</Text>
+        {renderActionRows(true)}
+      </View>
+    </>
+  );
+
   if (loading) {
     return (
       <View style={styles.loadingWrap}>
@@ -507,29 +822,22 @@ export default function UserProfile() {
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
-
-      <View style={[styles.topActionsRow, { top: insets.top + 8 }]}>
-        <TouchableOpacity style={styles.topIcon} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={21} color="#fff" />
-        </TouchableOpacity>
-
-        <Animated.View style={[styles.compactCenter, { opacity: compactBarOpacity }]}>
-          <Image source={{ uri: user?.profileImage || defaultProfile }} style={styles.compactAvatar} />
-          <View>
-            <Text style={styles.compactName} numberOfLines={1}>
-              {user?.name}
-            </Text>
-            <Text style={styles.compactSub}>{profileSubtitle}</Text>
-          </View>
-        </Animated.View>
-
-        <TouchableOpacity style={styles.topIcon} onPress={() => setShowMenu((v) => !v)}>
-          <Ionicons name="ellipsis-vertical" size={20} color="#fff" />
+  if (!user) {
+    return (
+      <View style={styles.loadingWrap}>
+        <Ionicons name="person-circle-outline" size={56} color={PALETTE.offline} />
+        <Text style={styles.loadingTitle}>Profile unavailable</Text>
+        <Text style={styles.loadingText}>We could not load this profile.</Text>
+        <TouchableOpacity style={styles.emptyBackBtn} onPress={handleBack} activeOpacity={0.88}>
+          <Text style={styles.emptyBackText}>Back to dashboard</Text>
         </TouchableOpacity>
       </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <StatusBar translucent backgroundColor="transparent" barStyle={statusBarStyle} />
 
       {showMenu && (
         <>
@@ -559,373 +867,215 @@ export default function UserProfile() {
         </>
       )}
 
-      <Animated.ScrollView
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
-          useNativeDriver: false,
-        })}
-        contentContainerStyle={{
-          paddingTop: HEADER_MAX_HEIGHT + insets.top + 14,
-          paddingBottom: Math.max(24, insets.bottom + 8),
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.contentWrap}>
-          <View style={styles.quickActions}>
-            {canMessageMain && (
-              <QuickAction icon="chatbubble-ellipses-outline" label="Message" onPress={openChat} />
-            )}
-            <QuickAction icon="call-outline" label="Call" onPress={handleCall} />
-            <QuickAction icon="share-social-outline" label="Share" onPress={handleShare} />
-          </View>
+      <View style={styles.contentWrap}>
+        <View style={styles.heroCard}>
+          <View style={[styles.heroBanner, { height: 110 + insets.top }]}> 
+            <View style={styles.heroBannerFallback}>
+              <View style={styles.heroBannerOrbPrimary} />
+              <View style={styles.heroBannerOrbSecondary} />
+            </View>
+            <View style={styles.heroBannerOverlay} />
 
-          <View style={styles.card}>
-            <SectionHeader title="Info" icon="person-circle-outline" />
-            <InfoRow label="Name" value={user?.name} />
-            <InfoRow label="Username" value={user?.username} />
-            <InfoRow label="Phone" value={user?.phone} />
-            <InfoRow label="Email" value={user?.email} />
-            <InfoRow label="Role" value={roleName} />
-          </View>
+            <View style={[styles.heroTopBar, { top: insets.top + 6 }]}> 
+              <TouchableOpacity style={styles.heroTopIconBtn} onPress={handleBack}>
+                <Ionicons name="chevron-back" size={20} color={PALETTE.white} />
+              </TouchableOpacity>
 
-          {roleName === "Student" && (
-            <>
-              <View style={styles.card}>
-                <SectionHeader title="Periods" icon="calendar-outline" />
-
-                <View style={styles.schedulePreviewCard}>
-                  <View style={styles.schedulePreviewHeader}>
-                    <View style={styles.schedulePreviewIconWrap}>
-                      <Ionicons name="calendar-clear-outline" size={18} color={PALETTE.accentDark} />
-                    </View>
-                    <View style={styles.schedulePreviewTextWrap}>
-                      <Text style={styles.schedulePreviewEyebrow}>Weekly learning flow</Text>
-                      <Text style={styles.schedulePreviewTitle}>
-                        {selectedScheduleDay || "Today"} schedule
-                      </Text>
-                      <Text style={styles.schedulePreviewSubtext}>
-                        {studentGradeSection?.key || "Class schedule"}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* <View style={styles.schedulePreviewStatsRow}>
-                    <View style={styles.schedulePreviewStatPill}>
-                      <Text style={styles.schedulePreviewStatValue}>{selectedDaySummary.classCount}
-
-                        <Text style={styles.schedulePreviewStatLabel}> Classes</Text>
-                      </Text>
-                      
-                    </View>
-                    <View style={styles.schedulePreviewStatPill}>
-                      <Text style={styles.schedulePreviewStatValue}>{selectedDaySummary.freeCount}
-                        <Text style={styles.schedulePreviewStatLabel}> Free</Text>
-                      </Text>
-                      
-                    </View>
-                    <View style={styles.schedulePreviewStatPillWide}>
-                      <Text style={styles.schedulePreviewStatValue}>{selectedDaySummary.total}
-                        <Text style={styles.schedulePreviewStatLabel}> Total periods</Text>
-                      </Text>
-                      
-                    </View>
-                  </View> */}
+              <View style={styles.heroTopActions}>
+                <View style={styles.heroQuickStats}>
+                  <MiniPill icon={heroQuickStatIcon} text={heroQuickStat} />
                 </View>
 
-                <TouchableOpacity
-                  style={styles.scheduleOpenButton}
-                  activeOpacity={0.9}
-                  onPress={() => setScheduleSheetVisible(true)}
-                >
-                  <View>
-                    <Text style={styles.scheduleOpenButtonTitle}>Open full schedule</Text>
-                    <Text style={styles.scheduleOpenButtonSubtext}>
-                      View the day tabs and all periods in a bottom sheet.
-                    </Text>
-                  </View>
-                  {/* <View style={styles.scheduleOpenButtonIcon}>
-                    <Ionicons name="chevron-up" size={18} color={PALETTE.accentDark} />
-                  </View> */}
+                <TouchableOpacity style={styles.heroTopIconBtn} onPress={() => setShowMenu((value) => !value)}>
+                  <Ionicons name="ellipsis-horizontal" size={18} color={PALETTE.white} />
                 </TouchableOpacity>
               </View>
-
-              {parents.length > 0 && (
-                <View style={styles.card}>
-                  <SectionHeader title="Parents" icon="home-outline" />
-                  {parents.map((p) => (
-                    <PersonRow
-                      key={p.parentId}
-                      name={p.name}
-                      subtitle={`Relation: ${p.relationship}`}
-                      image={p.profileImage}
-                      onPress={() => {
-                        if (parentRecordId && p.parentId === parentRecordId) router.push("/dashboard/profile");
-                        else router.push(`/userProfile?recordId=${p.parentId}`);
-                      }}
-                      onMessage={
-                        p.userId && (!parentUserId || String(p.userId) !== String(parentUserId))
-                          ? () => openChatWith(p.userId, p.name)
-                          : null
-                      }
-                    />
-                  ))}
-                </View>
-              )}
-
-              {teachers.length > 0 && (
-                <View style={styles.card}>
-                  <SectionHeader title="Teachers" icon="school-outline" />
-                  {teachers.map((t) => (
-                    <PersonRow
-                      key={t.teacherId || t.name}
-                      name={t.name}
-                      subtitle={t.subjects?.length ? t.subjects.join(", ") : "Teacher"}
-                      image={t.profileImage}
-                      onPress={() => (t.teacherId ? router.push(`/userProfile?recordId=${t.teacherId}`) : null)}
-                      onMessage={
-                        t.userId && (!parentUserId || String(t.userId) !== String(parentUserId))
-                          ? () => openChatWith(t.userId, t.name)
-                          : null
-                      }
-                    />
-                  ))}
-                </View>
-              )}
-            </>
-          )}
-
-          {roleName === "Teacher" && teacherCourses.length > 0 && (
-            <View style={styles.card}>
-              <SectionHeader title="Subjects" icon="book-outline" />
-              {teacherCourses.map((c) => (
-                <View key={c.courseId} style={styles.subjectRow}>
-                  <Text style={styles.subjectName}>{c.subject}</Text>
-                  <Text style={styles.subjectMeta}>Grade {c.grade} • Section {c.section}</Text>
-                </View>
-              ))}
             </View>
-          )}
-
-          {roleName === "Parent" && (
-            <View style={styles.card}>
-              <SectionHeader title="Account" icon="settings-outline" />
-
-              <TouchableOpacity
-                style={styles.accountItem}
-                onPress={canMessageMain ? openChat : handleShare}
-              >
-                <View style={[styles.accountIconWrap, { backgroundColor: "#E9F5FF" }]}>
-                  <Ionicons
-                    name={canMessageMain ? "chatbubble-ellipses-outline" : "share-social-outline"}
-                    size={18}
-                    color={PALETTE.accentDark}
-                  />
-                </View>
-                <Text style={styles.accountText}>
-                  {canMessageMain ? "Send Message" : "Share Profile"}
-                </Text>
-                <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.accountItem} onPress={handleCall}>
-                <View style={[styles.accountIconWrap, { backgroundColor: "#ECFDF3" }]}>
-                  <Ionicons name="call-outline" size={18} color="#059669" />
-                </View>
-                <Text style={styles.accountText}>Call User</Text>
-                <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.accountItem, styles.accountItemNoBorder]}
-                onPress={handleShare}
-              >
-                <View style={[styles.accountIconWrap, { backgroundColor: "#F1F5FF" }]}>
-                  <Ionicons name="share-social-outline" size={18} color="#4F46E5" />
-                </View>
-                <Text style={styles.accountText}>Share Profile</Text>
-                <Ionicons name="chevron-forward-outline" size={18} color="#8EA1B5" />
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      </Animated.ScrollView>
-
-      <Animated.View style={[styles.header, { height: headerHeight }]}>
-        <Image source={{ uri: user?.profileImage || defaultProfile }} style={styles.headerBgImage} />
-        <View style={styles.headerBgOverlay} />
-
-        <Animated.View
-          style={[
-            styles.heroWrap,
-            {
-              transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
-              opacity: heroOpacity,
-            },
-          ]}
-        >
-          <View style={styles.photoCard}>
-            <Image source={{ uri: user?.profileImage || defaultProfile }} style={styles.photoCardImage} />
           </View>
 
-          <View style={styles.identitySide}>
-            <View style={styles.identityCard}>
-              <Text style={styles.identityName} numberOfLines={1}>
-                {user?.name}
+          <View style={styles.heroAvatarSlot}>
+            <View style={styles.avatarWrap}>
+              <View style={styles.photoCard}>
+                <View style={styles.photoCardImageClip}>
+                  <Image source={{ uri: user.profileImage || defaultProfile }} style={styles.photoCardImage} />
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.heroIdentityBlock}>
+            <View style={styles.identityTopRow}>
+              <Text style={styles.name} numberOfLines={1}>
+                {user.name || "Profile"}
               </Text>
-              {!!user?.username && <Text style={styles.identityUsername}>@{user.username}</Text>}
-              <Text style={styles.identityRole}>{profileSubtitle}</Text>
+            </View>
+
+            <View style={styles.subRow}>
+              {!!usernameHandle && <Text style={styles.subText}>{usernameHandle}</Text>}
+              <MiniPill icon={heroRoleIcon} text={roleName || "Profile"} compact />
+              {!!heroSecondaryMeta && <MiniPill icon={heroSecondaryIcon} text={heroSecondaryMeta} compact />}
+            </View>
+
+            <TouchableOpacity style={styles.editProfileBtn} onPress={handlePrimaryAction} activeOpacity={0.88}>
+              <Text style={styles.editProfileText}>{primaryActionLabel}</Text>
+            </TouchableOpacity>
+
+            <View style={styles.profileFilterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.profileFilterBtn,
+                  profileSectionTab === "main" && styles.profileFilterBtnActive,
+                ]}
+                onPress={() => setProfileSectionTab("main")}
+                activeOpacity={0.85}
+              >
+                <Text
+                  style={[
+                    styles.profileFilterText,
+                    profileSectionTab === "main" && styles.profileFilterTextActive,
+                  ]}
+                >
+                  Main
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.profileFilterBtn,
+                  profileSectionTab === "info" && styles.profileFilterBtnActive,
+                ]}
+                onPress={() => setProfileSectionTab("info")}
+                activeOpacity={0.85}
+              >
+                <Text
+                  style={[
+                    styles.profileFilterText,
+                    profileSectionTab === "info" && styles.profileFilterTextActive,
+                  ]}
+                >
+                  Info
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
-        </Animated.View>
-      </Animated.View>
+        </View>
+
+        <ScrollView
+          style={styles.sectionScroll}
+          contentContainerStyle={[
+            styles.sectionScrollContent,
+            { paddingBottom: Math.max(88, insets.bottom + 64) },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          {profileSectionTab === "main" ? renderMainSection() : renderInfoSection()}
+        </ScrollView>
+      </View>
 
       <Modal
         visible={scheduleSheetVisible}
         transparent
         animationType="slide"
-        onRequestClose={() => setScheduleSheetVisible(false)}
+        onRequestClose={closeScheduleSheet}
       >
         <View style={styles.sheetOverlay}>
-          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={() => setScheduleSheetVisible(false)} />
+          <TouchableOpacity style={styles.sheetBackdrop} activeOpacity={1} onPress={closeScheduleSheet} />
 
           <View style={[styles.sheetContainer, { paddingBottom: Math.max(insets.bottom, 18) }]}> 
             <View style={styles.sheetHandle} />
 
             <View style={styles.sheetHeader}>
-              <View>
-                <Text style={styles.sheetTitle}>Student periods</Text>
-                <Text style={styles.sheetSubtitle}>{studentGradeSection?.key || "Class schedule"}</Text>
+              <View style={styles.sheetHeaderInfo}>
+                <Text style={styles.sheetTitle}>Class Schedule</Text>
+                <Text style={styles.sheetSub}>
+                  Grade {studentGradeSection?.grade || "--"} • Section {studentGradeSection?.section || "--"}
+                </Text>
               </View>
 
-              <TouchableOpacity style={styles.sheetCloseButton} onPress={() => setScheduleSheetVisible(false)}>
+              <TouchableOpacity style={styles.sheetCloseButton} onPress={closeScheduleSheet}>
                 <Ionicons name="close" size={18} color={PALETTE.text} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sheetScrollContent}>
-              <View style={styles.scheduleHeroCard}>
-                <View style={styles.scheduleHeroTextWrap}>
-                  <Text style={styles.scheduleEyebrow}>Weekly learning flow</Text>
-                  <Text style={styles.scheduleHeroTitle}>{selectedScheduleDay || "Today"} schedule</Text>
-                  <Text style={styles.scheduleHeroSubtext}>
-                    {selectedDaySummary.total} period{selectedDaySummary.total === 1 ? "" : "s"} planned
-                  </Text>
-                </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {WEEK_DAYS.map((day) => {
+                const entries = studentWeeklySchedule?.[day] || [];
+                const isToday = day === todayName;
+                const isExpanded = !!expandedScheduleDays[day];
 
-                <View style={styles.scheduleHeroCountPill}>
-                  <Text style={styles.scheduleHeroCountNumber}>{selectedDaySummary.total}</Text>
-                  <Text style={styles.scheduleHeroCountLabel}>periods</Text>
-                </View>
-              </View>
-
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.dayChipRow}
-              >
-                {WEEK_DAYS.map((day) => {
-                  const active = selectedScheduleDay === day;
-                  const dayCount = studentWeeklySchedule?.[day]?.length || 0;
-                  return (
+                return (
+                  <View key={day} style={[styles.daySection, isToday && styles.daySectionToday]}>
                     <TouchableOpacity
-                      key={day}
-                      style={[styles.dayChip, active && styles.dayChipActive]}
-                      onPress={() => setSelectedScheduleDay(day)}
-                      activeOpacity={0.88}
+                      activeOpacity={0.9}
+                      style={[styles.daySectionHeader, isExpanded && styles.daySectionHeaderExpanded]}
+                      onPress={() => toggleScheduleDay(day)}
                     >
-                      <Text style={[styles.dayChipKicker, active && styles.dayChipKickerActive]}>
-                        {WEEK_DAY_SHORT[day]}
-                      </Text>
-                      <Text style={[styles.dayChipTitle, active && styles.dayChipTitleActive]}>{day}</Text>
-                      <Text style={[styles.dayChipSub, active && styles.dayChipSubActive]}>
-                        {dayCount} period{dayCount === 1 ? "" : "s"}
-                      </Text>
+                      <View style={styles.daySectionHeaderLeft}>
+                        <View style={styles.dayHeaderIconWrap}>
+                          <Ionicons name="calendar-clear-outline" size={14} color={PALETTE.accent} />
+                        </View>
+                        <Text style={styles.daySectionTitle}>{day}</Text>
+                        {isToday ? (
+                          <View style={styles.todayPill}>
+                            <Text style={styles.todayPillText}>Today</Text>
+                          </View>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.daySectionHeaderRight}>
+                        <View style={styles.dayCountPill}>
+                          <Text style={styles.dayCountPillText}>
+                            {entries.length} {entries.length === 1 ? "class" : "classes"}
+                          </Text>
+                        </View>
+                        <View style={[styles.dayChevronWrap, isExpanded && styles.dayChevronWrapActive]}>
+                          <Ionicons
+                            name={isExpanded ? "chevron-up" : "chevron-down"}
+                            size={16}
+                            color={PALETTE.accent}
+                          />
+                        </View>
+                      </View>
                     </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
 
-              <View style={styles.scheduleInsightsRow}>
-                <View style={styles.scheduleInsightCard}>
-                  <Text style={styles.scheduleInsightValue}>{selectedDaySummary.classCount}
+                    {isExpanded ? (
+                      entries.length ? (
+                        <View style={styles.daySectionBody}>
+                          {entries.map((item) => (
+                            <View key={`${day}-${item.periodName}`} style={styles.periodRow}>
+                              <View style={styles.periodBadge}>
+                                <Text style={styles.periodBadgeText}>{item.periodName}</Text>
+                              </View>
 
-                    <Text style={styles.scheduleInsightLabel}> Classes</Text>
-                  </Text>
-                  
-                </View>
-                <View style={styles.scheduleInsightCard}>
-                  <Text style={styles.scheduleInsightValue}>{selectedDaySummary.freeCount}
-                    <Text style={styles.scheduleInsightLabel}> Free</Text>
-                  </Text>
-                  
-                </View>
-                {/* <View style={[styles.scheduleInsightCard, styles.scheduleInsightCardAccent]}>
-                  <Ionicons name="sparkles-outline" size={15} color={PALETTE.accentDark} />
-                  <Text style={styles.scheduleInsightHint}>Tap a day to focus on that plan</Text>
-                </View> */}
-              </View>
+                              <View style={styles.periodContent}>
+                                <Text style={styles.periodSubject}>{item.subject || "Free Period"}</Text>
+                                <View style={styles.periodTeacherRow}>
+                                  <Ionicons name="person-outline" size={12} color={PALETTE.muted} />
+                                  <Text numberOfLines={1} ellipsizeMode="tail" style={styles.periodTeacher}>
+                                    {item.teacherName || "Unassigned"}
+                                  </Text>
+                                </View>
+                              </View>
 
-              {selectedDayPeriods.length ? (
-                <View style={styles.periodTimeline}>
-                  {selectedDayPeriods.map((p, index) => (
-                    <View
-                      key={`${selectedScheduleDay}-${p.periodName}`}
-                      style={[
-                        styles.periodTimelineRow,
-                        p.isFree && styles.periodTimelineRowFree,
-                        index === selectedDayPeriods.length - 1 && styles.periodTimelineRowLast,
-                      ]}
-                    >
-                      <View style={styles.periodRailWrap}>
-                        <View style={[styles.periodRailDot, p.isFree && styles.periodRailDotFree]} />
-                        {index !== selectedDayPeriods.length - 1 && (
-                          <View style={[styles.periodRailLine, p.isFree && styles.periodRailLineFree]} />
-                        )}
-                      </View>
-
-                      <View style={[styles.periodCard, p.isFree && styles.periodCardFree]}>
-                        <View style={styles.periodTopRow}>
-                          <View>
-                            <Text style={styles.periodLabel}>{p.periodName}</Text>
-                            <Text style={[styles.periodSubject, p.isFree && styles.periodSubjectFree]}>
-                              {p.subject}
-                            </Text>
-                          </View>
-
-                          <View style={[styles.subjectMiniChip, p.isFree && styles.subjectMiniChipFree]}>
-                            <Text
-                              style={[
-                                styles.subjectMiniChipText,
-                                p.isFree && styles.subjectMiniChipTextFree,
-                              ]}
-                            >
-                              {p.isFree ? "Break" : "Class"}
-                            </Text>
-                          </View>
+                              <View style={styles.periodArrowWrap}>
+                                <Ionicons name="chevron-forward" size={14} color={PALETTE.accent} />
+                              </View>
+                            </View>
+                          ))}
                         </View>
-
-                        <View style={styles.periodMetaRow}>
-                          <View style={styles.periodMetaPill}>
-                            <Ionicons
-                              name={p.isFree ? "cafe-outline" : "school-outline"}
-                              size={13}
-                              color={p.isFree ? PALETTE.muted : PALETTE.accentDark}
-                            />
-                            <Text style={styles.periodTeacher} numberOfLines={1}>
-                              {p.teacherName}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              ) : (
-                <View style={styles.scheduleEmptyState}>
-                  <Ionicons name="calendar-clear-outline" size={18} color={PALETTE.muted} />
-                  <Text style={styles.emptyText}>No schedule found for this day.</Text>
-                </View>
-              )}
+                      ) : (
+                        <Text style={styles.dayEmptyText}>No periods scheduled.</Text>
+                      )
+                    ) : (
+                      <Text style={styles.dayCollapsedHint}>
+                        {entries.length
+                          ? `Tap to view ${entries.length} period${entries.length === 1 ? "" : "s"}`
+                          : "Tap to view this day"}
+                      </Text>
+                    )}
+                  </View>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -934,29 +1084,37 @@ export default function UserProfile() {
   );
 }
 
-function SectionHeader({ title, icon }) {
+function MiniPill({ icon, text, compact = false }) {
+  const { PALETTE, styles } = useUserProfileThemeConfig();
+
   return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionIconWrap}>
-        <Ionicons name={icon} size={16} color={PALETTE.accentDark} />
-      </View>
-      <Text style={styles.sectionTitle}>{title}</Text>
+    <View style={[styles.miniPill, compact && styles.miniPillCompact]}>
+      <Ionicons name={icon} size={compact ? 10 : 13} color={compact ? PALETTE.accent : "#F8FAFC"} />
+      <Text style={[styles.miniPillText, compact && styles.miniPillTextCompact]}>{text}</Text>
     </View>
   );
 }
 
-function QuickAction({ icon, label, onPress }) {
+function ActionRow({ icon, title, subtitle, onPress, destructive = false }) {
+  const { PALETTE, styles } = useUserProfileThemeConfig();
+
   return (
-    <TouchableOpacity style={styles.quickActionItem} onPress={onPress} activeOpacity={0.88}>
-      <View style={styles.quickActionIcon}>
-        <Ionicons name={icon} size={18} color={PALETTE.accentDark} />
+    <TouchableOpacity style={styles.actionRow} onPress={onPress} activeOpacity={0.8}>
+      <View style={[styles.iconWrap, destructive ? styles.iconWrapDanger : null]}>
+        <Ionicons name={icon} size={18} color={destructive ? PALETTE.danger : PALETTE.accent} />
       </View>
-      <Text style={styles.quickActionLabel}>{label}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.actionTitle, destructive ? styles.actionTitleDanger : null]}>{title}</Text>
+        <Text numberOfLines={1} style={styles.actionSub}>{subtitle}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
     </TouchableOpacity>
   );
 }
 
 function InfoRow({ label, value }) {
+  const { styles } = useUserProfileThemeConfig();
+
   if (!value) return null;
   return (
     <View style={styles.infoRow}>
@@ -967,6 +1125,8 @@ function InfoRow({ label, value }) {
 }
 
 function PersonRow({ name, subtitle, extra, image, onPress, onMessage }) {
+  const { PALETTE, styles } = useUserProfileThemeConfig();
+
   return (
     <TouchableOpacity style={styles.childCard} onPress={onPress} activeOpacity={0.88}>
       <Image source={{ uri: image || defaultProfile }} style={styles.childImage} />
@@ -988,7 +1148,7 @@ function PersonRow({ name, subtitle, extra, image, onPress, onMessage }) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (PALETTE) => StyleSheet.create({
   container: { flex: 1, backgroundColor: PALETTE.background },
 
   loadingWrap: {
@@ -1002,6 +1162,201 @@ const styles = StyleSheet.create({
     color: PALETTE.muted,
     fontSize: 14,
     fontWeight: "600",
+  },
+  loadingTitle: {
+    marginTop: 12,
+    color: PALETTE.text,
+    fontSize: 18,
+    fontWeight: "800",
+  },
+  emptyBackBtn: {
+    marginTop: 18,
+    backgroundColor: PALETTE.accent,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 10,
+  },
+  emptyBackText: {
+    color: PALETTE.white,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  heroCard: {
+    marginHorizontal: -14,
+    backgroundColor: PALETTE.card,
+    marginBottom: 4,
+    overflow: "hidden",
+  },
+  heroBanner: {
+    backgroundColor: PALETTE.heroSurface,
+    position: "relative",
+    overflow: "hidden",
+  },
+  heroBannerFallback: {
+    flex: 1,
+    backgroundColor: PALETTE.heroSurface,
+    overflow: "hidden",
+  },
+  heroBannerOrbPrimary: {
+    position: "absolute",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: PALETTE.heroOrbPrimary,
+    top: -40,
+    right: -20,
+  },
+  heroBannerOrbSecondary: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: PALETTE.heroOrbSecondary,
+    bottom: -60,
+    left: -20,
+  },
+  heroBannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "transparent",
+  },
+  heroTopBar: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    zIndex: 30,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  heroTopActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  heroTopIconBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: PALETTE.heroTopButton,
+    borderWidth: 1,
+    borderColor: PALETTE.heroTopBorder,
+  },
+  heroQuickStats: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginRight: 8,
+  },
+  miniPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: PALETTE.heroPillBg,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: PALETTE.heroPillBorder,
+  },
+  miniPillCompact: {
+    backgroundColor: PALETTE.accentSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderColor: PALETTE.border,
+  },
+  miniPillText: {
+    marginLeft: 5,
+    color: PALETTE.heroPillText,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  miniPillTextCompact: {
+    marginLeft: 3,
+    fontSize: 9,
+    color: PALETTE.accent,
+  },
+  heroAvatarSlot: {
+    paddingHorizontal: 18,
+    marginTop: -44,
+  },
+  avatarWrap: {
+    position: "relative",
+    alignSelf: "flex-start",
+  },
+  heroIdentityBlock: {
+    marginTop: -6,
+    marginHorizontal: 14,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    paddingBottom: 14,
+  },
+  identityTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  name: {
+    fontSize: 21,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  subRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  subText: {
+    fontSize: 11,
+    color: PALETTE.muted,
+    fontWeight: "600",
+    marginRight: 2,
+  },
+  editProfileBtn: {
+    marginTop: 10,
+    width: "100%",
+    backgroundColor: PALETTE.purpleAction,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    minHeight: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  editProfileText: {
+    color: PALETTE.white,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  profileFilterRow: {
+    flexDirection: "row",
+    backgroundColor: "#F8FBFF",
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 12,
+    padding: 4,
+    marginTop: 10,
+  },
+  profileFilterBtn: {
+    flex: 1,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileFilterBtnActive: {
+    backgroundColor: PALETTE.card,
+    borderWidth: 1,
+    borderColor: PALETTE.accent,
+  },
+  profileFilterText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: PALETTE.muted,
+  },
+  profileFilterTextActive: {
+    color: PALETTE.text,
   },
 
   topActionsRow: {
@@ -1018,11 +1373,11 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: "rgba(15, 23, 42, 0.28)",
+    backgroundColor: PALETTE.topIconSurface,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.24)",
+    borderColor: PALETTE.topIconBorder,
   },
 
   compactCenter: {
@@ -1039,16 +1394,16 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     marginRight: 8,
     borderWidth: 1.5,
-    borderColor: "#fff",
+    borderColor: PALETTE.heroSurface,
   },
   compactName: {
-    color: "#fff",
+    color: PALETTE.white,
     fontSize: 14,
     fontWeight: "700",
     maxWidth: 160,
   },
   compactSub: {
-    color: "#DBEAFE",
+    color: PALETTE.heroSubtleText,
     fontSize: 11,
     marginTop: 1,
   },
@@ -1058,7 +1413,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    backgroundColor: PALETTE.accent,
+    backgroundColor: PALETTE.heroSurface,
     zIndex: 10,
     overflow: "hidden",
   },
@@ -1069,7 +1424,7 @@ const styles = StyleSheet.create({
   },
   headerBgOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(8, 24, 46, 0.42)",
+    backgroundColor: PALETTE.overlayStrong,
   },
 
   heroWrap: {
@@ -1082,13 +1437,24 @@ const styles = StyleSheet.create({
   },
 
   photoCard: {
-    width: 124,
-    height: 148,
-    borderRadius: 20,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    overflow: "visible",
+    borderWidth: 4,
+    borderColor: PALETTE.heroSurface,
+    backgroundColor: PALETTE.card,
+    shadowColor: PALETTE.shadowBlue,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  photoCardImageClip: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 44,
     overflow: "hidden",
-    borderWidth: 2,
-    borderColor: "rgba(255,255,255,0.95)",
-    backgroundColor: "#fff",
   },
   photoCardImage: {
     width: "100%",
@@ -1103,37 +1469,44 @@ const styles = StyleSheet.create({
   },
   identityCard: {
     alignSelf: "flex-start",
-    backgroundColor: "rgba(15,23,42,0.34)",
+    backgroundColor: PALETTE.heroTopButton,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.25)",
+    borderColor: PALETTE.heroTopBorder,
     paddingVertical: 12,
     paddingHorizontal: 12,
     minWidth: "76%",
     maxWidth: "100%",
   },
   identityName: {
-    color: "#fff",
+    color: PALETTE.white,
     fontSize: 19,
     fontWeight: "800",
     letterSpacing: 0.2,
   },
   identityUsername: {
-    color: "#DDEAFE",
+    color: PALETTE.heroSubtleText,
     fontSize: 13,
     fontWeight: "600",
     marginTop: 3,
   },
   identityRole: {
-    color: "#E2E8F0",
+    color: PALETTE.heroSubtleText,
     fontSize: 12,
     fontWeight: "700",
     marginTop: 8,
   },
 
   contentWrap: {
+    flex: 1,
     paddingHorizontal: 14,
-    gap: 12,
+    gap: 4,
+  },
+  sectionScroll: {
+    flex: 1,
+  },
+  sectionScrollContent: {
+    gap: 4,
   },
 
   quickActions: {
@@ -1168,7 +1541,7 @@ const styles = StyleSheet.create({
   quickActionLabel: {
     fontSize: 12,
     fontWeight: "700",
-    color: "#33506D",
+    color: PALETTE.text,
   },
 
   card: {
@@ -1176,12 +1549,8 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    padding: 14,
-    shadowColor: "rgba(15,23,42,0.03)",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    elevation: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
 
   sectionHeader: {
@@ -1202,6 +1571,44 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "800",
     color: PALETTE.text,
+    marginBottom: 10,
+  },
+
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 16,
+    backgroundColor: PALETTE.card,
+    marginBottom: 10,
+  },
+  iconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: PALETTE.accentSoft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  iconWrapDanger: {
+    backgroundColor: PALETTE.dangerSoft,
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: PALETTE.text,
+  },
+  actionTitleDanger: {
+    color: PALETTE.danger,
+  },
+  actionSub: {
+    fontSize: 12,
+    color: PALETTE.muted,
+    marginTop: 2,
   },
 
   infoRow: {
@@ -1210,7 +1617,7 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#EFF4FA",
+    borderBottomColor: PALETTE.line,
   },
   infoLabel: {
     color: PALETTE.muted,
@@ -1228,30 +1635,54 @@ const styles = StyleSheet.create({
   childCard: {
     flexDirection: "row",
     alignItems: "center",
-    marginVertical: 6,
-    padding: 12,
-    backgroundColor: "#FAFCFF",
-    borderRadius: 14,
+    marginTop: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 11,
+    backgroundColor: PALETTE.card,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: PALETTE.border,
+    borderColor: PALETTE.borderSoft,
+    shadowColor: PALETTE.shadowSoft,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 2,
   },
   childImage: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: PALETTE.border,
   },
-  childBody: { flex: 1, marginLeft: 12 },
+  childBody: { flex: 1, marginLeft: 10 },
   childName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
     color: PALETTE.text,
   },
   childMeta: {
-    fontSize: 12.5,
+    fontSize: 11.5,
     color: PALETTE.muted,
-    marginTop: 2,
+    marginTop: 1,
+  },
+
+  noteStateCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: PALETTE.cardMuted,
+    paddingVertical: 18,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  noteStateText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: PALETTE.muted,
+    fontWeight: "600",
   },
 
   accountItem: {
@@ -1280,16 +1711,16 @@ const styles = StyleSheet.create({
   },
 
   msgBtn: {
-    marginRight: 10,
-    padding: 7,
+    marginRight: 8,
+    padding: 6,
     borderRadius: 999,
-    backgroundColor: "#E0F2FE",
+    backgroundColor: PALETTE.badgeSurface,
   },
 
   subjectRow: {
     padding: 12,
     borderRadius: 12,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: PALETTE.surfaceMuted,
     borderWidth: 1,
     borderColor: PALETTE.border,
     marginTop: 8,
@@ -1297,406 +1728,260 @@ const styles = StyleSheet.create({
   subjectName: { fontSize: 14, color: PALETTE.text, fontWeight: "700" },
   subjectMeta: { fontSize: 12.5, color: PALETTE.muted, marginTop: 3 },
 
-  schedulePreviewCard: {
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: "#F7FBFF",
+  scheduleCard: {
+    backgroundColor: PALETTE.inputBackground,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#D8EAFE",
+    borderColor: PALETTE.border,
+    padding: 14,
   },
-  schedulePreviewHeader: {
+  scheduleTop: {
     flexDirection: "row",
     alignItems: "center",
   },
-  schedulePreviewIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: "#ffffff",
+  scheduleIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: PALETTE.accentSoft,
+    borderWidth: 1,
+    borderColor: PALETTE.borderSoft,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 12,
+    marginRight: 10,
   },
-  schedulePreviewTextWrap: {
-    flex: 1,
-  },
-  schedulePreviewEyebrow: {
-    fontSize: 10.5,
-    fontWeight: "800",
-    color: PALETTE.accentDark,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  schedulePreviewTitle: {
-    marginTop: 5,
-    fontSize: 20,
-    fontWeight: "800",
-    color: PALETTE.text,
-  },
-  schedulePreviewSubtext: {
-    marginTop: 3,
-    fontSize: 12.5,
-    fontWeight: "600",
-    color: PALETTE.muted,
-  },
-  schedulePreviewStatsRow: {
-    marginTop: 16,
-    flexDirection: "row",
-    gap: 8,
-  },
-  schedulePreviewStatPill: {
-    flex: 1,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E3EEF9",
-  },
-  schedulePreviewStatPillWide: {
-    flex: 1.25,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#E3EEF9",
-  },
-  schedulePreviewStatValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: PALETTE.text,
-  },
-  schedulePreviewStatLabel: {
-    marginTop: 2,
-    fontSize: 11,
-    fontWeight: "700",
-    color: PALETTE.muted,
-  },
-  scheduleOpenButton: {
-    marginTop: 12,
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: "#0F172A",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  scheduleOpenButtonTitle: {
+  scheduleTitle: {
     fontSize: 15,
     fontWeight: "800",
-    color: "#FFFFFF",
-  },
-  scheduleOpenButtonSubtext: {
-    marginTop: 3,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#CBD5E1",
-  },
-  scheduleOpenButtonIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#EAF5FF",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 12,
-  },
-
-  scheduleHeroCard: {
-    marginBottom: 14,
-    padding: 16,
-    borderRadius: 20,
-    backgroundColor: "#F4F9FF",
-    borderWidth: 1,
-    borderColor: "#D8EAFE",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  scheduleHeroTextWrap: {
-    flex: 1,
-  },
-  scheduleEyebrow: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: PALETTE.accentDark,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  scheduleHeroTitle: {
-    marginTop: 6,
-    fontSize: 22,
-    fontWeight: "800",
     color: PALETTE.text,
   },
-  scheduleHeroSubtext: {
-    marginTop: 4,
-    fontSize: 12.5,
-    color: PALETTE.muted,
-    fontWeight: "600",
-  },
-  scheduleHeroCountPill: {
-    minWidth: 82,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 18,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#D8EAFE",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scheduleHeroCountNumber: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: PALETTE.accentDark,
-  },
-  scheduleHeroCountLabel: {
-    marginTop: 2,
-    fontSize: 11,
-    fontWeight: "700",
-    color: PALETTE.muted,
-    textTransform: "uppercase",
-  },
-
-  dayChipKicker: {
-    fontSize: 10.5,
-    color: PALETTE.muted,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.7,
-    marginBottom: 6,
-  },
-  dayChipKickerActive: {
-    color: PALETTE.accentDark,
-  },
-
-  dayChipRow: {
-    gap: 10,
-    paddingRight: 6,
-    paddingBottom: 8,
-  },
-  dayChip: {
-    minWidth: 122,
-    backgroundColor: "#FBFDFF",
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    borderRadius: 16,
-    paddingVertical: 13,
-    paddingHorizontal: 14,
-  },
-  dayChipActive: {
-    backgroundColor: "#EEF6FF",
-    borderColor: "#B6D9FB",
-    shadowColor: "#93C5FD",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.14,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  dayChipTitle: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: PALETTE.text,
-  },
-  dayChipTitleActive: {
-    color: PALETTE.accentDark,
-  },
-  dayChipSub: {
-    fontSize: 11,
-    color: PALETTE.muted,
-    marginTop: 3,
-    fontWeight: "600",
-  },
-  dayChipSubActive: {
-    color: PALETTE.accentDark,
-  },
-
-  scheduleInsightsRow: {
-    marginTop: 12,
-    marginBottom: 6,
-    flexDirection: "row",
-    gap: 8,
-  },
-  scheduleInsightCard: {
-    flex: 1,
-    minHeight: 64,
-    borderRadius: 16,
-    backgroundColor: "#F8FAFC",
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    justifyContent: "center",
-  },
-  scheduleInsightCardAccent: {
-    flex: 1.4,
-    backgroundColor: "#F2F8FF",
-    borderColor: "#D8EAFE",
-    gap: 5,
-  },
-  scheduleInsightValue: {
-    fontSize: 21,
-    fontWeight: "800",
-    color: PALETTE.text,
-  },
-  scheduleInsightLabel: {
+  scheduleSub: {
     marginTop: 2,
     fontSize: 12,
-    fontWeight: "700",
     color: PALETTE.muted,
   },
-  scheduleInsightHint: {
-    fontSize: 11.5,
-    fontWeight: "700",
-    color: PALETTE.accentDark,
-    lineHeight: 16,
-  },
-
-  periodTimeline: {
-    marginTop: 8,
-  },
-  periodTimelineRow: {
-    flexDirection: "row",
-    alignItems: "stretch",
-    minHeight: 96,
-  },
-  periodTimelineRowFree: {
-    opacity: 0.92,
-  },
-  periodTimelineRowLast: {
-    minHeight: 88,
-  },
-  periodRailWrap: {
-    width: 26,
-    alignItems: "center",
-  },
-  periodRailDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginTop: 22,
-    backgroundColor: PALETTE.accent,
-    borderWidth: 3,
-    borderColor: "#DCEEFF",
-  },
-  periodRailDotFree: {
-    backgroundColor: "#94A3B8",
-    borderColor: "#E2E8F0",
-  },
-  periodRailLine: {
+  sheetOverlay: {
     flex: 1,
-    width: 2,
-    marginTop: 6,
-    marginBottom: -2,
-    backgroundColor: "#D7EAFE",
-    borderRadius: 999,
+    justifyContent: "flex-end",
+    backgroundColor: PALETTE.overlay,
   },
-  periodRailLineFree: {
-    backgroundColor: "#E2E8F0",
-  },
-
-  periodCard: {
+  sheetBackdrop: {
     flex: 1,
-    marginBottom: 12,
-    padding: 14,
-    borderRadius: 18,
-    borderWidth: 1,
+  },
+  sheetContainer: {
+    backgroundColor: PALETTE.card,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    maxHeight: "84%",
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
     borderColor: PALETTE.border,
-    backgroundColor: "#FFFFFF",
-    shadowColor: "rgba(15,23,42,0.04)",
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
+    shadowColor: PALETTE.shadowBlue,
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.07,
     shadowRadius: 16,
-    elevation: 2,
+    elevation: 6,
   },
-  periodCardFree: {
-    backgroundColor: "#F8FAFC",
-    shadowOpacity: 0.03,
+  sheetHandle: {
+    width: 46,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: PALETTE.border,
+    alignSelf: "center",
+    marginBottom: 12,
   },
-  periodTopRow: {
+  sheetHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 10,
+    marginBottom: 10,
   },
-  periodLabel: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: PALETTE.accentDark,
-    textTransform: "uppercase",
-    letterSpacing: 0.7,
+  sheetHeaderInfo: {
+    flex: 1,
+    paddingRight: 12,
   },
-  subjectMiniChip: {
-    backgroundColor: "#DBEAFE",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  subjectMiniChipFree: {
-    backgroundColor: "#E2E8F0",
-  },
-  subjectMiniChipText: {
-    color: PALETTE.accentDark,
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  subjectMiniChipTextFree: {
-    color: "#64748B",
-  },
-  periodSubject: {
-    marginTop: 6,
-    fontSize: 17,
+  sheetTitle: {
+    fontSize: 18,
+    fontWeight: "900",
     color: PALETTE.text,
-    fontWeight: "800",
-    lineHeight: 22,
   },
-  periodSubjectFree: {
-    color: "#64748B",
+  sheetSub: {
+    marginTop: 2,
+    color: PALETTE.muted,
+    fontSize: 12,
+    fontWeight: "600",
   },
-  periodMetaRow: {
-    marginTop: 12,
+  sheetCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: PALETTE.inputBackground,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  daySection: {
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    borderRadius: 16,
+    padding: 12,
+    backgroundColor: PALETTE.card,
+  },
+  daySectionToday: {
+    backgroundColor: PALETTE.inputBackground,
+    borderColor: PALETTE.accent,
+  },
+  daySectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    borderRadius: 14,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
   },
-  periodMetaPill: {
-    maxWidth: "100%",
+  daySectionHeaderExpanded: {
+    backgroundColor: PALETTE.inputBackground,
+  },
+  daySectionHeaderLeft: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "#F3F8FD",
+    flex: 1,
   },
-  periodTeacher: {
-    fontSize: 12.5,
-    color: PALETTE.muted,
-    fontWeight: "600",
-    flexShrink: 1,
-  },
-
-  scheduleEmptyState: {
-    marginTop: 10,
-    paddingVertical: 18,
-    paddingHorizontal: 14,
-    borderRadius: 16,
+  dayHeaderIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    backgroundColor: PALETTE.accentSoft,
     borderWidth: 1,
     borderColor: PALETTE.border,
-    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  daySectionHeaderRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    marginLeft: 10,
   },
-  emptyText: {
+  daySectionTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  todayPill: {
+    marginLeft: 8,
+    backgroundColor: PALETTE.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  todayPillText: {
+    color: PALETTE.accent,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  dayCountPill: {
+    backgroundColor: PALETTE.accentSoft,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 8,
+  },
+  dayCountPillText: {
+    color: PALETTE.accent,
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  dayChevronWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: PALETTE.card,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dayChevronWrapActive: {
+    backgroundColor: PALETTE.accentSoft,
+    borderColor: PALETTE.accent,
+  },
+  daySectionBody: {
+    marginTop: 10,
+  },
+  dayCollapsedHint: {
+    marginTop: 8,
+    color: PALETTE.muted,
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  periodRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: PALETTE.borderSoft,
+    borderRadius: 14,
+    backgroundColor: PALETTE.card,
+  },
+  periodBadge: {
+    minWidth: 66,
+    backgroundColor: PALETTE.accentSoft,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    marginRight: 10,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+  },
+  periodBadgeText: {
+    color: PALETTE.accent,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  periodContent: {
+    flex: 1,
+  },
+  periodSubject: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: PALETTE.text,
+  },
+  periodTeacherRow: {
+    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  periodTeacher: {
+    marginLeft: 5,
+    flex: 1,
+    fontSize: 10,
+    color: PALETTE.muted,
+    fontWeight: "500",
+  },
+  periodArrowWrap: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: PALETTE.inputBackground,
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 8,
+  },
+  dayEmptyText: {
     fontSize: 13,
     color: PALETTE.muted,
     fontWeight: "600",
-    flex: 1,
   },
 
   dropdownMenu: {
@@ -1707,7 +1992,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PALETTE.border,
     zIndex: 1000,
-    minWidth: 190,
+    minWidth: 205,
     overflow: "hidden",
   },
   menuOverlay: {
@@ -1723,7 +2008,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: PALETTE.line,
   },
   menuItemNoBorder: { borderBottomWidth: 0 },
   menuText: {
@@ -1732,58 +2017,4 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  sheetOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(15, 23, 42, 0.38)",
-  },
-  sheetBackdrop: {
-    flex: 1,
-  },
-  sheetContainer: {
-    maxHeight: "84%",
-    backgroundColor: "#FFFFFF",
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    paddingTop: 10,
-    paddingHorizontal: 14,
-  },
-  sheetHandle: {
-    alignSelf: "center",
-    width: 52,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: "#D6E2EE",
-    marginBottom: 12,
-  },
-  sheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 14,
-  },
-  sheetTitle: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: PALETTE.text,
-  },
-  sheetSubtitle: {
-    marginTop: 3,
-    fontSize: 12.5,
-    fontWeight: "600",
-    color: PALETTE.muted,
-  },
-  sheetCloseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#F8FAFC",
-    borderWidth: 1,
-    borderColor: PALETTE.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sheetScrollContent: {
-    paddingBottom: 8,
-  },
 });

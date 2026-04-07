@@ -24,14 +24,8 @@ import { database } from "../constants/firebaseConfig";
 import { getOpenedChat, clearOpenedChat } from "./lib/chatStore";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { getUserVal } from "./lib/userHelpers";
+import { useParentTheme } from "../hooks/use-parent-theme";
 
-const PRIMARY = "#007AFB";
-const MUTED = "#6B78A8";
-const BG = "#FFFFFF";
-const INCOMING_BG = "#F6F7FB";
-const OUTGOING_BG = "#007AFB";
-const INCOMING_TEXT = "#111";
-const OUTGOING_TEXT = "#fff";
 const AVATAR_PLACEHOLDER = require("../assets/images/avatar_placeholder.png");
 
 function fmtTime12(ts) {
@@ -78,6 +72,43 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const storage = getStorage();
   const params = useLocalSearchParams();
+  const { colors, statusBarStyle, isDark } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      primary: colors.primary,
+      muted: colors.mutedAlt,
+      background: colors.background,
+      card: colors.card,
+      text: colors.text,
+      textStrong: colors.textStrong,
+      line: colors.lineSoft,
+      border: colors.border,
+      borderStrong: colors.borderStrong,
+      avatarBg: colors.avatarPlaceholder,
+      incomingBg: colors.chatIncoming,
+      outgoingBg: colors.chatOutgoing,
+      incomingText: colors.chatIncomingText,
+      outgoingText: colors.chatOutgoingText,
+      inputBg: colors.inputBackground,
+      placeholder: colors.muted,
+      sendDisabled: colors.surfaceMuted,
+      sendDisabledIcon: isDark ? colors.mutedAlt : "#BFCBEF",
+      overlay: colors.overlay,
+      overlayStrong: colors.overlayStrong,
+      viewerOverlay: isDark ? "rgba(1,4,9,0.95)" : "rgba(0,0,0,0.95)",
+      outgoingMeta: isDark ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.85)",
+      outgoingMetaStrong: isDark ? "rgba(255,255,255,0.94)" : "rgba(255,255,255,0.9)",
+      seen: colors.heroSubtleText,
+      seenMuted: isDark ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.78)",
+      incomingImageBg: colors.surfaceMuted,
+      outgoingImageBg: colors.primaryDark,
+      danger: colors.danger,
+      cancel: colors.mutedAlt,
+      white: colors.white,
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   const routeChatId = typeof params.chatId === "string" ? params.chatId : "";
   const routeUserId = typeof params.userId === "string" ? params.userId : "";
@@ -107,9 +138,7 @@ export default function ChatScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   const [viewerVisible, setViewerVisible] = useState(false);
-  const [viewerImages, setViewerImages] = useState([]);
-  const [viewerFallbackUri, setViewerFallbackUri] = useState(null);
-  const [viewerLibAvailable, setViewerLibAvailable] = useState(null);
+  const [viewerImageUri, setViewerImageUri] = useState(null);
 
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const [activeMessage, setActiveMessage] = useState(null);
@@ -495,7 +524,7 @@ export default function ChatScreen() {
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaType?.Images ?? ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.7,
         allowsEditing: false,
       });
@@ -728,30 +757,14 @@ export default function ChatScreen() {
 
   function closeViewer() {
     setViewerVisible(false);
-    setViewerImages([]);
-    setViewerFallbackUri(null);
+    setViewerImageUri(null);
   }
 
   async function openImageViewer(message) {
     const uri = message.imageUrl || message.imageUri || message.image || null;
     if (!uri) return;
 
-    if (viewerLibAvailable === null) {
-      try {
-        await import("react-native-image-viewing");
-        setViewerLibAvailable(true);
-      } catch {
-        setViewerLibAvailable(false);
-      }
-    }
-
-    if (viewerLibAvailable) {
-      setViewerImages([{ uri }]);
-      setViewerVisible(true);
-      return;
-    }
-
-    setViewerFallbackUri(uri);
+    setViewerImageUri(uri);
     setViewerVisible(true);
   }
 
@@ -793,7 +806,7 @@ export default function ChatScreen() {
       <Ionicons
         name={seen ? "checkmark-done" : "checkmark"}
         size={14}
-        color={seen ? "#CBE8FF" : "rgba(255,255,255,0.78)"}
+        color={seen ? palette.seen : palette.seenMuted}
         style={{ marginLeft: 6 }}
       />
     );
@@ -913,11 +926,11 @@ export default function ChatScreen() {
 
   return (
     <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]} edges={["bottom"]}>
-      <StatusBar barStyle="dark-content" backgroundColor={BG} translucent={false} />
+      <StatusBar barStyle={statusBarStyle} backgroundColor={palette.background} translucent={false} />
       <View style={[styles.container, { paddingBottom: insets.bottom }]}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.back} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={22} color="#222" />
+            <Ionicons name="chevron-back" size={22} color={palette.text} />
           </TouchableOpacity>
 
           <View style={styles.headerCenter}>
@@ -934,7 +947,7 @@ export default function ChatScreen() {
 
         <View style={styles.messagesWrap}>
           {loading ? (
-            <ActivityIndicator size="small" color={PRIMARY} style={{ marginTop: 24 }} />
+            <ActivityIndicator size="small" color={palette.primary} style={{ marginTop: 24 }} />
           ) : (
             <FlatList
               ref={flatListRef}
@@ -961,12 +974,12 @@ export default function ChatScreen() {
           ]}
         >
           <TouchableOpacity onPress={pickImageAndSend} style={styles.attachmentBtn}>
-            <Ionicons name="image-outline" size={22} color={MUTED} />
+            <Ionicons name="image-outline" size={22} color={palette.muted} />
           </TouchableOpacity>
 
           <TextInput
             placeholder="Message"
-            placeholderTextColor="#9AA4C0"
+            placeholderTextColor={palette.placeholder}
             value={text}
             onChangeText={setText}
             style={styles.input}
@@ -979,7 +992,7 @@ export default function ChatScreen() {
             onPress={sendMessage}
             disabled={!text.trim() || sending}
           >
-            <Ionicons name="send" size={20} color={text.trim() ? "#fff" : "#BFCBEF"} />
+            <Ionicons name="send" size={20} color={text.trim() ? palette.white : palette.sendDisabledIcon} />
           </TouchableOpacity>
         </View>
 
@@ -988,19 +1001,19 @@ export default function ChatScreen() {
             <View style={styles.sheetContainer}>
               {activeMessage?.type === "text" && !activeMessage?.deleted ? (
                 <TouchableOpacity style={styles.sheetItem} onPress={startEditMessage}>
-                  <Ionicons name="create-outline" size={18} color="#0F172A" />
+                  <Ionicons name="create-outline" size={18} color={palette.text} />
                   <Text style={styles.sheetText}>Edit message</Text>
                 </TouchableOpacity>
               ) : null}
 
               <TouchableOpacity style={styles.sheetItem} onPress={doDeleteMessage}>
-                <Ionicons name="trash-outline" size={18} color="#DC2626" />
-                <Text style={[styles.sheetText, { color: "#DC2626" }]}>Delete message</Text>
+                <Ionicons name="trash-outline" size={18} color={palette.danger} />
+                <Text style={[styles.sheetText, { color: palette.danger }]}>Delete message</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetItem} onPress={closeMessageActions}>
-                <Ionicons name="close-outline" size={18} color="#6B7280" />
-                <Text style={[styles.sheetText, { color: "#6B7280" }]}>Cancel</Text>
+                <Ionicons name="close-outline" size={18} color={palette.cancel} />
+                <Text style={[styles.sheetText, { color: palette.cancel }]}>Cancel</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -1012,7 +1025,7 @@ export default function ChatScreen() {
               <View style={styles.editHead}>
                 <Text style={styles.editTitle}>Edit Message</Text>
                 <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                  <Ionicons name="close" size={22} color="#6B7280" />
+                  <Ionicons name="close" size={22} color={palette.muted} />
                 </TouchableOpacity>
               </View>
 
@@ -1021,7 +1034,7 @@ export default function ChatScreen() {
                 value={editDraft}
                 onChangeText={setEditDraft}
                 placeholder="Edit your message"
-                placeholderTextColor="#9AA4C0"
+                placeholderTextColor={palette.placeholder}
                 multiline
               />
 
@@ -1037,16 +1050,14 @@ export default function ChatScreen() {
           </View>
         </Modal>
 
-        <Modal visible={viewerVisible && !viewerLibAvailable} transparent animationType="fade" onRequestClose={closeViewer}>
+        <Modal visible={viewerVisible} transparent animationType="fade" onRequestClose={closeViewer}>
           <View style={styles.modalOverlay}>
             <TouchableOpacity style={styles.modalCloseBtn} onPress={closeViewer}>
-              <Ionicons name="close" size={28} color="#fff" />
+              <Ionicons name="close" size={28} color={palette.white} />
             </TouchableOpacity>
             <View style={styles.modalContent}>
-              {viewerFallbackUri ? (
-                <Image source={{ uri: viewerFallbackUri }} style={styles.modalImage} resizeMode="contain" />
-              ) : viewerImages.length ? (
-                <Image source={{ uri: viewerImages[0].uri }} style={styles.modalImage} resizeMode="contain" />
+              {viewerImageUri ? (
+                <Image source={{ uri: viewerImageUri }} style={styles.modalImage} resizeMode="contain" />
               ) : null}
             </View>
           </View>
@@ -1056,33 +1067,33 @@ export default function ChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: BG },
-  container: { flex: 1, backgroundColor: BG },
+const createStyles = (palette) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: palette.background },
+  container: { flex: 1, backgroundColor: palette.background },
 
   header: {
     height: 62,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 12,
-    borderBottomColor: "#F1F4FF",
+    borderBottomColor: palette.line,
     borderBottomWidth: 1,
-    backgroundColor: BG,
+    backgroundColor: palette.background,
   },
   back: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
   headerCenter: { flex: 1, alignItems: "center" },
-  headerName: { fontSize: 16, fontWeight: "700", color: "#111", letterSpacing: 0.1 },
-  headerSub: { fontSize: 12, color: MUTED, marginTop: 2 },
+  headerName: { fontSize: 16, fontWeight: "700", color: palette.textStrong, letterSpacing: 0.1 },
+  headerSub: { fontSize: 12, color: palette.muted, marginTop: 2 },
   headerRight: { width: 36, alignItems: "center", justifyContent: "center" },
-  headerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: "#F1F3F8" },
+  headerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: palette.avatarBg },
 
-  messagesWrap: { flex: 1, paddingHorizontal: 12, backgroundColor: BG },
+  messagesWrap: { flex: 1, paddingHorizontal: 12, backgroundColor: palette.background },
 
   messageRow: { flexDirection: "row", marginVertical: 6, alignItems: "flex-end" },
   messageRowLeft: { justifyContent: "flex-start" },
   messageRowRight: { justifyContent: "flex-end" },
 
-  msgAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 8, backgroundColor: "#F1F3F8" },
+  msgAvatar: { width: 36, height: 36, borderRadius: 18, marginRight: 8, backgroundColor: palette.avatarBg },
 
   bubbleWrap: { maxWidth: "78%", position: "relative" },
   bubble: {
@@ -1091,14 +1102,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   bubbleLeft: {
-    backgroundColor: INCOMING_BG,
+    backgroundColor: palette.incomingBg,
     borderTopLeftRadius: 6,
     borderTopRightRadius: 14,
     borderBottomRightRadius: 14,
     borderBottomLeftRadius: 14,
   },
   bubbleRight: {
-    backgroundColor: OUTGOING_BG,
+    backgroundColor: palette.outgoingBg,
     borderTopRightRadius: 6,
     borderTopLeftRadius: 14,
     borderBottomRightRadius: 14,
@@ -1107,17 +1118,17 @@ const styles = StyleSheet.create({
   },
 
   bubbleText: { fontSize: 15, lineHeight: 20 },
-  bubbleTextLeft: { color: INCOMING_TEXT, fontWeight: "500" },
-  bubbleTextRight: { color: OUTGOING_TEXT, fontWeight: "500" },
+  bubbleTextLeft: { color: palette.incomingText, fontWeight: "500" },
+  bubbleTextRight: { color: palette.outgoingText, fontWeight: "500" },
 
   bubbleMetaRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", marginTop: 6 },
   bubbleTime: { fontSize: 10, opacity: 0.9 },
-  bubbleTimeLeft: { color: MUTED, textAlign: "left" },
-  bubbleTimeRight: { color: "rgba(255,255,255,0.85)", textAlign: "right" },
+  bubbleTimeLeft: { color: palette.muted, textAlign: "left" },
+  bubbleTimeRight: { color: palette.outgoingMeta, textAlign: "right" },
 
   editedLabel: { fontSize: 10, marginRight: 6, fontWeight: "600" },
-  editedLeft: { color: "#6B7280" },
-  editedRight: { color: "rgba(255,255,255,0.86)" },
+  editedLeft: { color: palette.muted, },
+  editedRight: { color: palette.outgoingMeta },
 
   leftTailContainer: {
     position: "absolute",
@@ -1136,7 +1147,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 8,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: INCOMING_BG,
+    borderBottomColor: palette.incomingBg,
     transform: [{ rotate: "180deg" }],
   },
 
@@ -1157,7 +1168,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 8,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderBottomColor: OUTGOING_BG,
+    borderBottomColor: palette.outgoingBg,
   },
 
   incomingImage: {
@@ -1165,14 +1176,14 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: 12,
     resizeMode: "cover",
-    backgroundColor: "#eaeefb",
+    backgroundColor: palette.incomingImageBg,
   },
   outgoingImage: {
     width: 220,
     height: 140,
     borderRadius: 12,
     resizeMode: "cover",
-    backgroundColor: "#005ecc",
+    backgroundColor: palette.outgoingImageBg,
     marginRight: -12,
   },
   imageMeta: {
@@ -1189,21 +1200,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  imageTime: { color: "rgba(255,255,255,0.9)", fontSize: 11 },
-  imageTimeIncoming: { color: MUTED, fontSize: 11 },
+  imageTime: { color: palette.outgoingMetaStrong, fontSize: 11 },
+  imageTimeIncoming: { color: palette.muted, fontSize: 11 },
 
   dateSeparator: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
-  dateLine: { height: 1, backgroundColor: "#EEF4FF", flex: 1, marginHorizontal: 12 },
-  dateText: { color: MUTED, fontSize: 12 },
+  dateLine: { height: 1, backgroundColor: palette.line, flex: 1, marginHorizontal: 12 },
+  dateText: { color: palette.muted, fontSize: 12 },
 
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     paddingHorizontal: 8,
     paddingVertical: 10,
-    borderTopColor: "#F1F4FF",
+    borderTopColor: palette.line,
     borderTopWidth: 1,
-    backgroundColor: BG,
+    backgroundColor: palette.background,
   },
   attachmentBtn: { width: 40, height: 40, alignItems: "center", justifyContent: "center", marginRight: 6 },
   input: {
@@ -1213,27 +1224,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === "ios" ? 8 : 6,
     borderRadius: 20,
-    backgroundColor: "#F8FAFF",
-    color: "#111",
+    backgroundColor: palette.inputBg,
+    color: palette.textStrong,
     fontSize: 15,
     marginRight: 8,
   },
   sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
-  sendBtnActive: { backgroundColor: PRIMARY },
-  sendBtnDisabled: { backgroundColor: "#F1F4FF" },
+  sendBtnActive: { backgroundColor: palette.primary },
+  sendBtnDisabled: { backgroundColor: palette.sendDisabled },
 
   sheetOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15,23,42,0.35)",
+    backgroundColor: palette.overlay,
     justifyContent: "flex-end",
   },
   sheetContainer: {
-    backgroundColor: "#fff",
+    backgroundColor: palette.card,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     paddingBottom: 10,
     borderTopWidth: 1,
-    borderColor: "#E5EAF5",
+    borderColor: palette.border,
   },
   sheetItem: {
     paddingHorizontal: 18,
@@ -1241,46 +1252,46 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F4FF",
+    borderBottomColor: palette.line,
     gap: 10,
   },
-  sheetText: { fontSize: 15, fontWeight: "500", color: "#111827" },
+  sheetText: { fontSize: 15, fontWeight: "500", color: palette.textStrong },
 
   modalOverlayEdit: {
     flex: 1,
-    backgroundColor: "rgba(15,23,42,0.45)",
+    backgroundColor: palette.overlayStrong,
     justifyContent: "center",
     padding: 14,
   },
   editCard: {
-    backgroundColor: "#fff",
+    backgroundColor: palette.card,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#E6ECF7",
+    borderColor: palette.border,
     overflow: "hidden",
   },
   editHead: {
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#EEF2FA",
+    borderBottomColor: palette.line,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  editTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },
+  editTitle: { fontSize: 16, fontWeight: "700", color: palette.textStrong },
   editInput: {
     minHeight: 100,
     maxHeight: 180,
     margin: 12,
     borderWidth: 1,
-    borderColor: "#DFE7F7",
+    borderColor: palette.borderStrong,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    color: "#111",
+    color: palette.textStrong,
     fontSize: 15,
-    backgroundColor: "#FAFCFF",
+    backgroundColor: palette.inputBg,
     textAlignVertical: "top",
   },
   editActions: {
@@ -1297,19 +1308,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   editBtnCancel: {
-    backgroundColor: "#F5F7FC",
+    backgroundColor: palette.sendDisabled,
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: palette.border,
   },
   editBtnSave: {
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
   },
-  editBtnCancelText: { color: "#475569", fontWeight: "700" },
-  editBtnSaveText: { color: "#fff", fontWeight: "700" },
+  editBtnCancelText: { color: palette.cancel, fontWeight: "700" },
+  editBtnSaveText: { color: palette.white, fontWeight: "700" },
 
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.95)",
+    backgroundColor: palette.viewerOverlay,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1329,7 +1340,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: palette.overlay,
     alignItems: "center",
     justifyContent: "center",
   },

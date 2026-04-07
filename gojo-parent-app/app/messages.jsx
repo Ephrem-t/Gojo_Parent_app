@@ -20,9 +20,8 @@ import { useRouter } from "expo-router";
 import { setOpenedChat } from "./lib/chatStore";
 import { useFocusEffect } from "@react-navigation/native";
 import { getUserVal } from "./lib/userHelpers";
+import { useParentTheme } from "../hooks/use-parent-theme";
 
-const PRIMARY = "#007AFB";
-const MUTED = "#6B78A8";
 const AVATAR_PLACEHOLDER = require("../assets/images/avatar_placeholder.png");
 
 const FILTERS = ["Children", "Management", "Teachers"];
@@ -51,6 +50,27 @@ function fmtTime12(ts) {
 
 export default function MessagesScreen() {
   const router = useRouter();
+  const { colors, statusBarStyle } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      background: colors.background,
+      primary: colors.primary,
+      muted: colors.mutedAlt,
+      text: colors.text,
+      textStrong: colors.textStrong,
+      border: colors.borderStrong,
+      line: colors.lineSoft,
+      searchBg: colors.cardMuted,
+      filterBg: colors.inputBackground,
+      avatarBg: colors.avatarPlaceholder,
+      badgeBg: colors.infoSurface,
+      inputText: colors.textStrong,
+      placeholder: colors.muted,
+      white: colors.white,
+    }),
+    [colors]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -447,11 +467,11 @@ export default function MessagesScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom"]} style={styles.safe}>
-      <StatusBar barStyle="dark-content" backgroundColor="#ffffff" translucent={false} />
+      <StatusBar barStyle={statusBarStyle} backgroundColor={palette.background} translucent={false} />
       <View style={styles.container}>
         <View style={styles.headerRow}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="chevron-back" size={22} color="#222" />
+            <Ionicons name="chevron-back" size={22} color={palette.text} />
           </TouchableOpacity>
 
           <Text style={styles.headerTitle}>Messages</Text>
@@ -462,24 +482,24 @@ export default function MessagesScreen() {
               setTimeout(() => searchInputRef.current?.focus(), 80);
             }}
           >
-            <Ionicons name={showSearch ? "close-outline" : "search-outline"} size={20} color={MUTED} />
+            <Ionicons name={showSearch ? "close-outline" : "search-outline"} size={20} color={palette.muted} />
           </TouchableOpacity>
         </View>
 
         {showSearch && (
           <View style={styles.searchWrap}>
-            <Ionicons name="search-outline" size={18} color={MUTED} style={{ marginRight: 8 }} />
+            <Ionicons name="search-outline" size={18} color={palette.muted} style={{ marginRight: 8 }} />
             <TextInput
               ref={searchInputRef}
               value={search}
               onChangeText={setSearch}
               placeholder="Search by name, role, or message"
-              placeholderTextColor="#98A2B3"
+              placeholderTextColor={palette.placeholder}
               style={styles.searchInput}
             />
             {search.length > 0 && (
               <TouchableOpacity onPress={() => setSearch("")}>
-                <Ionicons name="close-circle" size={18} color={MUTED} />
+                <Ionicons name="close-circle" size={18} color={palette.muted} />
               </TouchableOpacity>
             )}
           </View>
@@ -504,7 +524,7 @@ export default function MessagesScreen() {
 
         {loadingInitial && contacts.length === 0 ? (
           <View style={styles.center}>
-            <ActivityIndicator size="large" color={PRIMARY} />
+            <ActivityIndicator size="large" color={palette.primary} />
           </View>
         ) : filteredContacts.length === 0 ? (
           <View style={styles.emptyWrap}>
@@ -517,7 +537,14 @@ export default function MessagesScreen() {
           <FlatList
             data={filteredContacts}
             keyExtractor={(it) => it.key}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                colors={[palette.primary]}
+                tintColor={palette.primary}
+              />
+            }
             renderItem={({ item }) => {
               const lastWasMine =
                 item.lastSenderId && currentUserId && String(item.lastSenderId) === String(currentUserId);
@@ -553,7 +580,7 @@ export default function MessagesScreen() {
                             <Ionicons
                               name={seenFlag ? "checkmark-done" : "checkmark"}
                               size={16}
-                              color={seenFlag ? PRIMARY : MUTED}
+                              color={seenFlag ? palette.primary : palette.muted}
                               style={{ marginLeft: 6 }}
                             />
                           ) : null}
@@ -585,9 +612,9 @@ export default function MessagesScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#fff" },
-  container: { flex: 1, backgroundColor: "#fff" },
+const createStyles = (palette) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: palette.background },
+  container: { flex: 1, backgroundColor: palette.background },
 
   headerRow: {
     paddingHorizontal: 12,
@@ -598,7 +625,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   backButton: { width: 36, height: 36, alignItems: "center", justifyContent: "center" },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: "#111" },
+  headerTitle: { fontSize: 20, fontWeight: "800", color: palette.textStrong },
 
   searchWrap: {
     marginHorizontal: 16,
@@ -607,13 +634,13 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E6ECF7",
-    backgroundColor: "#FAFCFF",
+    borderColor: palette.border,
+    backgroundColor: palette.searchBg,
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
   },
-  searchInput: { flex: 1, color: "#111827", fontSize: 14, paddingVertical: 0 },
+  searchInput: { flex: 1, color: palette.inputText, fontSize: 14, paddingVertical: 0 },
 
   filterContainer: { paddingHorizontal: 16, marginBottom: 8 },
   filterRow: { flexDirection: "row", width: "100%", gap: 8 },
@@ -621,17 +648,17 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 38,
     borderRadius: 12,
-    backgroundColor: "#F8FAFF",
+    backgroundColor: palette.filterBg,
     justifyContent: "center",
     alignItems: "center",
   },
-  filterPillActive: { backgroundColor: PRIMARY },
-  filterPillText: { color: MUTED, fontWeight: "700", fontSize: 13 },
-  filterPillTextActive: { color: "#fff" },
+  filterPillActive: { backgroundColor: palette.primary },
+  filterPillText: { color: palette.muted, fontWeight: "700", fontSize: 13 },
+  filterPillTextActive: { color: palette.white },
 
   itemWrapper: { paddingHorizontal: 0 },
-  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, backgroundColor: "#fff" },
-  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#F1F3F8" },
+  row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, backgroundColor: palette.background },
+  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: palette.avatarBg },
 
   rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 
@@ -646,7 +673,7 @@ const styles = StyleSheet.create({
   name: {
     fontWeight: "700",
     fontSize: 16,
-    color: "#111",
+    color: palette.textStrong,
     marginRight: 8,
     flexShrink: 1,
   },
@@ -656,11 +683,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: "#F1F7FF",
+    backgroundColor: palette.badgeBg,
     flexShrink: 0,
   },
-  badgeText: { color: PRIMARY, fontWeight: "700", fontSize: 11 },
-  subtitleText: { color: MUTED, fontSize: 13, flex: 1 },
+  badgeText: { color: palette.primary, fontWeight: "700", fontSize: 11 },
+  subtitleText: { color: palette.muted, fontSize: 13, flex: 1 },
 
   rightMeta: {
     minWidth: 88,
@@ -670,23 +697,23 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
 
-  time: { color: MUTED, fontSize: 11 },
+  time: { color: palette.muted, fontSize: 11 },
 
   unreadPill: {
     marginLeft: 6,
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 12,
     minWidth: 24,
     alignItems: "center",
   },
-  unreadText: { color: "#fff", fontWeight: "700", fontSize: 12 },
+  unreadText: { color: palette.white, fontWeight: "700", fontSize: 12 },
 
-  separatorLine: { height: 1, backgroundColor: "#EEF4FF", marginLeft: 56 + 12 + 8, marginRight: 0 },
+  separatorLine: { height: 1, backgroundColor: palette.line, marginLeft: 56 + 12 + 8, marginRight: 0 },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 40, paddingHorizontal: 24 },
-  emptyTitle: { fontWeight: "700", fontSize: 16, color: "#222", textAlign: "center" },
-  emptySubtitle: { color: MUTED, marginTop: 6, textAlign: "center" },
+  emptyTitle: { fontWeight: "700", fontSize: 16, color: palette.text, textAlign: "center" },
+  emptySubtitle: { color: palette.muted, marginTop: 6, textAlign: "center" },
 });

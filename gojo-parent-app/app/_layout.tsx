@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Linking } from "react-native";
 import BlockedAccountModal from "../components/ui/BlockedAccountModal";
 import { database } from "../constants/firebaseConfig";
+import { ParentThemeProvider } from "../hooks/use-parent-theme";
 import {
   BLOCKED_ACCOUNT_MESSAGE,
   clearParentSession,
@@ -152,7 +153,7 @@ export default function RootLayout() {
   }, [pathname]);
 
   return (
-    <>
+    <ParentThemeProvider>
       <Slot />
       <BlockedAccountModal
         visible={blockedNotice.visible}
@@ -163,6 +164,6 @@ export default function RootLayout() {
         primaryDisabled={!blockedNotice.phone && !blockedNotice.phoneLabel}
         secondaryLabel="Go to Login"
       />
-    </>
+    </ParentThemeProvider>
   );
 }

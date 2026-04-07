@@ -14,8 +14,12 @@ import {
   Modal,
   Pressable,
 } from "react-native";
+import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
 import {
   ref,
   query,
@@ -31,10 +35,20 @@ import {
 } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
 import { queryUserByUsernameInSchool, queryUserByChildInSchool } from "../lib/userHelpers";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const IMAGE_HEIGHT = Math.round(SCREEN_WIDTH * 0.9 * 0.65);
 const PAGE_SIZE = 20;
+const DESCRIPTION_PREVIEW_LENGTH = 140;
+
+function getFileExtensionFromUrl(url) {
+  if (!url) return "jpg";
+  const cleanUrl = url.split("?")[0] || "";
+  const ext = cleanUrl.split(".").pop()?.toLowerCase();
+  if (!ext || ext.length > 5) return "jpg";
+  return ext;
+}
 
 function timeAgo(iso) {
   if (!iso) return "";
@@ -54,7 +68,53 @@ function timeAgo(iso) {
   return `${years}y`;
 }
 
+function formatTargetRoleLabel(data) {
+  const raw = data?.targetRole ?? data?.target ?? "all";
+  const normalized = String(raw).trim().toLowerCase();
+
+  if (!normalized || normalized === "all") return "Visible to everyone";
+  if (normalized === "parent") return "Visible to parent";
+  return `Visible to ${normalized}`;
+}
+
+function getPosterName(admin, postData) {
+  return admin?.name || admin?.username || postData?.adminName || "School Admin";
+}
+
+function getPosterImage(admin, postData) {
+  return admin?.profileImage || postData?.adminProfile || null;
+}
+
 export default function HomeScreen() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { colors, isDark } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      background: colors.background,
+      feedBackground: colors.background,
+      primary: colors.primary,
+      text: colors.text,
+      textStrong: colors.textStrong,
+      muted: colors.mutedAlt,
+      card: colors.card,
+      cardMuted: colors.cardMuted,
+      border: colors.border,
+      borderSoft: colors.borderSoft,
+      avatarBg: colors.surfaceMuted,
+      imageBg: colors.surfaceMuted,
+      soft: colors.primarySoft,
+      overlay: colors.overlay,
+      like: isDark ? "#FF7B93" : "#ED4956",
+      menuHandle: isDark ? "rgba(255,255,255,0.12)" : "#D6E2EE",
+      menuDanger: isDark ? "#FF7B93" : "#ED4956",
+      viewerOverlay: isDark ? "rgba(1,4,9,0.96)" : "rgba(0,0,0,0.96)",
+      viewerCloseBg: isDark ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.18)",
+      viewerCloseIcon: colors.white,
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const [postsLatest, setPostsLatest] = useState([]);
   const [postsOlder, setPostsOlder] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -62,6 +122,8 @@ export default function HomeScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [userId, setUserId] = useState(null);
+  const [expandedDescriptions, setExpandedDescriptions] = useState({});
+  const [postMenuPostId, setPostMenuPostId] = useState(null);
 
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerImage, setViewerImage] = useState(null);
@@ -98,6 +160,11 @@ export default function HomeScreen() {
   }, []);
 
   const combinedPosts = useMemo(() => [...postsLatest, ...postsOlder], [postsLatest, postsOlder]);
+
+  const findLoadedPost = useCallback(
+    (postId) => postsLatest.find((item) => item.postId === postId) || postsOlder.find((item) => item.postId === postId) || null,
+    [postsLatest, postsOlder]
+  );
 
   const postsRefForSchool = async () => {
     const sk = await AsyncStorage.getItem("schoolKey");
@@ -446,12 +513,123 @@ export default function HomeScreen() {
     }
   };
 
+  const toggleDescription = useCallback((postId) => {
+    setExpandedDescriptions((prev) => ({
+      ...prev,
+      [postId]: !prev[postId],
+    }));
+  }, []);
+
+  const closePostMenu = useCallback(() => {
+    setPostMenuPostId(null);
+  }, []);
+
+  const openPostMenu = useCallback((postId) => {
+    setPostMenuPostId(postId);
+  }, []);
+
+  const openPosterProfile = useCallback(
+    (item) => {
+      const profileUserKey = item?.admin?._nodeKey || item?.admin?.userId || item?.data?.adminId || "";
+      if (!profileUserKey) {
+        Alert.alert("Unavailable", "Profile could not be opened.");
+        return;
+      }
+
+      router.push({
+        pathname: "/userProfile",
+        params: {
+          userId: profileUserKey,
+          roleName: item?.admin?.role || "Admin",
+        },
+      });
+    },
+    [router]
+  );
+
+  const handleAboutAccount = useCallback(() => {
+    const selectedPost = findLoadedPost(postMenuPostId);
+    closePostMenu();
+
+    if (!selectedPost) return;
+
+    const accountName = getPosterName(selectedPost.admin, selectedPost.data);
+    const targetRole = formatTargetRoleLabel(selectedPost.data);
+
+    Alert.alert("About this account", `Posted by ${accountName}\nAudience: ${targetRole}`);
+  }, [closePostMenu, findLoadedPost, postMenuPostId]);
+
+  const handleReportPost = useCallback(async () => {
+    const uid = userId || (await loadUserContext());
+    const postId = postMenuPostId;
+    closePostMenu();
+
+    if (!uid) {
+      Alert.alert("Not signed in", "You must be signed in to report posts.");
+      return;
+    }
+
+    if (!postId) return;
+
+    try {
+      const schoolKey = await AsyncStorage.getItem("schoolKey");
+      const postPath = schoolKey ? `Platform1/Schools/${schoolKey}/Posts/${postId}` : `Posts/${postId}`;
+      const updates = {};
+      updates[`${postPath}/reportBy/${uid}`] = true;
+      await update(ref(database), updates);
+      Alert.alert("Report", "This post has been reported.");
+    } catch (error) {
+      console.warn("report post failed:", error);
+      Alert.alert("Error", "Unable to report this post. Please try again.");
+    }
+  }, [closePostMenu, loadUserContext, postMenuPostId, userId]);
+
+  const handleDownloadPost = useCallback(async () => {
+    const selectedPost = findLoadedPost(postMenuPostId);
+    closePostMenu();
+
+    const downloadableUrl = selectedPost?.data?.postUrl || null;
+    if (!downloadableUrl) {
+      Alert.alert("Download", "This post does not have an image to download.");
+      return;
+    }
+
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (permission.status !== "granted") {
+        Alert.alert("Permission needed", "Allow photo access to save downloaded images.");
+        return;
+      }
+
+      const ext = getFileExtensionFromUrl(downloadableUrl);
+      const fileName = `gojo-parent-post-${selectedPost.postId || Date.now()}.${ext}`;
+      const downloadPath = `${FileSystem.cacheDirectory}${fileName}`;
+
+      await FileSystem.downloadAsync(downloadableUrl, downloadPath);
+      await MediaLibrary.saveToLibraryAsync(downloadPath);
+      await FileSystem.deleteAsync(downloadPath, { idempotent: true });
+
+      Alert.alert("Download", "Image saved to your gallery.");
+    } catch (error) {
+      console.warn("download post failed:", error);
+      Alert.alert("Error", "Unable to download this image. Please try again.");
+    }
+  }, [closePostMenu, findLoadedPost, postMenuPostId]);
+
   function PostCard({ item }) {
-    const { postId, data, admin, likesMap = {}, seenMap = {} } = item;
+    const { postId, data, admin, likesMap = {} } = item;
     const likesCount = data.likeCount || Object.keys(likesMap || {}).length;
-    const seenCount = Object.keys(seenMap || {}).length;
     const isLiked = userId ? !!likesMap[userId] : false;
     const imageUri = data.postUrl || null;
+    const message = String(data.message || "").trim();
+    const targetRoleLabel = formatTargetRoleLabel(data);
+    const posterName = getPosterName(admin, data);
+    const posterImage = getPosterImage(admin, data);
+    const isExpanded = !!expandedDescriptions[postId];
+    const shouldTruncate = message.length > DESCRIPTION_PREVIEW_LENGTH;
+    const previewMessage = shouldTruncate && !isExpanded
+      ? `${message.slice(0, DESCRIPTION_PREVIEW_LENGTH).trimEnd()}...`
+      : message;
 
     const scale = useRef(new Animated.Value(1)).current;
     const animateHeart = () => {
@@ -469,41 +647,59 @@ export default function HomeScreen() {
     return (
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Image
-            source={admin?.profileImage ? { uri: admin.profileImage } : require("../../assets/images/avatar_placeholder.png")}
-            style={styles.avatar}
-          />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.username}>{admin?.name || admin?.username || "School Admin"}</Text>
-            <Text style={styles.time}>{timeAgo(data.time)}</Text>
-          </View>
+          <TouchableOpacity style={styles.headerProfileTap} activeOpacity={0.85} onPress={() => openPosterProfile(item)}>
+            <Image
+              source={posterImage ? { uri: posterImage } : require("../../assets/images/avatar_placeholder.png")}
+              style={styles.avatar}
+            />
+            <View style={styles.headerTextWrap}>
+              <Text style={styles.username}>{posterName}</Text>
+              <View style={styles.headerMetaRow}>
+                <Text style={styles.time}>{timeAgo(data.time)}</Text>
+                <Text style={styles.headerDot}>·</Text>
+                <Text style={styles.targetRoleText}>{targetRoleLabel}</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.moreBtn} activeOpacity={0.8} onPress={() => openPostMenu(postId)}>
+            <Ionicons name="ellipsis-horizontal" size={20} color={palette.muted} />
+          </TouchableOpacity>
         </View>
 
-        {imageUri ? (
-          <TouchableOpacity activeOpacity={0.95} onPress={() => { setViewerImage(imageUri); setViewerVisible(true); }}>
-            <Image source={{ uri: imageUri }} style={styles.postImage} resizeMode="cover" />
-          </TouchableOpacity>
+        {message ? (
+          <View style={styles.messageWrap}>
+            <Text style={styles.messageText}>{previewMessage}</Text>
+            {shouldTruncate ? (
+              <TouchableOpacity activeOpacity={0.8} onPress={() => toggleDescription(postId)}>
+                <Text style={styles.seeMoreText}>{isExpanded ? "See less" : "See more"}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         ) : null}
 
-        <View style={styles.actionsRow}>
-          <View style={styles.leftActions}>
-            <TouchableOpacity onPress={onHeartPress} style={styles.iconBtn} activeOpacity={0.8}>
+        {imageUri ? (
+          <Pressable
+            onPress={() => {
+              setViewerImage(imageUri);
+              setViewerVisible(true);
+            }}
+          >
+            <Image source={{ uri: imageUri }} style={styles.postImage} resizeMode="cover" />
+          </Pressable>
+        ) : null}
+
+        <View style={styles.reactionsSummary}>
+          <View style={styles.reactionsLeft}>
+            <TouchableOpacity onPress={onHeartPress} style={styles.likeIconOnlyBtn} activeOpacity={0.85}>
               <Animated.View style={{ transform: [{ scale }] }}>
-                <Ionicons name={isLiked ? "heart" : "heart-outline"} size={28} color={isLiked ? "#E0245E" : "#111"} />
+                <Ionicons
+                  name={isLiked ? "heart" : "heart-outline"}
+                  size={24}
+                  color={isLiked ? palette.like : palette.textStrong}
+                />
               </Animated.View>
             </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.meta}>
-          <Text style={styles.likesText}>{likesCount} {likesCount === 1 ? "like" : "likes"}</Text>
-          <Text style={styles.messageText}>
-            <Text style={styles.username}>{admin?.username || admin?.name || ""}</Text>{"  "}
-            {data.message}
-          </Text>
-          <View style={styles.bottomMetaRow}>
-            <Text style={styles.seenText}>{seenCount} seen</Text>
-            <Text style={styles.timeSmall}> • {new Date(data.time).toLocaleString?.() ?? ""}</Text>
+            <Text style={styles.reactionCountText}>{likesCount} {likesCount === 1 ? "like" : "likes"}</Text>
           </View>
         </View>
       </View>
@@ -512,6 +708,9 @@ export default function HomeScreen() {
 
   const EmptyState = () => (
     <View style={styles.emptyContainer}>
+      <View style={styles.emptyFallbackIcon}>
+        <Ionicons name="newspaper-outline" size={48} color={palette.muted} />
+      </View>
       <Text style={styles.emptyTitle}>No posts yet</Text>
       <Text style={styles.emptySubtitle}>Announcements from your school will appear here.</Text>
     </View>
@@ -520,22 +719,22 @@ export default function HomeScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#007AFB" />
+        <ActivityIndicator size="large" color={palette.primary} />
       </View>
     );
   }
 
   if (!combinedPosts?.length) {
     return (
-      <View style={{ flex: 1, backgroundColor: "#fff" }}>
+      <View style={{ flex: 1, backgroundColor: palette.background }}>
         <EmptyState />
       </View>
     );
   }
 
   const ListFooter = () => {
-    if (loadingMore) return <ActivityIndicator style={{ margin: 16 }} color="#007AFB" />;
-    if (!hasMore) return <Text style={{ textAlign: "center", color: "#888", padding: 12 }}>No more posts</Text>;
+    if (loadingMore) return <ActivityIndicator style={{ margin: 16 }} color={palette.primary} />;
+    if (!hasMore) return <Text style={{ textAlign: "center", color: palette.muted, padding: 12 }}>No more posts</Text>;
     return null;
   };
 
@@ -545,8 +744,8 @@ export default function HomeScreen() {
         data={combinedPosts}
         keyExtractor={(i) => i.postId}
         renderItem={({ item }) => <PostCard item={item} />}
-        contentContainerStyle={styles.list}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={["#007AFB"]} />}
+        contentContainerStyle={[styles.list, { paddingBottom: 74 + Math.max(insets.bottom, 6) }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.primary]} tintColor={palette.primary} />}
         onEndReachedThreshold={0.6}
         onEndReached={() => {
           if (!loadingMore && hasMore) loadMore();
@@ -554,11 +753,36 @@ export default function HomeScreen() {
         ListFooterComponent={<ListFooter />}
       />
 
+      <Modal visible={!!postMenuPostId} transparent animationType="fade" onRequestClose={closePostMenu}>
+        <View style={styles.menuOverlay}>
+          <Pressable style={styles.menuBackdrop} onPress={closePostMenu} />
+          <View style={styles.menuSheetWrap}>
+            <View style={styles.menuSheetHandle} />
+            <View style={styles.menuSheet}>
+              <TouchableOpacity style={styles.menuItem} activeOpacity={0.85} onPress={handleAboutAccount}>
+                <Ionicons name="information-circle-outline" size={20} color={palette.text} />
+                <Text style={styles.menuItemText}>About this account</Text>
+              </TouchableOpacity>
+              <View style={styles.menuDivider} />
+              <TouchableOpacity style={styles.menuItem} activeOpacity={0.85} onPress={handleDownloadPost}>
+                <Ionicons name="download-outline" size={20} color={palette.text} />
+                <Text style={styles.menuItemText}>Download</Text>
+              </TouchableOpacity>
+              <View style={styles.menuDivider} />
+              <TouchableOpacity style={styles.menuItem} activeOpacity={0.85} onPress={handleReportPost}>
+                <Ionicons name="flag-outline" size={20} color={palette.menuDanger} />
+                <Text style={[styles.menuItemText, styles.menuItemDanger]}>Report</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={viewerVisible} transparent animationType="fade" onRequestClose={() => setViewerVisible(false)}>
         <View style={styles.viewerBg}>
           <View style={styles.viewerTop}>
             <TouchableOpacity style={styles.viewerClose} onPress={() => setViewerVisible(false)}>
-              <Ionicons name="close" size={26} color="#fff" />
+              <Ionicons name="close" size={26} color={palette.viewerCloseIcon} />
             </TouchableOpacity>
           </View>
           <Pressable style={{ flex: 1, width: "100%" }} onPress={() => setViewerVisible(false)}>
@@ -570,29 +794,140 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  list: { paddingVertical: 12, paddingHorizontal: 12, backgroundColor: "#fff" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: "#fff" },
-  card: { backgroundColor: "#fff", borderRadius: 12, marginBottom: 16, overflow: "hidden", borderColor: "#F1F3F8", borderWidth: 1 },
-  cardHeader: { flexDirection: "row", alignItems: "center", padding: 12 },
-  avatar: { width: 46, height: 46, borderRadius: 23, marginRight: 10, backgroundColor: "#F6F8FF" },
-  username: { fontWeight: "700", color: "#111" },
-  time: { color: "#888", fontSize: 12, marginTop: 2 },
-  postImage: { width: "100%", height: IMAGE_HEIGHT, backgroundColor: "#EEE" },
-  actionsRow: { flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 10, paddingVertical: 8, alignItems: "center" },
-  leftActions: { flexDirection: "row", alignItems: "center" },
-  iconBtn: { padding: 6 },
-  meta: { paddingHorizontal: 12, paddingBottom: 12 },
-  likesText: { fontWeight: "700",marginTop: -10, marginBottom: 6, color: "#111" },
-  messageText: { color: "#222", lineHeight: 20 },
-  bottomMetaRow: { flexDirection: "row", marginTop: 8, alignItems: "center" },
-  seenText: { color: "#888", fontSize: 12 },
-  timeSmall: { color: "#888", fontSize: 12 },
-  emptyContainer: { flex: 1, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", padding: 28 },
-  emptyTitle: { fontSize: 20, fontWeight: "700", color: "#222", marginBottom: 6 },
-  emptySubtitle: { fontSize: 14, color: "#8B93B3", textAlign: "center" },
-  viewerBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.96)", alignItems: "center", justifyContent: "center" },
+const createStyles = (palette) => StyleSheet.create({
+  list: { paddingVertical: 0, backgroundColor: palette.feedBackground },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, backgroundColor: palette.feedBackground },
+  card: {
+    backgroundColor: palette.card,
+    marginBottom: 6,
+    marginHorizontal: 0,
+    overflow: "hidden",
+    borderRadius: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.border,
+  },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  headerProfileTap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  headerTextWrap: { flex: 1 },
+  avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 10, backgroundColor: palette.avatarBg },
+  username: { fontWeight: "700", color: palette.textStrong, fontSize: 15 },
+  headerMetaRow: { flexDirection: "row", alignItems: "center", marginTop: 2 },
+  time: { color: palette.muted, fontSize: 12 },
+  headerDot: { color: palette.muted, fontSize: 12, marginHorizontal: 4 },
+  targetRoleText: { color: palette.muted, fontSize: 12 },
+  moreBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  messageWrap: { paddingHorizontal: 12, paddingBottom: 8 },
+  seeMoreText: {
+    color: palette.muted,
+    fontSize: 14,
+    marginTop: 4,
+  },
+  postImage: { width: "100%", height: IMAGE_HEIGHT, backgroundColor: palette.imageBg },
+  messageText: { color: palette.text, lineHeight: 20, fontSize: 15 },
+  reactionsSummary: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingTop: 4,
+    paddingBottom: 4,
+  },
+  reactionsLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  reactionCountText: {
+    color: palette.text,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  likeIconOnlyBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: palette.overlay,
+  },
+  menuBackdrop: {
+    flex: 1,
+  },
+  menuSheetWrap: {
+    paddingHorizontal: 8,
+    paddingBottom: 10,
+  },
+  menuSheetHandle: {
+    alignSelf: "center",
+    width: 38,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: palette.menuHandle,
+    marginBottom: 10,
+  },
+  menuSheet: {
+    backgroundColor: palette.card,
+    borderRadius: 22,
+    paddingVertical: 6,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    elevation: 12,
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  menuItemText: {
+    color: palette.text,
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  menuItemDanger: {
+    color: palette.menuDanger,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: palette.border,
+    marginHorizontal: 18,
+  },
+  emptyContainer: { flex: 1, backgroundColor: palette.feedBackground, alignItems: "center", justifyContent: "center", padding: 28 },
+  emptyFallbackIcon: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: palette.soft,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  emptyTitle: { fontSize: 20, fontWeight: "700", color: palette.text, marginBottom: 6 },
+  emptySubtitle: { fontSize: 14, color: palette.muted, textAlign: "center" },
+  viewerBg: { flex: 1, backgroundColor: palette.viewerOverlay, alignItems: "center", justifyContent: "center" },
   viewerTop: { position: "absolute", top: 45, right: 14, zIndex: 20 },
-  viewerClose: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  viewerClose: { width: 40, height: 40, borderRadius: 20, backgroundColor: palette.viewerCloseBg, alignItems: "center", justifyContent: "center" },
   viewerImage: { width: "100%", height: "100%" },
 });

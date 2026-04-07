@@ -13,19 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
 import { getLinkedChildrenForParent } from "../lib/parentChildren";
-
-const PRIMARY = "#2296F3";
-const PRIMARY_DARK = "#0B72C7";
-const PRIMARY_SOFT = "#EAF5FF";
-const SUCCESS = "#16A34A";
-const SUCCESS_SOFT = "#ECFDF3";
-const WARNING = "#F59E0B";
-const WARNING_SOFT = "#FFF7ED";
-const TEXT = "#0F172A";
-const MUTED = "#64748B";
-const BORDER = "#E5EDF5";
-const BG = "#FFFFFF";
-const CARD = "#FFFFFF";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
 function monthLabel(monthKey) {
   if (!monthKey || !/^\d{4}-\d{2}$/.test(String(monthKey))) return String(monthKey || "");
@@ -50,6 +38,43 @@ function sortMonthKeysDesc(keys) {
 }
 
 export default function HistoryTab() {
+  const { colors, isDark } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      background: colors.background,
+      card: colors.card,
+      cardMuted: colors.cardMuted,
+      inputBackground: colors.inputBackground,
+      text: colors.text,
+      muted: colors.muted,
+      border: colors.border,
+      borderSoft: colors.borderSoft,
+      borderStrong: colors.borderStrong,
+      line: colors.lineSoft,
+      primary: colors.primary,
+      primaryDark: colors.primaryDark,
+      primarySoft: colors.primarySoftAlt,
+      success: colors.success,
+      successSoft: colors.successSoft,
+      warning: colors.warning,
+      warningSoft: colors.warningSoft,
+      heroGradientStart: colors.heroSurface,
+      heroGradientMid: colors.cardMuted,
+      heroGradientEnd: colors.primarySoft,
+      heroBorder: isDark ? colors.borderStrong : "#E3EDF9",
+      heroShadow: isDark ? "#000000" : "#9FBFE6",
+      heroGlowOne: colors.heroOrbPrimary,
+      heroGlowTwo: colors.heroOrbSecondary,
+      iconBg: colors.primarySoftAlt,
+      iconBorder: colors.infoBorder,
+      successBorder: isDark ? colors.borderStrong : "#CFEFD9",
+      warningBorder: isDark ? colors.borderStrong : "#FED7AA",
+      softShadow: isDark ? "#000000" : "#BED3EE",
+      monthBadgeShadow: isDark ? "#000000" : "#DCE8F6",
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -182,7 +207,7 @@ export default function HistoryTab() {
   if (loading) {
     return (
       <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PRIMARY} />
+        <ActivityIndicator size="large" color={palette.primary} />
         <Text style={styles.loadingText}>Loading payment history...</Text>
       </View>
     );
@@ -193,10 +218,10 @@ export default function HistoryTab() {
       style={styles.screen}
       contentContainerStyle={{ paddingBottom: 28 }}
       showsVerticalScrollIndicator={false}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[palette.primary]} tintColor={palette.primary} />}
     >
       <LinearGradient
-        colors={["#FFFFFF", "#F9FBFF", "#F1F7FF"]}
+        colors={[palette.heroGradientStart, palette.heroGradientMid, palette.heroGradientEnd]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.heroCard}
@@ -211,7 +236,7 @@ export default function HistoryTab() {
           </View>
 
           <View style={styles.heroIconWrap}>
-            <Ionicons name="receipt-outline" size={24} color={PRIMARY} />
+            <Ionicons name="receipt-outline" size={24} color={palette.primary} />
           </View>
         </View>
 
@@ -244,13 +269,13 @@ export default function HistoryTab() {
           <Text style={styles.summaryWideValue}>{summary.latestMonth}</Text>
         </View>
         <View style={styles.summaryWideRight}>
-          <Ionicons name="calendar-outline" size={20} color={PRIMARY_DARK} />
+          <Ionicons name="calendar-outline" size={20} color={palette.primaryDark} />
         </View>
       </View>
 
       {children.length === 0 ? (
         <View style={styles.emptyCard}>
-          <Ionicons name="people-outline" size={28} color={MUTED} />
+          <Ionicons name="people-outline" size={28} color={palette.muted} />
           <Text style={styles.emptyTitle}>No linked children found</Text>
           <Text style={styles.emptyText}>
             This parent account does not currently show any linked student IDs.
@@ -258,7 +283,7 @@ export default function HistoryTab() {
         </View>
       ) : paymentRows.length === 0 ? (
         <View style={styles.emptyCard}>
-          <Ionicons name="receipt-outline" size={28} color={MUTED} />
+          <Ionicons name="receipt-outline" size={28} color={palette.muted} />
           <Text style={styles.emptyTitle}>No payment records found</Text>
           <Text style={styles.emptyText}>
             We found your linked children, but there are no matching payment records yet in
@@ -274,7 +299,7 @@ export default function HistoryTab() {
             <View key={group.studentId} style={styles.studentCard}>
               <View style={styles.studentTop}>
                 <View style={styles.studentAvatar}>
-                  <Ionicons name="person-outline" size={20} color={PRIMARY_DARK} />
+                  <Ionicons name="person-outline" size={20} color={palette.primaryDark} />
                 </View>
 
                 <View style={{ flex: 1 }}>
@@ -295,7 +320,7 @@ export default function HistoryTab() {
                 </View>
                 <View style={styles.studentMiniDivider} />
                 <View style={styles.studentMiniStat}>
-                  <Text style={[styles.studentMiniStatValue, { color: pendingCount ? WARNING : TEXT }]}>
+                  <Text style={[styles.studentMiniStatValue, { color: pendingCount ? palette.warning : palette.text }]}>
                     {pendingCount}
                   </Text>
                   <Text style={styles.studentMiniStatLabel}>Pending</Text>
@@ -305,9 +330,9 @@ export default function HistoryTab() {
               {group.items.length > 0 ? (
                 <View style={styles.timelineWrap}>
                   {group.items.map((item, index) => {
-                    const statusColor = item.paid ? SUCCESS : WARNING;
-                    const statusBg = item.paid ? SUCCESS_SOFT : WARNING_SOFT;
-                    const statusBorder = item.paid ? "#CFEFD9" : "#FED7AA";
+                    const statusColor = item.paid ? palette.success : palette.warning;
+                    const statusBg = item.paid ? palette.successSoft : palette.warningSoft;
+                    const statusBorder = item.paid ? palette.successBorder : palette.warningBorder;
                     const statusText = item.paid ? "Paid" : "Pending";
                     const iconName = item.paid ? "checkmark-circle" : "time";
 
@@ -338,7 +363,7 @@ export default function HistoryTab() {
                 </View>
               ) : (
                 <View style={styles.childNoHistory}>
-                  <Ionicons name="document-text-outline" size={18} color={MUTED} />
+                  <Ionicons name="document-text-outline" size={18} color={palette.muted} />
                   <Text style={styles.childNoHistoryText}>No payment history found for this child yet.</Text>
                 </View>
               )}
@@ -350,34 +375,34 @@ export default function HistoryTab() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette) => StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: BG,
+    backgroundColor: palette.background,
   },
 
   loadingWrap: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: BG,
+    backgroundColor: palette.background,
     paddingVertical: 40,
   },
   loadingText: {
     marginTop: 10,
     fontSize: 14,
-    color: MUTED,
+    color: palette.muted,
     fontWeight: "600",
   },
 
   heroCard: {
     borderWidth: 1,
-    borderColor: "#E3EDF9",
+    borderColor: palette.heroBorder,
     borderRadius: 24,
     padding: 18,
     marginBottom: 14,
     overflow: "hidden",
-    shadowColor: "#9FBFE6",
+    shadowColor: palette.heroShadow,
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.2,
     shadowRadius: 24,
@@ -388,7 +413,7 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 999,
-    backgroundColor: "rgba(30,144,255,0.08)",
+    backgroundColor: palette.heroGlowOne,
     top: -72,
     right: -28,
   },
@@ -397,7 +422,7 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 999,
-    backgroundColor: "rgba(59,130,246,0.06)",
+    backgroundColor: palette.heroGlowTwo,
     bottom: -36,
     left: -18,
   },
@@ -415,23 +440,23 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 18,
-    backgroundColor: "#EEF5FF",
+    backgroundColor: palette.iconBg,
     borderWidth: 1,
-    borderColor: "#D9E8FB",
+    borderColor: palette.iconBorder,
     alignItems: "center",
     justifyContent: "center",
   },
   heroTitle: {
     fontSize: 23,
     fontWeight: "900",
-    color: TEXT,
+    color: palette.text,
     letterSpacing: 0.2,
   },
   heroSub: {
     marginTop: 8,
     fontSize: 13,
     lineHeight: 20,
-    color: MUTED,
+    color: palette.muted,
     fontWeight: "500",
   },
   heroInsightsRow: {
@@ -442,9 +467,9 @@ const styles = StyleSheet.create({
   heroStatPill: {
     flex: 1,
     minWidth: 0,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: palette.card,
     borderWidth: 1,
-    borderColor: "#E2ECF9",
+    borderColor: palette.border,
     borderRadius: 16,
     paddingHorizontal: 8,
     paddingVertical: 10,
@@ -453,40 +478,40 @@ const styles = StyleSheet.create({
   heroStatValue: {
     fontSize: 15,
     fontWeight: "900",
-    color: TEXT,
+    color: palette.text,
   },
   heroStatLabel: {
     marginTop: 2,
     fontSize: 10,
     fontWeight: "700",
-    color: MUTED,
+    color: palette.muted,
   },
   heroStatPillSuccess: {
-    backgroundColor: SUCCESS_SOFT,
-    borderColor: "#CFEFD9",
+    backgroundColor: palette.successSoft,
+    borderColor: palette.successBorder,
   },
   heroStatPillWarning: {
-    backgroundColor: WARNING_SOFT,
-    borderColor: "#FED7AA",
+    backgroundColor: palette.warningSoft,
+    borderColor: palette.warningBorder,
   },
   heroStatValueSuccess: {
-    color: SUCCESS,
+    color: palette.success,
   },
   heroStatValueWarning: {
-    color: WARNING,
+    color: palette.warning,
   },
 
   summaryWide: {
-    backgroundColor: "#FCFEFF",
+    backgroundColor: palette.cardMuted,
     borderWidth: 1,
-    borderColor: "#E3EDF9",
+    borderColor: palette.border,
     borderRadius: 20,
     padding: 15,
     marginBottom: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    shadowColor: "#BED3EE",
+    shadowColor: palette.softShadow,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.12,
     shadowRadius: 20,
@@ -496,35 +521,35 @@ const styles = StyleSheet.create({
   summaryWideLabel: {
     fontSize: 12,
     fontWeight: "700",
-    color: MUTED,
+    color: palette.muted,
   },
   summaryWideValue: {
     marginTop: 4,
     fontSize: 15,
     fontWeight: "800",
-    color: TEXT,
+    color: palette.text,
   },
   summaryWideRight: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "#EEF5FF",
+    backgroundColor: palette.primarySoft,
     borderWidth: 1,
-    borderColor: "#D9E8FB",
+    borderColor: palette.iconBorder,
     alignItems: "center",
     justifyContent: "center",
     marginLeft: 12,
   },
 
   emptyCard: {
-    backgroundColor: "#FCFEFF",
+    backgroundColor: palette.cardMuted,
     borderWidth: 1,
-    borderColor: "#E3EDF9",
+    borderColor: palette.border,
     borderRadius: 20,
     padding: 22,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#BED3EE",
+    shadowColor: palette.softShadow,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.1,
     shadowRadius: 18,
@@ -534,25 +559,25 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 15,
     fontWeight: "800",
-    color: TEXT,
+    color: palette.text,
     textAlign: "center",
   },
   emptyText: {
     marginTop: 6,
     fontSize: 13,
-    color: MUTED,
+    color: palette.muted,
     lineHeight: 18,
     textAlign: "center",
   },
 
   studentCard: {
-    backgroundColor: "#FCFEFF",
+    backgroundColor: palette.cardMuted,
     borderWidth: 1,
-    borderColor: "#E3EDF9",
+    borderColor: palette.border,
     borderRadius: 22,
     padding: 15,
     marginBottom: 14,
-    shadowColor: "#BED3EE",
+    shadowColor: palette.softShadow,
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.1,
     shadowRadius: 18,
@@ -566,9 +591,9 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 18,
-    backgroundColor: "#EEF5FF",
+    backgroundColor: palette.primarySoft,
     borderWidth: 1,
-    borderColor: "#D9E8FB",
+    borderColor: palette.iconBorder,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
@@ -576,18 +601,18 @@ const styles = StyleSheet.create({
   studentName: {
     fontSize: 16,
     fontWeight: "800",
-    color: TEXT,
+    color: palette.text,
   },
   studentMeta: {
     marginTop: 3,
     fontSize: 12.5,
-    color: MUTED,
+    color: palette.muted,
     fontWeight: "600",
   },
   studentSubMeta: {
     marginTop: 2,
     fontSize: 12,
-    color: MUTED,
+    color: palette.muted,
     fontWeight: "600",
   },
 
@@ -595,10 +620,10 @@ const styles = StyleSheet.create({
     marginTop: 12,
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F6FAFF",
+    backgroundColor: palette.inputBackground,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#E4EDF9",
+    borderColor: palette.border,
     paddingVertical: 12,
   },
   studentMiniStat: {
@@ -609,25 +634,25 @@ const styles = StyleSheet.create({
   studentMiniDivider: {
     width: 1,
     height: 24,
-    backgroundColor: "#E2E8F0",
+    backgroundColor: palette.borderSoft,
   },
   studentMiniStatValue: {
     fontSize: 18,
     fontWeight: "900",
-    color: TEXT,
+    color: palette.text,
   },
   studentMiniStatLabel: {
     marginTop: 2,
     fontSize: 11.5,
     fontWeight: "700",
-    color: MUTED,
+    color: palette.muted,
   },
 
   timelineWrap: {
     marginTop: 14,
-    backgroundColor: "#FBFDFF",
+    backgroundColor: palette.inputBackground,
     borderWidth: 1,
-    borderColor: "#EBF1F8",
+    borderColor: palette.borderSoft,
     borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -637,19 +662,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#EEF4FA",
+    borderBottomColor: palette.line,
   },
   monthBadge: {
     width: 46,
     height: 46,
     borderRadius: 14,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: palette.card,
     borderWidth: 1,
-    borderColor: "#E1EBF7",
+    borderColor: palette.borderSoft,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
-    shadowColor: "#DCE8F6",
+    shadowColor: palette.monthBadgeShadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 10,
@@ -658,17 +683,17 @@ const styles = StyleSheet.create({
   monthBadgeText: {
     fontSize: 12,
     fontWeight: "900",
-    color: PRIMARY_DARK,
+    color: palette.primaryDark,
   },
   historyMonth: {
     fontSize: 14,
     fontWeight: "800",
-    color: TEXT,
+    color: palette.text,
   },
   historySub: {
     marginTop: 3,
     fontSize: 12,
-    color: MUTED,
+    color: palette.muted,
     fontWeight: "600",
   },
   statusPill: {
@@ -688,9 +713,9 @@ const styles = StyleSheet.create({
 
   childNoHistory: {
     marginTop: 14,
-    backgroundColor: "#F8FBFF",
+    backgroundColor: palette.inputBackground,
     borderWidth: 1,
-    borderColor: "#E1EBF7",
+    borderColor: palette.borderSoft,
     borderRadius: 16,
     padding: 14,
     flexDirection: "row",
@@ -698,7 +723,7 @@ const styles = StyleSheet.create({
   },
   childNoHistoryText: {
     marginLeft: 8,
-    color: MUTED,
+    color: palette.muted,
     fontSize: 13,
     fontWeight: "600",
     flex: 1,

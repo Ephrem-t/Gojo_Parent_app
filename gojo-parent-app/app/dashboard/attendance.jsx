@@ -21,19 +21,58 @@ import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
 import { getLinkedChildrenForParent } from "../lib/parentChildren";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
-const PRIMARY = "#1E90FF";
-const PRIMARY_DARK = "#1E90FF";
-const PRIMARY_SOFT = "#EEF4FF";
-const BG = "#FFFFFF";
-const CARD = "#FFFFFF";
-const TEXT = "#0F172A";
-const MUTED = "#64748B";
-const BORDER = "#E5EAF2";
+const makePalette = (colors, isDark) => ({
+  background: colors.background,
+  card: colors.card,
+  cardMuted: colors.cardMuted,
+  surfaceMuted: colors.surfaceMuted,
+  accent: colors.primary,
+  accentDark: colors.primaryDark,
+  accentSoft: colors.primarySoft,
+  text: colors.text,
+  muted: colors.muted,
+  mutedAlt: colors.mutedAlt,
+  border: colors.border,
+  borderSoft: colors.borderSoft,
+  borderStrong: colors.borderStrong,
+  present: isDark ? colors.primaryDark : "#2563EB",
+  late: colors.warning,
+  absent: colors.offline,
+  ringTrack: colors.borderSoft,
+  heroGradientStart: colors.heroSurface,
+  heroGradientMid: colors.cardMuted,
+  heroGradientEnd: colors.primarySoft,
+  heroBorder: isDark ? colors.borderStrong : "#DDE8F7",
+  heroGlowOne: colors.heroOrbPrimary,
+  heroGlowTwo: colors.heroOrbSecondary,
+  heroShadow: isDark ? "#000000" : "#9FBFE6",
+  avatarBg: colors.avatarPlaceholder,
+  metricSurface: isDark ? colors.cardMuted : "rgba(255,255,255,0.74)",
+  metricBorder: isDark ? colors.borderStrong : "rgba(220,233,250,0.95)",
+  filterTabsBg: isDark ? colors.cardMuted : "#E8EEF9",
+  filterTextInactive: colors.mutedAlt,
+  indicatorBorder: isDark ? colors.borderStrong : "#BFDBFE",
+  activeSurface: isDark ? "#102742" : "#EEF6FF",
+  activeBorder: isDark ? colors.borderStrong : "#BFDBFE",
+  noRecordSurface: isDark ? colors.surfaceMuted : "#F8FAFC",
+  noRecordBorder: isDark ? colors.borderStrong : "#D5DEE9",
+  presentSurface: isDark ? "#102742" : "#DBEAFE",
+  lateSurface: isDark ? "#3B2A0B" : "#FEF3C7",
+  absentSurface: isDark ? "#1F2937" : "#E2E8F0",
+  line: colors.line,
+  lineStrong: colors.borderSoft,
+});
 
-const PRESENT = "#2563EB";
-const LATE = "#F59E0B";
-const ABSENT = "#94A3B8";
+function useAttendanceThemeConfig() {
+  const { colors, isDark } = useParentTheme();
+
+  const PALETTE = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
+  const styles = useMemo(() => createStyles(PALETTE), [PALETTE]);
+
+  return { PALETTE, styles };
+}
 
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "attendance_cache_v6";
@@ -49,16 +88,16 @@ const getPathPrefix = async () => {
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
 
-const statusColor = (status) => {
+const statusColor = (status, PALETTE) => {
   switch (String(status || "").toLowerCase()) {
     case "present":
-      return PRESENT;
+      return PALETTE.present;
     case "late":
-      return LATE;
+      return PALETTE.late;
     case "absent":
-      return ABSENT;
+      return PALETTE.absent;
     default:
-      return MUTED;
+      return PALETTE.muted;
   }
 };
 
@@ -75,13 +114,14 @@ const statusIcon = (status) => {
   }
 };
 
-const percentColor = (p) => {
-  if (p >= 75) return PRIMARY_DARK;
-  if (p >= 50) return PRIMARY;
-  return ABSENT;
+const percentColor = (p, PALETTE) => {
+  if (p >= 75) return PALETTE.accentDark;
+  if (p >= 50) return PALETTE.accent;
+  return PALETTE.absent;
 };
 
 const ProgressRing = ({ percent, color, label }) => {
+  const { PALETTE, styles } = useAttendanceThemeConfig();
   const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
   const dashOffset = RING_CIRCUMFERENCE - (RING_CIRCUMFERENCE * safePercent) / 100;
 
@@ -92,7 +132,7 @@ const ProgressRing = ({ percent, color, label }) => {
           cx={RING_SIZE / 2}
           cy={RING_SIZE / 2}
           r={RING_RADIUS}
-          stroke="#E2E8F0"
+          stroke={PALETTE.ringTrack}
           strokeWidth={RING_STROKE}
           fill="none"
         />
@@ -120,6 +160,7 @@ const ProgressRing = ({ percent, color, label }) => {
 export default function Attendance() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { PALETTE, styles } = useAttendanceThemeConfig();
   const scale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1;
   const fontScale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1;
   const avatarSize = Math.round(72 * scale);
@@ -545,7 +586,7 @@ export default function Attendance() {
   if (loading && !childUser && !children.length) {
     return (
       <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PRIMARY} />
+        <ActivityIndicator size="large" color={PALETTE.accent} />
         <Text style={styles.loadingText}>Loading attendance...</Text>
       </View>
     );
@@ -562,7 +603,7 @@ export default function Attendance() {
 
   const fixedHeaderCard = (
     <LinearGradient
-      colors={["#FFFFFF", "#F9FBFF", "#EEF5FF"]}
+      colors={[PALETTE.heroGradientStart, PALETTE.heroGradientMid, PALETTE.heroGradientEnd]}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.heroCard}
@@ -585,22 +626,22 @@ export default function Attendance() {
           </Text>
 
           <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
-            <View style={[styles.statusDot, { backgroundColor: PRIMARY }]} />
-            <Text style={[styles.statusText, { color: PRIMARY }]}>Attendance Overview</Text>
+            <View style={[styles.statusDot, { backgroundColor: PALETTE.accent }]} />
+            <Text style={[styles.statusText, { color: PALETTE.accent }]}>Attendance Overview</Text>
           </View>
         </View>
 
         {children.length > 1 && (
           <TouchableOpacity onPress={() => setShowChildPicker((s) => !s)} style={styles.switchBtn}>
-            <Ionicons name={showChildPicker ? "chevron-up" : "chevron-down"} size={20} color={PRIMARY} />
+            <Ionicons name={showChildPicker ? "chevron-up" : "chevron-down"} size={20} color={PALETTE.accent} />
           </TouchableOpacity>
         )}
       </View>
 
       <View style={styles.metricGrid}>
-        <MetricCard label="Present" value={attendanceTotalsAll.present} valueColor={PRESENT} />
-        <MetricCard label="Late" value={attendanceTotalsAll.late} valueColor={LATE} />
-        <MetricCard label="Absent" value={attendanceTotalsAll.absent} valueColor={ABSENT} />
+        <MetricCard label="Present" value={attendanceTotalsAll.present} valueColor={PALETTE.present} />
+        <MetricCard label="Late" value={attendanceTotalsAll.late} valueColor={PALETTE.late} />
+        <MetricCard label="Absent" value={attendanceTotalsAll.absent} valueColor={PALETTE.absent} />
       </View>
     </LinearGradient>
   );
@@ -657,8 +698,8 @@ export default function Attendance() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={[PRIMARY]}
-            tintColor={PRIMARY}
+            colors={[PALETTE.accent]}
+            tintColor={PALETTE.accent}
           />
         }
       >
@@ -678,7 +719,7 @@ export default function Attendance() {
                     <Text style={[styles.childName, active && styles.childNameActive]}>
                       {c.name || `Child ${i + 1}`}
                     </Text>
-                    {active && <Ionicons name="checkmark-circle" size={18} color={PRIMARY} />}
+                    {active && <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} />}
                   </TouchableOpacity>
                 );
               })}
@@ -707,7 +748,7 @@ export default function Attendance() {
             const isExpanded = !!expandedCourses[course.courseId];
             const dailyStatus = entries[0]?.[1] || null;
             const dailyStatusKey = String(dailyStatus || "").toLowerCase();
-            const ringColor = percentColor(attendancePercent);
+            const ringColor = percentColor(attendancePercent, PALETTE);
             const ringValue = attendancePercent;
             const ringLabel = `${attendancePercent}%`;
             const summaryLabel = "Total";
@@ -771,7 +812,7 @@ export default function Attendance() {
                       <Text style={styles.noRecords}>No attendance recorded</Text>
                     ) : (
                       entries.map(([date, status]) => {
-                        const sc = statusColor(status);
+                        const sc = statusColor(status, PALETTE);
                         const icon = statusIcon(status);
                         return (
                           <View key={date} style={styles.attRow}>
@@ -816,17 +857,19 @@ export default function Attendance() {
   );
 }
 
-function MetricCard({ label, value, valueColor = TEXT }) {
+function MetricCard({ label, value, valueColor }) {
+  const { PALETTE, styles } = useAttendanceThemeConfig();
+
   return (
     <View style={styles.metricCard}>
       <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={[styles.metricValue, { color: valueColor }]}>{value}</Text>
+      <Text style={[styles.metricValue, { color: valueColor ?? PALETTE.text }]}>{value}</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+const createStyles = (PALETTE) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: PALETTE.background },
   fixedHeaderWrap: {
     padding: 14,
     paddingBottom: 0,
@@ -840,11 +883,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 24,
-    backgroundColor: BG,
+    backgroundColor: PALETTE.background,
   },
   loadingText: {
     marginTop: 10,
-    color: MUTED,
+    color: PALETTE.muted,
     fontSize: 14,
     fontWeight: "600",
   },
@@ -852,10 +895,10 @@ const styles = StyleSheet.create({
   heroCard: {
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "#DDE8F7",
+    borderColor: PALETTE.heroBorder,
     padding: 16,
     overflow: "hidden",
-    shadowColor: "#9FBFE6",
+    shadowColor: PALETTE.heroShadow,
     shadowOffset: { width: 0, height: 12 },
     shadowOpacity: 0.18,
     shadowRadius: 24,
@@ -866,7 +909,7 @@ const styles = StyleSheet.create({
     width: 170,
     height: 170,
     borderRadius: 999,
-    backgroundColor: "rgba(30,144,255,0.08)",
+    backgroundColor: PALETTE.heroGlowOne,
     top: -72,
     right: -18,
   },
@@ -875,7 +918,7 @@ const styles = StyleSheet.create({
     width: 118,
     height: 118,
     borderRadius: 999,
-    backgroundColor: "rgba(96,165,250,0.08)",
+    backgroundColor: PALETTE.heroGlowTwo,
     bottom: -34,
     left: -20,
   },
@@ -885,17 +928,17 @@ const styles = StyleSheet.create({
   },
   avatar: {
     marginRight: 12,
-    backgroundColor: "#E5E7EB",
+    backgroundColor: PALETTE.avatarBg,
   },
   heroInfo: {
     flex: 1,
   },
   name: {
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "800",
   },
   subText: {
-    color: MUTED,
+    color: PALETTE.muted,
     fontSize: 13,
     marginTop: 2,
   },
@@ -908,7 +951,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -921,14 +964,14 @@ const styles = StyleSheet.create({
   metricCard: {
     flex: 1,
     borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.74)",
+    backgroundColor: PALETTE.metricSurface,
     borderWidth: 1,
-    borderColor: "rgba(220,233,250,0.95)",
+    borderColor: PALETTE.metricBorder,
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
   metricLabel: {
-    color: MUTED,
+    color: PALETTE.muted,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -939,7 +982,7 @@ const styles = StyleSheet.create({
   },
 
   stickyTabsWrap: {
-    backgroundColor: BG,
+    backgroundColor: PALETTE.background,
     paddingTop: 2,
     paddingBottom: 4,
     zIndex: 5,
@@ -947,7 +990,7 @@ const styles = StyleSheet.create({
   filterTabs: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8EEF9",
+    backgroundColor: PALETTE.filterTabsBg,
     borderRadius: 14,
     overflow: "hidden",
     position: "relative",
@@ -961,29 +1004,29 @@ const styles = StyleSheet.create({
   filterText: {
     fontWeight: "700",
     fontSize: 12,
-    color: "#475569",
+    color: PALETTE.filterTextInactive,
     letterSpacing: 0.2,
   },
   filterTextActive: {
-    color: TEXT,
+    color: PALETTE.text,
   },
   filterIndicator: {
     position: "absolute",
     top: 4,
     bottom: 4,
     left: 0,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: PALETTE.accentSoft,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: PALETTE.indicatorBorder,
   },
 
   dateCard: {
     marginTop: 8,
-    backgroundColor: CARD,
+    backgroundColor: PALETTE.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: PALETTE.border,
     padding: 14,
   },
   dateTopRow: {
@@ -997,13 +1040,13 @@ const styles = StyleSheet.create({
   todayBtn: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: PALETTE.accentSoft,
     paddingHorizontal: 10,
     paddingVertical: 7,
     borderRadius: 999,
   },
   todayBtnText: {
-    color: PRIMARY,
+    color: PALETTE.accent,
     fontSize: 12,
     fontWeight: "800",
     marginLeft: 5,
@@ -1017,12 +1060,12 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: PALETTE.accentSoft,
     alignItems: "center",
     justifyContent: "center",
   },
   dateNavBtnDisabled: {
-    backgroundColor: "#F1F5F9",
+    backgroundColor: PALETTE.surfaceMuted,
   },
   dateCenter: {
     flex: 1,
@@ -1030,12 +1073,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   dateMain: {
-    color: TEXT,
+    color: PALETTE.text,
     fontSize: 15,
     fontWeight: "900",
   },
   dateSub: {
-    color: MUTED,
+    color: PALETTE.muted,
     fontSize: 12,
     marginTop: 2,
     fontWeight: "600",
@@ -1043,14 +1086,14 @@ const styles = StyleSheet.create({
 
   card: {
     marginTop: 8,
-    backgroundColor: CARD,
+    backgroundColor: PALETTE.card,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: PALETTE.border,
     padding: 14,
   },
   cardTitle: {
-    color: TEXT,
+    color: PALETTE.text,
     fontSize: 14,
     fontWeight: "800",
   },
@@ -1069,24 +1112,24 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   childRowActive: {
-    backgroundColor: PRIMARY_SOFT,
-    borderColor: "#BFDBFE",
+    backgroundColor: PALETTE.activeSurface,
+    borderColor: PALETTE.activeBorder,
   },
   childName: {
     fontSize: 14,
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "700",
   },
   childNameActive: {
-    color: PRIMARY,
+    color: PALETTE.accent,
   },
 
   courseCard: {
     marginBottom: 8,
-    backgroundColor: CARD,
+    backgroundColor: PALETTE.card,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: BORDER,
+    borderColor: PALETTE.border,
     padding: 10,
   },
   courseHead: {
@@ -1095,14 +1138,14 @@ const styles = StyleSheet.create({
   },
   courseName: {
     fontSize: 14,
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "800",
     textTransform: "capitalize",
   },
   teacher: {
     marginTop: 2,
     fontSize: 12,
-    color: MUTED,
+    color: PALETTE.muted,
     fontWeight: "600",
   },
   courseMetaRight: {
@@ -1112,32 +1155,32 @@ const styles = StyleSheet.create({
   dailyStatusPill: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#D5DEE9",
-    backgroundColor: "#F8FAFC",
+    borderColor: PALETTE.noRecordBorder,
+    backgroundColor: PALETTE.noRecordSurface,
     minWidth: 92,
     paddingVertical: 5,
     paddingHorizontal: 10,
     alignItems: "center",
   },
   dailyStatusPillPresent: {
-    borderColor: "#93C5FD",
-    backgroundColor: "#DBEAFE",
+    borderColor: PALETTE.present,
+    backgroundColor: PALETTE.presentSurface,
   },
   dailyStatusPillLate: {
-    borderColor: "#FCD34D",
-    backgroundColor: "#FEF3C7",
+    borderColor: PALETTE.late,
+    backgroundColor: PALETTE.lateSurface,
   },
   dailyStatusPillAbsent: {
-    borderColor: "#CBD5E1",
-    backgroundColor: "#E2E8F0",
+    borderColor: PALETTE.absent,
+    backgroundColor: PALETTE.absentSurface,
   },
   dailyStatusText: {
     fontSize: 11,
     fontWeight: "800",
-    color: "#64748B",
+    color: PALETTE.mutedAlt,
   },
   dailyStatusTextActive: {
-    color: "#0F172A",
+    color: PALETTE.text,
   },
 
   ringWrap: {
@@ -1163,14 +1206,14 @@ const styles = StyleSheet.create({
   },
   noRecords: {
     fontSize: 12,
-    color: MUTED,
+    color: PALETTE.muted,
     paddingVertical: 4,
   },
 
   attRow: {
     paddingVertical: 6,
     borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
+    borderBottomColor: PALETTE.line,
     flexDirection: "row",
     alignItems: "center",
   },
@@ -1183,7 +1226,7 @@ const styles = StyleSheet.create({
   attDate: {
     flex: 1,
     fontSize: 12,
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "500",
   },
   statusWrap: {
@@ -1198,36 +1241,36 @@ const styles = StyleSheet.create({
     marginTop: 6,
     paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
+    borderTopColor: PALETTE.lineStrong,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   summaryLabel: {
     fontSize: 12,
-    color: MUTED,
+    color: PALETTE.muted,
     fontWeight: "700",
   },
   summaryValue: {
     fontSize: 12,
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "900",
   },
 
   emptyTitle: {
     fontSize: 18,
-    color: TEXT,
+    color: PALETTE.text,
     fontWeight: "800",
     textAlign: "center",
   },
   emptySubtitle: {
     fontSize: 14,
-    color: MUTED,
+    color: PALETTE.muted,
     textAlign: "center",
     marginTop: 6,
   },
   emptyQuarterText: {
-    color: MUTED,
+    color: PALETTE.muted,
     fontSize: 13,
     marginTop: 8,
     fontWeight: "500",
@@ -1239,7 +1282,7 @@ const styles = StyleSheet.create({
   },
   refreshingBgText: {
     fontSize: 12,
-    color: MUTED,
+    color: PALETTE.muted,
     fontWeight: "600",
   },
 });

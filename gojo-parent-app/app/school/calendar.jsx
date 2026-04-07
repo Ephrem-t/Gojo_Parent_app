@@ -17,27 +17,25 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as EthiopianDate from "ethiopian-date";
 
 import { database } from "../../constants/firebaseConfig";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
-const CALENDAR_COLORS = {
-  text: "#11181C",
-  background: "#FFFFFF",
-  border: "#E4EAF5",
-  muted: "#6B7894",
-  primary: "#007AFB",
-  soft: "#EEF5FF",
-  surfaceMuted: "#F1F5F9",
-  inputBackground: "#F8FAFC",
-  card: "#FFFFFF",
-  infoSurface: "#EAF3FF",
-  infoBorder: "#CFE0FF",
-  overlay: "rgba(0,0,0,0.45)",
-};
-
-const CAT_COLORS = {
-  academic: "#16A34A",
-  class: "#DC2626",
-  defaultClose: "#EAB308",
-};
+const makeCalendarColors = (colors, isDark) => ({
+  text: colors.textStrong,
+  background: colors.background,
+  border: colors.border,
+  muted: colors.mutedAlt,
+  primary: colors.primary,
+  primaryDark: colors.primaryDark,
+  soft: colors.primarySoft,
+  surfaceMuted: colors.surfaceMuted,
+  inputBackground: colors.inputBackground,
+  card: colors.card,
+  infoSurface: colors.infoSurface,
+  infoBorder: colors.infoBorder,
+  overlay: colors.overlayStrong,
+  white: colors.white,
+  shadow: isDark ? "#000000" : "#0F172A",
+});
 
 const DAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAYS_AM = ["እሁድ", "ሰኞ", "ማክ", "ረቡዕ", "ሐሙስ", "አርብ", "ቅዳሜ"];
@@ -530,7 +528,16 @@ function buildMovableClosureEvents(yearStart, yearEnd, amharic = false) {
 }
 
 export default function CalendarTab() {
-  const colors = CALENDAR_COLORS;
+  const { colors: themeColors, isDark } = useParentTheme();
+  const colors = useMemo(() => makeCalendarColors(themeColors, isDark), [themeColors, isDark]);
+  const catColors = useMemo(
+    () => ({
+      academic: themeColors.success,
+      class: themeColors.danger,
+      defaultClose: themeColors.warning,
+    }),
+    [themeColors]
+  );
   const styles = useMemo(() => createStyles(colors), [colors]);
   const todayEth = getTodayEthiopian();
 
@@ -963,9 +970,9 @@ export default function CalendarTab() {
     const dayEvents = eventsByDate[gregorianDate] || [];
     if (!dayEvents.length) return null;
 
-    if (dayEvents.some((event) => event._defaultClosure)) return CAT_COLORS.defaultClose;
-    if (dayEvents.some((event) => event._category === "academic")) return CAT_COLORS.academic;
-    return CAT_COLORS.class;
+    if (dayEvents.some((event) => event._defaultClosure)) return catColors.defaultClose;
+    if (dayEvents.some((event) => event._category === "academic")) return catColors.academic;
+    return catColors.class;
   };
 
   const scrollToDetails = () => {
@@ -1272,7 +1279,7 @@ export default function CalendarTab() {
           <View style={styles.legendWrap}>
             {["class", "academic", "defaultClose"].map((key) => (
               <View key={key} style={styles.legendItem}>
-                <View style={[styles.legendDot, { backgroundColor: CAT_COLORS[key] }]} />
+                <View style={[styles.legendDot, { backgroundColor: catColors[key] }]} />
                 <Text style={styles.legendText}>{labels.category[key]}</Text>
               </View>
             ))}
@@ -1342,7 +1349,7 @@ export default function CalendarTab() {
                     <View
                       style={[
                         styles.dot,
-                        { backgroundColor: isSelected ? "#FFFFFF" : dotColor },
+                        { backgroundColor: isSelected ? colors.white : dotColor },
                       ]}
                     />
                   ) : null}
@@ -1387,8 +1394,8 @@ export default function CalendarTab() {
             selectedEvents.map((event) => {
               const category = event._category || "general";
               const color = event._defaultClosure
-                ? CAT_COLORS.defaultClose
-                : (CAT_COLORS[category] || CAT_COLORS.class);
+                ? catColors.defaultClose
+                : (catColors[category] || catColors.class);
 
               return (
                 <View key={event.id} style={[styles.eventCard, { borderColor: `${color}55` }]}>
@@ -1428,8 +1435,8 @@ export default function CalendarTab() {
             upcomingDeadlines.map((event) => {
               const category = event._category || "general";
               const color = event._defaultClosure
-                ? CAT_COLORS.defaultClose
-                : (CAT_COLORS[category] || CAT_COLORS.class);
+                ? catColors.defaultClose
+                : (catColors[category] || catColors.class);
 
               return (
                 <View key={event.id} style={[styles.upcomingRow, { borderColor: `${color}55` }]}>
@@ -1460,7 +1467,7 @@ export default function CalendarTab() {
 
 function createStyles(colors) {
   const primary = colors.primary;
-  const primaryDark = colors.primary;
+  const primaryDark = colors.primaryDark;
   const primarySoft = colors.soft;
   const background = colors.background;
   const card = colors.card;
@@ -1483,7 +1490,7 @@ function createStyles(colors) {
       paddingBottom: 28,
       borderTopWidth: 1,
       borderColor: colors.border,
-      shadowColor: "#0F172A",
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: -8 },
       shadowOpacity: 0.08,
       shadowRadius: 18,
@@ -1588,7 +1595,7 @@ function createStyles(colors) {
       borderColor: border,
       paddingHorizontal: 16,
       paddingVertical: 12,
-      shadowColor: "#0F172A",
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 6 },
       shadowOpacity: 0.05,
       shadowRadius: 14,
@@ -1689,7 +1696,7 @@ function createStyles(colors) {
       paddingVertical: 14,
       paddingHorizontal: 14,
       marginBottom: 12,
-      shadowColor: "#0F172A",
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 8 },
       shadowOpacity: 0.04,
       shadowRadius: 18,
@@ -1748,7 +1755,7 @@ function createStyles(colors) {
       padding: 20,
       borderWidth: 1,
       borderColor: colors.border,
-      shadowColor: "#0F172A",
+      shadowColor: colors.shadow,
       shadowOffset: { width: 0, height: 14 },
       shadowOpacity: 0.1,
       shadowRadius: 28,
@@ -1827,7 +1834,7 @@ function createStyles(colors) {
     pickerChipActive: {
       backgroundColor: colors.infoSurface,
       borderColor: colors.infoBorder,
-      shadowColor: "#2563EB",
+      shadowColor: colors.primary,
       shadowOffset: { width: 0, height: 4 },
       shadowOpacity: 0.08,
       shadowRadius: 10,

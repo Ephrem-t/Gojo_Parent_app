@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useMemo } from "react";
 import {
   SafeAreaView,
   ScrollView,
@@ -31,16 +31,32 @@ import {
   getSchoolContactInfo,
   normalizePhoneNumber,
 } from "./lib/accountAccess";
+import { useParentTheme } from "../hooks/use-parent-theme";
 
 export const options = { headerShown: false };
-
-const PRIMARY = "#007AFB";
-const BACKGROUND = "#FFFFFF";
-const MUTED = "#6B78A8";
 
 export default function LoginScreen() {
   const router = useRouter();
   const passwordRef = useRef(null);
+  const { colors, expoStatusBarStyle } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      background: colors.background,
+      primary: colors.primary,
+      muted: colors.mutedAlt,
+      title: colors.textStrong,
+      inputBg: colors.card,
+      inputBorder: colors.borderStrong,
+      inputText: colors.text,
+      placeholder: colors.muted,
+      error: colors.danger,
+      link: colors.primary,
+      footer: colors.mutedAlt,
+      buttonText: colors.white,
+    }),
+    [colors]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -276,7 +292,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "left", "right", "bottom"]}>
-      <StatusBar style="dark" />
+      <StatusBar style={expoStatusBarStyle} />
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -298,11 +314,11 @@ export default function LoginScreen() {
               {error ? <Text style={styles.error}>{error}</Text> : null}
 
               <View style={styles.inputRow}>
-                <Ionicons name="person-outline" size={22} color={MUTED} style={styles.inputIcon} />
+                <Ionicons name="person-outline" size={22} color={palette.muted} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   placeholder="Username"
-                  placeholderTextColor="#B8C6FF"
+                  placeholderTextColor={palette.placeholder}
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
@@ -313,12 +329,12 @@ export default function LoginScreen() {
               </View>
 
               <View style={styles.inputRow}>
-                <Ionicons name="key-outline" size={22} color={MUTED} style={styles.inputIcon} />
+                <Ionicons name="key-outline" size={22} color={palette.muted} style={styles.inputIcon} />
                 <TextInput
                   ref={passwordRef}
                   style={[styles.input, { paddingRight: 44 }]}
                   placeholder="Password"
-                  placeholderTextColor="#B8C6FF"
+                  placeholderTextColor={palette.placeholder}
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!showPassword}
@@ -326,12 +342,12 @@ export default function LoginScreen() {
                   onSubmitEditing={handleSignIn}
                 />
                 <TouchableOpacity activeOpacity={0.7} onPress={() => setShowPassword((v) => !v)} style={styles.eyeButton}>
-                  <Ionicons name={showPassword ? "eye" : "eye-off"} size={20} color={MUTED} />
+                  <Ionicons name={showPassword ? "eye" : "eye-off"} size={20} color={palette.muted} />
                 </TouchableOpacity>
               </View>
 
               <TouchableOpacity style={[styles.button, loading && styles.buttonDisabled]} onPress={handleSignIn} disabled={loading}>
-                {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Login</Text>}
+                {loading ? <ActivityIndicator color={palette.buttonText} /> : <Text style={styles.buttonText}>Login</Text>}
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.linkRow} onPress={handleNeedHelp}>
@@ -359,32 +375,32 @@ export default function LoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (palette) => StyleSheet.create({
   flex: { flex: 1 },
-  safe: { flex: 1, backgroundColor: BACKGROUND },
+  safe: { flex: 1, backgroundColor: palette.background },
   scrollContent: { flexGrow: 1, justifyContent: "space-between", paddingTop: 12, paddingBottom: 20 },
 
   top: { alignItems: "center", marginTop: 8 },
   logo: { width: 180, height: 180, borderRadius: 14, marginTop: 16 },
-  title: { marginTop: -8, fontSize: 34, color: "#111", fontWeight: "800" },
-  subtitle: { marginTop: 8, fontSize: 14, color: MUTED, textAlign: "center" },
+  title: { marginTop: -8, fontSize: 34, color: palette.title, fontWeight: "800" },
+  subtitle: { marginTop: 8, fontSize: 14, color: palette.muted, textAlign: "center" },
 
   form: { paddingHorizontal: 28, marginTop: 8 },
-  error: { color: "#B00020", marginBottom: 8, textAlign: "center" },
+  error: { color: palette.error, marginBottom: 8, textAlign: "center" },
 
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#FFFFFF",
+    backgroundColor: palette.inputBg,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#E7EDFF",
+    borderColor: palette.inputBorder,
     paddingHorizontal: 12,
     height: 56,
     marginTop: 12,
   },
   inputIcon: { marginRight: 8 },
-  input: { flex: 1, fontSize: 16, color: "#222" },
+  input: { flex: 1, fontSize: 16, color: palette.inputText },
 
   eyeButton: {
     position: "absolute",
@@ -397,17 +413,17 @@ const styles = StyleSheet.create({
   button: {
     height: 56,
     borderRadius: 12,
-    backgroundColor: PRIMARY,
+    backgroundColor: palette.primary,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 20,
   },
   buttonDisabled: { opacity: 0.75 },
-  buttonText: { color: "#fff", fontWeight: "800", fontSize: 18 },
+  buttonText: { color: palette.buttonText, fontWeight: "800", fontSize: 18 },
 
   linkRow: { marginTop: 12, alignItems: "center" },
-  linkText: { color: PRIMARY, fontWeight: "600" },
+  linkText: { color: palette.link, fontWeight: "600" },
 
   footer: { alignItems: "center", marginTop: 28, paddingBottom: 8 },
-  copyright: { color: "#9AA0A6", fontSize: 12 },
+  copyright: { color: palette.footer, fontSize: 12 },
 });

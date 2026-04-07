@@ -1,17 +1,26 @@
-  import React, { useEffect, useRef, useState } from "react";
+  import React, { useEffect, useMemo, useRef, useState } from "react";
   import { View, Text, TouchableOpacity, StyleSheet, Animated } from "react-native";
 import PaymentsTab from "../school/payments";
 import HistoryTab from "../school/history";
 import CalendarTab from "../school/calendar";
-
-const PRIMARY = "#1E90FF";
-const PRIMARY_SOFT = "#EEF4FF";
-const BG = "#FFFFFF";
-const TEXT = "#0F172A";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const TABS = ["Payments", "History", "Calendar"];
 
 export default function SchoolScreen() {
+  const { colors, isDark } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      background: colors.background,
+      tabsBg: isDark ? colors.cardMuted : "#E8EEF9",
+      tabText: colors.mutedAlt,
+      tabTextActive: colors.text,
+      indicatorBg: colors.primarySoft,
+      indicatorBorder: isDark ? colors.borderStrong : "#BFDBFE",
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const [activeTab, setActiveTab] = useState("Payments");
   const tabAnim = useRef(new Animated.Value(0)).current;
   const [tabWidth, setTabWidth] = useState(0);
@@ -80,11 +89,11 @@ export default function SchoolScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+const createStyles = (palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: palette.background },
 
   stickyWrap: {
-    backgroundColor: BG,
+    backgroundColor: palette.background,
     paddingHorizontal: 14,
     paddingTop: 14,
     paddingBottom: 8,
@@ -104,7 +113,7 @@ const styles = StyleSheet.create({
   tabRow: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E8EEF9",
+    backgroundColor: palette.tabsBg,
     borderRadius: 14,
     overflow: "hidden",
     position: "relative",
@@ -115,20 +124,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   tabText: {
-    color: "#475569",
+    color: palette.tabText,
     fontWeight: "700",
     fontSize: 13,
     letterSpacing: 0.2,
   },
-  tabTextActive: { color: TEXT },
+  tabTextActive: { color: palette.tabTextActive },
   tabIndicator: {
     position: "absolute",
     top: 4,
     bottom: 4,
     left: 0,
-    backgroundColor: PRIMARY_SOFT,
+    backgroundColor: palette.indicatorBg,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#BFDBFE",
+    borderColor: palette.indicatorBorder,
   },
 });

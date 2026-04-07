@@ -1,10 +1,11 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Text, ActivityIndicator, StyleSheet, Dimensions, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { child, get, ref } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
 import { Image as ExpoImage } from "expo-image";
+import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const { width, height } = Dimensions.get("window");
 
@@ -69,6 +70,24 @@ const getRelativeTime = (postTime) => {
 export default function PostScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { colors, isDark } = useParentTheme();
+  const palette = useMemo(
+    () => ({
+      background: colors.backgroundAlt,
+      card: colors.card,
+      text: colors.text,
+      textStrong: colors.textStrong,
+      muted: colors.muted,
+      border: colors.border,
+      avatarBg: colors.avatarPlaceholder,
+      imageBg: colors.surfaceMuted,
+      primary: colors.primary,
+      white: colors.white,
+      shadow: isDark ? "#000000" : "#000000",
+    }),
+    [colors, isDark]
+  );
+  const styles = useMemo(() => createStyles(palette), [palette]);
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const useSafeBack = (router) =>
@@ -111,7 +130,7 @@ export default function PostScreen() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#1877f2" />
+        <ActivityIndicator size="large" color={palette.primary} />
         <Text style={styles.subtle}>{STRINGS.loading}</Text>
       </View>
     );
@@ -122,7 +141,7 @@ export default function PostScreen() {
       <View style={styles.center}>
         <Text style={styles.subtle}>{STRINGS.notFound}</Text>
         <TouchableOpacity style={styles.backBtn} onPress={handleBack}>
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color={palette.white} />
           <Text style={styles.backText}>{STRINGS.back}</Text>
         </TouchableOpacity>
       </View>
@@ -133,7 +152,7 @@ export default function PostScreen() {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.backBtn} onPress={handleBack} accessibilityRole="button" accessibilityLabel="Go back">
-          <Ionicons name="arrow-back" size={18} color="#fff" />
+          <Ionicons name="arrow-back" size={18} color={palette.white} />
           <Text style={styles.backText}>{STRINGS.back}</Text>
         </TouchableOpacity>
       </View>
@@ -155,19 +174,19 @@ export default function PostScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f0f2f5", padding: width * 0.04 },
+const createStyles = (palette) => StyleSheet.create({
+  container: { flex: 1, backgroundColor: palette.background, padding: width * 0.04 },
   headerRow: { flexDirection: "row", justifyContent: "flex-start", marginBottom: width * 0.03 },
-  card: { backgroundColor: "#fff", borderRadius: width * 0.03, padding: width * 0.03, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  card: { backgroundColor: palette.card, borderRadius: width * 0.03, padding: width * 0.03, borderWidth: 1, borderColor: palette.border, shadowColor: palette.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
   cardHeader: { flexDirection: "row", alignItems: "center", marginBottom: width * 0.02 },
-  avatar: { width: width * 0.12, height: width * 0.12, borderRadius: width * 0.06, marginRight: width * 0.025, backgroundColor: "#ddd" },
-  adminName: { fontSize: width * 0.045, fontWeight: "700", color: "#000" },
-  time: { fontSize: width * 0.03, color: "#666" },
-  message: { fontSize: width * 0.038, color: "#111", marginVertical: width * 0.02 },
-  postImage: { width: "100%", height: undefined, aspectRatio: 1, borderRadius: width * 0.02, backgroundColor: "#f0f0f0" },
-  likes: { marginTop: width * 0.02, color: "#555", fontWeight: "600" },
+  avatar: { width: width * 0.12, height: width * 0.12, borderRadius: width * 0.06, marginRight: width * 0.025, backgroundColor: palette.avatarBg },
+  adminName: { fontSize: width * 0.045, fontWeight: "700", color: palette.textStrong },
+  time: { fontSize: width * 0.03, color: palette.muted },
+  message: { fontSize: width * 0.038, color: palette.text, marginVertical: width * 0.02 },
+  postImage: { width: "100%", height: undefined, aspectRatio: 1, borderRadius: width * 0.02, backgroundColor: palette.imageBg },
+  likes: { marginTop: width * 0.02, color: palette.muted, fontWeight: "600" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: width * 0.05 },
-  subtle: { color: "#666", marginTop: 8 },
-  backBtn: { flexDirection: "row", alignItems: "center", backgroundColor: "#1877f2", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, gap: 6 },
-  backText: { color: "#fff", fontWeight: "600" },
+  subtle: { color: palette.muted, marginTop: 8 },
+  backBtn: { flexDirection: "row", alignItems: "center", backgroundColor: palette.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, gap: 6 },
+  backText: { color: palette.white, fontWeight: "600" },
 });
