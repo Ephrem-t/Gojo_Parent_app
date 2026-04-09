@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +19,10 @@ import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
 import { getLinkedChildrenForParent } from "../lib/parentChildren";
+import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
+import { isInternetReachableNow } from "../lib/networkGuard";
+import { queryUserByChildInSchool } from "../lib/userHelpers";
+import AppImage from "../../components/ui/AppImage";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const makePalette = (colors, isDark) => ({
@@ -67,8 +70,63 @@ function useClassMarkThemeConfig() {
   return { PALETTE, styles };
 }
 
+const getClassMarkLabels = (amharic) =>
+  amharic
+    ? {
+        noLinkedTitle: "እስካሁን የተገናኘ ልጅ የለም",
+        noLinkedSubtitle: "የልጅ ፕሮፋይልን ለማገናኘት እባክዎ የትምህርት ቤት አስተዳዳሪን ያነጋግሩ።",
+        student: "ተማሪ",
+        course: "ኮርስ",
+        teacher: "መምህር",
+        grade: "ክፍል",
+        section: "ክፍለ ክፍል",
+        greatProgress: "ጥሩ እድገት",
+        onTrack: "በጥሩ መንገድ ላይ",
+        needsSupport: "ድጋፍ ያስፈልጋል",
+        rank: "ደረጃ",
+        average: "አማካይ",
+        percent: "መቶኛ",
+        semester: "ሴሚስተር",
+        quarter: "ኩዋርተር",
+        semesterTotal: "የሴሚስተር ጠቅላላ",
+        viewMarks: "ውጤቶችን ይመልከቱ",
+        chooseChild: "ልጅ ይምረጡ",
+        child: "ልጅ",
+        total: "ጠቅላላ",
+        marks: "ውጤቶች",
+        noCourses: "ለዚህ ልጅ ኮርሶች ወይም ውጤቶች እስካሁን አልተገኙም።",
+        refreshing: "የቅርብ ጊዜ ውጤቶች በመዘመን ላይ…",
+      }
+    : {
+        noLinkedTitle: "No child is linked yet",
+        noLinkedSubtitle: "Please contact school admin to link child profile.",
+        student: "Student",
+        course: "Course",
+        teacher: "Teacher",
+        grade: "Grade",
+        section: "Section",
+        greatProgress: "Great progress",
+        onTrack: "On track",
+        needsSupport: "Needs support",
+        rank: "Rank",
+        average: "Average",
+        percent: "Percent",
+        semester: "Semester",
+        quarter: "Quarter",
+        semesterTotal: "Semester Total",
+        viewMarks: "View marks",
+        chooseChild: "Choose Child",
+        child: "Child",
+        total: "Total",
+        marks: "Marks",
+        noCourses: "No courses or marks found for this child yet.",
+        refreshing: "Refreshing latest marks…",
+      };
+
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "classMark_cache_v6";
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const CHILD_BUNDLE_CACHE_TTL_MS = 30 * 60 * 1000;
 const DIRECT_SEMESTER_KEY = "__semester_total__";
 const AVERAGE_SEMESTER_KEY = "average";
 const RING_SIZE = 58;
@@ -80,6 +138,9 @@ const getPathPrefix = async () => {
   const sk = (await AsyncStorage.getItem("schoolKey")) || null;
   return sk ? `Platform1/Schools/${sk}/` : "";
 };
+
+const getClassMarkBundleCacheKey = (prefix, studentId) =>
+  `cache:classMark:bundle:${String(prefix || "root")}:${String(studentId || "unknown")}`;
 
 const chipColorByPercent = (p, PALETTE) => {
   if (p >= 75) return PALETTE.success;
@@ -103,29 +164,6 @@ const semesterHasMarks = (semesterNode) => {
   if (!semesterNode || typeof semesterNode !== "object") return false;
   if (hasAssessments(semesterNode)) return true;
   return Object.values(semesterNode).some((value) => hasAssessments(value));
-};
-
-const getMarksNodeForSelection = (marksNode, semesterKey, quarterKey) => {
-  const semesterNode = marksNode?.[semesterKey];
-  if (!semesterNode || typeof semesterNode !== "object") return null;
-
-  if (quarterKey === DIRECT_SEMESTER_KEY && hasAssessments(semesterNode)) {
-    return semesterNode;
-  }
-
-  if (quarterKey && hasAssessments(semesterNode?.[quarterKey])) {
-    return semesterNode[quarterKey];
-  }
-
-  if (hasAssessments(semesterNode)) {
-    return semesterNode;
-  }
-
-  if (!quarterKey) {
-    return Object.values(semesterNode).find((value) => hasAssessments(value)) || null;
-  }
-
-  return null;
 };
 
 const collectAssessmentsFromNode = (node, quarterKey) => {
@@ -163,11 +201,11 @@ const getAssessmentItemsForSelection = (marksNode, semesterKey, quarterKey) => {
   return collectAssessmentsFromNode(marksNode[semesterKey], quarterKey);
 };
 
-const prettifyQuarterLabel = (q) => {
-  if (q === DIRECT_SEMESTER_KEY) return "Semester Total";
+const prettifyQuarterLabel = (q, labels) => {
+  if (q === DIRECT_SEMESTER_KEY) return labels.semesterTotal;
   const raw = String(q || "").toLowerCase().trim();
   const match = raw.match(/\d+/);
-  if (match) return `Quarter ${match[0]}`;
+  if (match) return `${labels.quarter} ${match[0]}`;
   return String(q || "");
 };
 
@@ -211,7 +249,40 @@ const ProgressRing = ({ percent, color }) => {
 export default function ClassMark() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { amharic, oromo } = useParentTheme();
   const { PALETTE, styles } = useClassMarkThemeConfig();
+  const labels = useMemo(
+    () =>
+      oromo
+        ? {
+            ...getClassMarkLabels(false),
+            noLinkedTitle: "Ijoolleen walqabatan hin jiran",
+            noLinkedSubtitle: "Profaayilii ijoollee walqabsiisuuf bulchaa mana barumsaa qunnami.",
+            student: "Barataa",
+            course: "Koorsii",
+            teacher: "Barsiisaa",
+            grade: "Kutaa",
+            section: "Kutaa xiqqaa",
+            greatProgress: "Fooyya'iinsa gaarii",
+            onTrack: "Karaa sirrii irra jira",
+            needsSupport: "Deeggarsa barbaada",
+            rank: "Sadarkaa",
+            average: "Giddugaleessa",
+            percent: "Dhibbeentaa",
+            semester: "Siimeestara",
+            quarter: "Kuwaartera",
+            semesterTotal: "Waliigala Siimeestaraa",
+            viewMarks: "Qabxii ilaali",
+            chooseChild: "Ijoollee filadhu",
+            child: "Ijoollee",
+            total: "Waliigala",
+            marks: "Qabxii",
+            noCourses: "Koorsiin yookaan qabxiin ijoollee kanaaf hin argamne.",
+            refreshing: "Qabxii haarawa deebi'ee fe'aa jira…",
+          }
+        : getClassMarkLabels(amharic),
+    [amharic, oromo]
+  );
 
   const [parentId, setParentId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -231,7 +302,7 @@ export default function ClassMark() {
   const [selectedSemester, setSelectedSemester] = useState(null);
   const [selectedQuarter, setSelectedQuarter] = useState(null);
   const [expanded, setExpanded] = useState({});
-  const semesterOptions = ["semester1", "semester2", AVERAGE_SEMESTER_KEY];
+  const semesterOptions = useMemo(() => ["semester1", "semester2", AVERAGE_SEMESTER_KEY], []);
   const semesterAnim = useRef(new Animated.Value(0)).current;
   const [semesterTabsWidth, setSemesterTabsWidth] = useState(0);
 
@@ -295,20 +366,44 @@ export default function ClassMark() {
     }
   };
 
-  const fetchChildBundle = async ({ prefix, studentId, childInfo }) => {
+  const fetchChildBundle = async ({ prefix, studentId, childInfo, forceNetwork = false }) => {
+    const cacheKey = getClassMarkBundleCacheKey(prefix, studentId);
+    const cachedRecord = await readCachedJsonRecord(cacheKey);
+    const cachedBundle = cachedRecord?.value || null;
+    const cacheFresh = cachedRecord
+      ? Date.now() - cachedRecord.savedAt <= CHILD_BUNDLE_CACHE_TTL_MS
+      : false;
+
+    if (!forceNetwork && cachedBundle && cacheFresh) {
+      return cachedBundle;
+    }
+
+    const onlineNow = await isInternetReachableNow();
+    if (!onlineNow) {
+      return cachedBundle;
+    }
+
     const [studentSnap, rankSnap] = await Promise.all([
       get(ref(database, `${prefix}Students/${studentId}`)),
       get(ref(database, `${prefix}Ranks/${studentId}`)),
     ]);
 
     const student = studentSnap.exists() ? studentSnap.val() : null;
-    if (!student) return null;
+    if (!student) return cachedBundle;
 
     const studentUserId = student.userId || student.systemAccountInformation?.userId || null;
-    const studentUserSnap = studentUserId
-      ? await get(ref(database, `${prefix}Users/${studentUserId}`))
-      : null;
-    const user = studentUserSnap?.exists() ? studentUserSnap.val() : {};
+    let user = {};
+    if (studentUserId) {
+      try {
+        const studentUserSnap = await queryUserByChildInSchool("userId", studentUserId);
+        if (studentUserSnap?.exists()) {
+          studentUserSnap.forEach((childSnap) => {
+            user = childSnap.val() || {};
+            return true;
+          });
+        }
+      } catch {}
+    }
 
     const grade = String(student.grade || student.basicStudentInformation?.grade || "");
     const section = String(student.section || student.basicStudentInformation?.section || "");
@@ -321,7 +416,7 @@ export default function ClassMark() {
         student?.name ||
         student?.basicStudentInformation?.name ||
         childInfo?.name ||
-        "Student",
+        labels.student,
       profileImage:
         user?.profileImage ||
         student?.profileImage ||
@@ -419,7 +514,7 @@ export default function ClassMark() {
         subjectNode?.name ||
         assignment?.subject ||
         fallbackNameFromCourseId ||
-        "Course";
+        labels.course;
 
       return {
         courseId,
@@ -429,7 +524,7 @@ export default function ClassMark() {
         section,
         teacherId: assignment?.teacherId || null,
         teacherUserId: assignment?.teacherUserId || null,
-        teacherName: assignment?.teacherName || teacherUser?.name || "Teacher",
+        teacherName: assignment?.teacherName || teacherUser?.name || labels.teacher,
       };
     });
 
@@ -442,12 +537,15 @@ export default function ClassMark() {
 
     const marksMap = Object.fromEntries(markSnaps);
 
-    return {
+    const bundle = {
       childUser: childUserObj,
       rank: rankSnap.exists() ? rankSnap.val() : null,
       courses: courseList,
       marksByCourse: marksMap,
     };
+
+    writeCachedJson(cacheKey, bundle).catch(() => {});
+    return bundle;
   };
 
   const applyBundleToState = async (bundle, index, kids) => {
@@ -458,6 +556,7 @@ export default function ClassMark() {
     setMarksByCourse(bundle.marksByCourse);
 
     await saveCache({
+        parentId,
       children: kids,
       currentIndex: index,
       childUser: bundle.childUser,
@@ -474,6 +573,7 @@ export default function ClassMark() {
     background = false,
     keepCurrent = true,
     forcedIndex = null,
+    forceNetwork = false,
   } = {}) => {
     if (!parentId) return;
 
@@ -482,7 +582,7 @@ export default function ClassMark() {
 
     try {
       const prefix = await getPathPrefix();
-      const kids = await getLinkedChildrenForParent(prefix, parentId);
+      const kids = await getLinkedChildrenForParent(prefix, parentId, forceNetwork ? { forceNetwork: true } : {});
 
       setChildren(kids);
 
@@ -505,6 +605,7 @@ export default function ClassMark() {
         prefix,
         studentId: chosen.studentId,
         childInfo: chosen,
+        forceNetwork,
       });
 
       if (!bundle) {
@@ -523,6 +624,9 @@ export default function ClassMark() {
     }
   };
 
+  const loadFreshDataRef = useRef(loadFreshData);
+  loadFreshDataRef.current = loadFreshData;
+
   useEffect(() => {
     if (!parentId) return;
 
@@ -530,8 +634,12 @@ export default function ClassMark() {
 
     (async () => {
       const cached = await loadCache();
+      const cacheMatchesParent = cached && String(cached.parentId || "") === String(parentId || "");
+      const cacheFresh = cacheMatchesParent
+        && Number.isFinite(Number(cached?.ts || 0))
+        && Date.now() - Number(cached.ts || 0) <= CACHE_TTL_MS;
 
-      if (cached && mounted) {
+      if (cacheMatchesParent && mounted) {
         setChildren(cached.children || []);
         setCurrentIndex(cached.currentIndex || 0);
         setChildUser(cached.childUser || null);
@@ -543,8 +651,8 @@ export default function ClassMark() {
         setLoading(false);
       }
 
-      if (mounted) {
-        await loadFreshData({ background: true, keepCurrent: true });
+      if (mounted && !cacheFresh) {
+        await loadFreshDataRef.current({ background: true, keepCurrent: true });
       }
     })();
 
@@ -566,6 +674,7 @@ export default function ClassMark() {
         prefix,
         studentId: child.studentId,
         childInfo: child,
+        forceNetwork: false,
       });
 
       if (!bundle) {
@@ -582,7 +691,7 @@ export default function ClassMark() {
   };
 
   const onRefresh = async () => {
-    await loadFreshData({ background: false, keepCurrent: true });
+    await loadFreshData({ background: false, keepCurrent: true, forceNetwork: true });
   };
 
   const availableSemesterKeys = useMemo(() => {
@@ -656,7 +765,7 @@ export default function ClassMark() {
       speed: 18,
       bounciness: 6,
     }).start();
-  }, [selectedSemester, semesterAnim]);
+  }, [selectedSemester, semesterAnim, semesterOptions]);
 
   const availableQuarterKeys = useMemo(() => {
     if (!childUser?.studentId) return [];
@@ -744,8 +853,8 @@ export default function ClassMark() {
   if (!children.length) {
     return (
       <View style={styles.loadingWrap}>
-        <Text style={styles.emptyTitle}>No child is linked yet</Text>
-        <Text style={styles.emptySubtitle}>Please contact school admin to link child profile.</Text>
+        <Text style={styles.emptyTitle}>{labels.noLinkedTitle}</Text>
+        <Text style={styles.emptySubtitle}>{labels.noLinkedSubtitle}</Text>
       </View>
     );
   }
@@ -753,10 +862,10 @@ export default function ClassMark() {
   const overallStatusColor = chipColorByPercent(stats.overallPercent, PALETTE);
   const overallStatus =
     stats.overallPercent >= 75
-      ? "Great progress"
+      ? labels.greatProgress
       : stats.overallPercent >= 50
-      ? "On track"
-      : "Needs support";
+      ? labels.onTrack
+      : labels.needsSupport;
   const isQuarterBasedSemester = selectedSemester !== AVERAGE_SEMESTER_KEY && visibleQuarterKeys.length > 0;
   const fixedHeaderCard = (
     <LinearGradient
@@ -769,16 +878,17 @@ export default function ClassMark() {
       <View style={styles.headerGlowTwo} />
 
       <View style={styles.headerTop}>
-        <Image
-          source={{ uri: childUser?.profileImage || defaultProfile }}
+        <AppImage
+          uri={childUser?.profileImage || defaultProfile}
+          fallbackSource={require("../../assets/images/avatar_placeholder.png")}
           style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
         />
         <View style={{ flex: 1 }}>
           <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
-            {childUser?.name || "Student"}
+            {childUser?.name || labels.student}
           </Text>
           <Text style={styles.subText}>
-            Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
+            {labels.grade} {childUser?.grade ?? "--"} • {labels.section} {childUser?.section ?? "--"}
           </Text>
 
           <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
@@ -796,99 +906,95 @@ export default function ClassMark() {
 
       <View style={styles.metricRow}>
         <View style={styles.metricPill}>
-          <Text style={styles.metricLabel}>Rank</Text>
+          <Text style={styles.metricLabel}>{labels.rank}</Text>
           <Text style={styles.metricValue}>{rank ?? "--"}</Text>
         </View>
         <View style={styles.metricPill}>
-          <Text style={styles.metricLabel}>Average</Text>
+          <Text style={styles.metricLabel}>{labels.average}</Text>
           <Text style={styles.metricValue}>{stats.averagePoint || 0}</Text>
         </View>
         <View style={styles.metricPill}>
-          <Text style={styles.metricLabel}>Percent</Text>
+          <Text style={styles.metricLabel}>{labels.percent}</Text>
           <Text style={[styles.metricValue, { color: overallStatusColor }]}>{stats.overallPercent}%</Text>
         </View>
       </View>
     </LinearGradient>
   );
   const fixedFilterCard = (
-    <View style={styles.stickyHeaderShell}>
-      <View style={styles.academicTermCard}>
-        <View style={styles.stickyTabsWrap}>
-          <View
-            style={styles.filterTabs}
-            onLayout={(e) => setSemesterTabsWidth(e.nativeEvent.layout.width)}
-          >
-            {semesterTabsWidth > 0 && (
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.filterIndicator,
+    <View style={styles.stickyTabsWrap}>
+      <View
+        style={styles.filterTabs}
+        onLayout={(e) => setSemesterTabsWidth(e.nativeEvent.layout.width)}
+      >
+        {semesterTabsWidth > 0 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.filterIndicator,
+              {
+                width: semesterTabsWidth / semesterOptions.length,
+                transform: [
                   {
-                    width: semesterTabsWidth / semesterOptions.length,
-                    transform: [
-                      {
-                        translateX: Animated.multiply(
-                          semesterAnim,
-                          semesterTabsWidth / semesterOptions.length
-                        ),
-                      },
-                    ],
+                    translateX: Animated.multiply(
+                      semesterAnim,
+                      semesterTabsWidth / semesterOptions.length
+                    ),
                   },
-                ]}
-              />
-            )}
+                ],
+              },
+            ]}
+          />
+        )}
 
-            {semesterOptions.map((semesterKey, index) => {
-              const active = selectedSemester === semesterKey;
-              const label =
-                semesterKey === AVERAGE_SEMESTER_KEY
-                  ? "Average"
-                  : `Semester ${index + 1}`;
+        {semesterOptions.map((semesterKey, index) => {
+          const active = selectedSemester === semesterKey;
+          const label =
+            semesterKey === AVERAGE_SEMESTER_KEY
+              ? labels.average
+              : `${labels.semester} ${index + 1}`;
+          return (
+            <TouchableOpacity
+              key={semesterKey}
+              style={styles.filterTab}
+              onPress={() => setSelectedSemester(semesterKey)}
+              activeOpacity={0.86}
+            >
+              <Text style={[styles.filterText, active && styles.filterTextActive]}>{label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {isQuarterBasedSemester && (
+        <>
+          <Text style={styles.quarterSectionTitle}>{labels.quarter}</Text>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.quarterRow}
+          >
+            {visibleQuarterKeys.map((q) => {
+              const active = effectiveQuarter === q;
               return (
                 <TouchableOpacity
-                  key={semesterKey}
-                  style={styles.filterTab}
-                  onPress={() => setSelectedSemester(semesterKey)}
-                  activeOpacity={0.86}
+                  key={q}
+                  style={[styles.quarterCard, active && styles.quarterCardActive]}
+                  onPress={() => setSelectedQuarter(q)}
+                  activeOpacity={0.88}
                 >
-                  <Text style={[styles.filterText, active && styles.filterTextActive]}>{label}</Text>
+                  <Text style={[styles.quarterTitle, active && styles.quarterTitleActive]}>
+                    {prettifyQuarterLabel(q, labels)}
+                  </Text>
+                  <Text style={[styles.quarterSub, active && styles.quarterSubActive]}>
+                    {labels.viewMarks}
+                  </Text>
                 </TouchableOpacity>
               );
             })}
-          </View>
-        </View>
-
-        {isQuarterBasedSemester && (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: 16, marginBottom: 2 }]}>Quarter</Text>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.quarterRow}
-            >
-              {visibleQuarterKeys.map((q) => {
-                const active = effectiveQuarter === q;
-                return (
-                  <TouchableOpacity
-                    key={q}
-                    style={[styles.quarterCard, active && styles.quarterCardActive]}
-                    onPress={() => setSelectedQuarter(q)}
-                    activeOpacity={0.88}
-                  >
-                    <Text style={[styles.quarterTitle, active && styles.quarterTitleActive]}>
-                      {prettifyQuarterLabel(q)}
-                    </Text>
-                    <Text style={[styles.quarterSub, active && styles.quarterSubActive]}>
-                      View marks
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </>
-        )}
-      </View>
+          </ScrollView>
+        </>
+      )}
     </View>
   );
 
@@ -910,7 +1016,7 @@ export default function ClassMark() {
       >
         {showList && children.length > 1 && (
           <View style={[styles.card, { marginTop: 8 }]}>
-            <Text style={styles.sectionTitle}>Choose Child</Text>
+            <Text style={styles.sectionTitle}>{labels.chooseChild}</Text>
             <View style={{ marginTop: 8 }}>
               {children.map((c, i) => {
                 const active = i === currentIndex;
@@ -922,7 +1028,7 @@ export default function ClassMark() {
                     activeOpacity={0.85}
                   >
                     <Text style={[styles.childName, active && { color: PALETTE.accent }]}>
-                      {c.name || `Child ${i + 1}`}
+                      {c.name || `${labels.child} ${i + 1}`}
                     </Text>
                     {active && <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} />}
                   </TouchableOpacity>
@@ -933,12 +1039,6 @@ export default function ClassMark() {
         )}
 
         {courses.map((course) => {
-          const quarterMarks = getMarksNodeForSelection(
-            marksByCourse?.[course.courseId],
-            selectedSemester,
-            effectiveQuarter
-          );
-
           const selectedAssessments = getAssessmentItemsForSelection(
             marksByCourse?.[course.courseId],
             selectedSemester,
@@ -970,7 +1070,7 @@ export default function ClassMark() {
                 <View style={styles.courseHead}>
                   <View style={{ flex: 1, paddingRight: 10 }}>
                     <Text style={styles.courseName}>{course.name}</Text>
-                    <Text style={styles.teacher}>Teacher: {course.teacherName}</Text>
+                    <Text style={styles.teacher}>{labels.teacher}: {course.teacherName}</Text>
                   </View>
 
                   <View style={styles.courseMeta}>
@@ -989,7 +1089,7 @@ export default function ClassMark() {
                   ))}
 
                   <View style={styles.assessTotalRow}>
-                    <Text style={styles.assessTotalLabel}>Total</Text>
+                    <Text style={styles.assessTotalLabel}>{labels.total}</Text>
                     <Text style={styles.assessTotalValue}>{totalScore}/{totalMax}</Text>
                   </View>
                 </View>
@@ -1000,14 +1100,14 @@ export default function ClassMark() {
 
         {!courses.length && (
           <View style={[styles.card, { marginTop: 8 }]}>
-            <Text style={styles.sectionTitle}>Marks</Text>
-            <Text style={styles.subText}>No courses or marks found for this child yet.</Text>
+            <Text style={styles.sectionTitle}>{labels.marks}</Text>
+            <Text style={styles.subText}>{labels.noCourses}</Text>
           </View>
         )}
 
         {refreshingBg && !refreshing && (
           <View style={{ marginTop: 8, alignItems: "center" }}>
-            <Text style={{ fontSize: 12, color: PALETTE.muted }}>Refreshing latest marks…</Text>
+            <Text style={{ fontSize: 12, color: PALETTE.muted }}>{labels.refreshing}</Text>
           </View>
         )}
       </ScrollView>
@@ -1099,24 +1199,11 @@ const createStyles = (PALETTE) => StyleSheet.create({
   },
   sectionTitle: { fontSize: 14, color: PALETTE.text, fontWeight: "800" },
 
-  academicTermCard: {
-    width: "92%",
-    alignSelf: "center",
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: "transparent",
-  },
-
-  stickyHeaderShell: {
-    marginTop: 2,
+  stickyTabsWrap: {
     backgroundColor: PALETTE.background,
     paddingTop: 2,
     paddingBottom: 4,
     zIndex: 5,
-  },
-
-  stickyTabsWrap: {
-    marginTop: 0,
   },
   filterTabs: {
     flexDirection: "row",
@@ -1156,6 +1243,13 @@ const createStyles = (PALETTE) => StyleSheet.create({
     marginTop: 10,
     paddingRight: 4,
     gap: 10,
+  },
+  quarterSectionTitle: {
+    marginTop: 16,
+    marginBottom: 2,
+    fontSize: 14,
+    color: PALETTE.text,
+    fontWeight: "800",
   },
   quarterCard: {
     minWidth: 124,

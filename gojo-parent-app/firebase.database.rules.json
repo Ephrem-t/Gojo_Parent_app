@@ -1,0 +1,27 @@
+{
+  "rules": {
+    "Platform1": {
+      "Schools": {
+        "$schoolKey": {
+          "Users": {
+            ".indexOn": ["username", "userId"]
+          },
+          "Posts": {
+            ".indexOn": ["time"]
+          },
+          "Chats": {
+            ".indexOn": ["lastMessage/timeStamp"]
+          },
+          "ChatSummaries": {
+            "$userId": {
+              ".indexOn": ["updatedAt", "lastTime", "unread"]
+            }
+          }
+        }
+      }
+    },
+    "Users": {
+      ".indexOn": ["username", "userId"]
+    }
+  }
+}

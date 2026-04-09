@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Linking,
   Modal,
   Platform,
@@ -21,7 +20,11 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { child, get, push, ref, set } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AppImage from "../components/ui/AppImage";
 import { useParentTheme } from "../hooks/use-parent-theme";
+import { readCachedJsonRecord, writeCachedJson } from "./lib/dataCache";
+import { isInternetReachableNow } from "./lib/networkGuard";
+import { resolveUserIdentity } from "./lib/userHelpers";
 
 const makePalette = (colors, isDark) => ({
   background: colors.background,
@@ -70,28 +73,339 @@ const makePalette = (colors, isDark) => ({
 });
 
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+const USER_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000;
 const WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
 const MINI_AVATAR = 18;
+
+function getUserProfileCacheKey(schoolKey, recordId, userId) {
+  return `cache:userProfile:${String(schoolKey || "root")}:${String(recordId || "none")}:${String(userId || "none")}`;
+}
 
 function getPeriodOrder(periodName) {
   const match = String(periodName || "").match(/\d+/);
   return match ? Number(match[0]) : Number.MAX_SAFE_INTEGER;
 }
 
+function normalizeIdentityValue(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function findTeacherMapKey(teacherMap, { teacherId, userId, name }) {
+  const normalizedTeacherId = String(teacherId ?? "").trim();
+  const normalizedUserId = String(userId ?? "").trim();
+  const normalizedName = normalizeIdentityValue(name);
+
+  return Object.keys(teacherMap).find((candidateKey) => {
+    const teacher = teacherMap[candidateKey] || {};
+    return (
+      (normalizedTeacherId && String(teacher.teacherId ?? "").trim() === normalizedTeacherId) ||
+      (normalizedUserId && String(teacher.userId ?? "").trim() === normalizedUserId) ||
+      (normalizedName && normalizeIdentityValue(teacher.name) === normalizedName)
+    );
+  }) || null;
+}
+
+function dedupeTeacherRows(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+
+  const mergedTeachers = new Map();
+
+  rows.forEach((teacher) => {
+    if (!teacher || typeof teacher !== "object") return;
+
+    const mergeKey =
+      String(teacher.userId || "").trim() ||
+      String(teacher.teacherId || "").trim() ||
+      normalizeIdentityValue(teacher.name) ||
+      JSON.stringify(teacher);
+
+    const existingTeacher = mergedTeachers.get(mergeKey);
+    const nextSubjects = Array.from(
+      new Set([
+        ...(Array.isArray(existingTeacher?.subjects) ? existingTeacher.subjects : []),
+        ...(Array.isArray(teacher.subjects) ? teacher.subjects : []),
+      ].filter(Boolean))
+    );
+
+    mergedTeachers.set(mergeKey, {
+      ...(existingTeacher || {}),
+      ...teacher,
+      teacherId: teacher.teacherId || existingTeacher?.teacherId || null,
+      userId: teacher.userId || existingTeacher?.userId || null,
+      name: teacher.name || existingTeacher?.name || "Teacher",
+      profileImage: teacher.profileImage || existingTeacher?.profileImage || defaultProfile,
+      subjects: nextSubjects,
+    });
+  });
+
+  return Array.from(mergedTeachers.values());
+}
+
 function useUserProfileThemeConfig() {
-  const { colors, isDark, statusBarStyle } = useParentTheme();
+  const { colors, isDark, statusBarStyle, amharic, oromo } = useParentTheme();
 
   const PALETTE = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
   const styles = useMemo(() => createStyles(PALETTE), [PALETTE]);
 
-  return { PALETTE, styles, statusBarStyle };
+  return { PALETTE, styles, statusBarStyle, amharic, oromo };
+}
+
+function getDayLabel(day, labels) {
+  return labels.dayLabels[day] || day;
+}
+
+function getUserProfileLabels(amharic, oromo) {
+  if (oromo) {
+    return {
+      ...getUserProfileLabels(false, false),
+      main: "Ijo",
+      info: "Odeeffannoo",
+      share: "Qoodi",
+      reportUser: "Fayyadamaa gabaasi",
+      profileFallback: "Profaayilii",
+      userFallback: "Fayyadamaa",
+      selfProfile: "Kun profaayilii kee dha",
+      studentProfile: "Profaayilii Barataa",
+      parentProfile: "Profaayilii Maatii",
+      schoolManagement: "Bulchiinsa Mana Barumsaa",
+      schoolProfile: "Profaayilii Mana Barumsaa",
+      notAllowed: "Hin eeyyamamu",
+      cannotMessageYourself: "Ofiif ergaa erguu hin dandeessu.",
+      chatUnavailable: "Chat hin argamu",
+      noPhoneTitle: "Lakkoofsi bilbilaa hin jiru",
+      noPhoneBody: "Lakkoofsi bilbilaa hin argamu.",
+      profileInfo: "Odeeffannoo Profaayilii",
+      name: "Maqaa",
+      username: "Maqaa fayyadamaa",
+      role: "Gahee hojii",
+      summary: "Cuunfaa",
+      classLabel: "Kutaa",
+      phone: "Bilbila",
+      email: "Imeelii",
+      loadingProfile: "Profaayilii fe'aa jira...",
+      profileUnavailable: "Profaayiliin hin argamne",
+      profileUnavailableBody: "Profaayilii kana fe'uu hin dandeenye.",
+      backToDashboard: "Gara daashboordii deebi'i",
+      classSchedule: "Sagantaa Kutaa",
+      grade: "Kutaa",
+      section: "Kutaa xiqqaa",
+      todayPill: "Har'a",
+      freePeriod: "Yeroo Bilisaa",
+      unassigned: "Hin ramadamne",
+      noPeriodsScheduled: "Yeroon hin qabamne.",
+      noClassesScheduledToday: "Har'a kutaan hin qabamne",
+    };
+  }
+
+  if (amharic) {
+    return {
+      roleLabels: {
+        Student: "ተማሪ",
+        Teacher: "መምህር",
+        Parent: "ወላጅ",
+        Admin: "አስተዳደር",
+        Profile: "መገለጫ",
+      },
+      dayLabels: {
+        Monday: "ሰኞ",
+        Tuesday: "ማክሰኞ",
+        Wednesday: "ረቡዕ",
+        Thursday: "ሐሙስ",
+        Friday: "ዓርብ",
+      },
+      main: "ዋና",
+      info: "መረጃ",
+      share: "አጋራ",
+      reportUser: "ተጠቃሚውን ሪፖርት አድርግ",
+      profileFallback: "መገለጫ",
+      userFallback: "ተጠቃሚ",
+      selfProfile: "ይህ የእርስዎ መገለጫ ነው",
+      studentProfile: "የተማሪ መገለጫ",
+      parentProfile: "የወላጅ መገለጫ",
+      schoolManagement: "የትምህርት ቤት አስተዳደር",
+      schoolProfile: "የትምህርት ቤት መገለጫ",
+      teacherSuffix: "መምህር",
+      notAllowed: "አይፈቀድም",
+      cannotMessageYourself: "ራስዎን መልዕክት መላክ አይችሉም።",
+      chatUnavailable: "ውይይት አይገኝም",
+      noChatAvailable: (name) => `${name || "ይህ ተጠቃሚ"} ጋር ውይይት አይገኝም።`,
+      noPhoneTitle: "ስልክ ቁጥር የለም",
+      noPhoneBody: "ምንም ስልክ ቁጥር አይገኝም።",
+      sharingFailed: "ማጋራት አልተሳካም",
+      shareFailedBody: "ይህን መገለጫ ማጋራት አልተቻለም።",
+      shareMessage: (name, link) => `የ${name || "ይህ ተጠቃሚ"} መገለጫ ይመልከቱ\n${link}`,
+      reportedTitle: "ሪፖርት ተደርጓል",
+      reportedBody: "ይህን ተጠቃሚ እንመለከታለን።",
+      reportFailedTitle: "ስህተት",
+      reportFailedBody: "ሪፖርቱን መላክ አልተቻለም።",
+      contactCountText: (count) => `${count} ${count === 1 ? "ግንኙነት" : "ግንኙነቶች"}`,
+      subjectCountText: (count) => `${count} ${count === 1 ? "ትምህርት" : "ትምህርቶች"}`,
+      classCountText: (count) => `${count} ክፍል${count === 1 ? "" : "ች"}`,
+      assigned: "ተመድቧል",
+      reachable: "ሊደረስበት ይችላል",
+      school: "ትምህርት ቤት",
+      sendMessage: "መልዕክት ላክ",
+      callUser: "ተጠቃሚውን ይደውሉ",
+      shareProfile: "መገለጫ አጋራ",
+      startChatWith: (name) => `${name || "ይህ ተጠቃሚ"} ጋር ውይይት ይጀምሩ`,
+      reachByPhone: "ይህን መገለጫ በስልክ ያግኙ",
+      sendLink: "የዚህን መገለጫ አገናኝ ያጋሩ",
+      sendReviewRequest: "ለዚህ መገለጫ የግምገማ ጥያቄ ይላኩ",
+      todayAtSchool: "ዛሬ በትምህርት ቤት",
+      schedule: "መርሃ ግብር",
+      parents: "ወላጆች",
+      teachers: "መምህራን",
+      account: "መለያ",
+      subjects: "ትምህርቶች",
+      relation: "ግንኙነት",
+      noLinkedParents: "የተገናኙ ወላጆች አልተገኙም።",
+      noAssignedTeachers: "የተመደቡ መምህራን አልተገኙም።",
+      noAssignedSubjects: "የተመደቡ ትምህርቶች አልተገኙም።",
+      profileInfo: "የመገለጫ መረጃ",
+      name: "ስም",
+      username: "የተጠቃሚ ስም",
+      role: "ሚና",
+      summary: "ማጠቃለያ",
+      classLabel: "ክፍል",
+      assignedSubjects: "የተመደቡ ትምህርቶች",
+      phone: "ስልክ",
+      email: "ኢሜይል",
+      classOverview: "የክፍል አጠቃላይ እይታ",
+      todayLabel: "ዛሬ",
+      plannedPeriods: "የታቀዱ ክፍለ ጊዜዎች",
+      classes: "ክፍሎች",
+      freePeriods: "ነጻ ጊዜዎች",
+      teachingOverview: "የማስተማር አጠቃላይ እይታ",
+      firstSubject: "የመጀመሪያ ትምህርት",
+      primaryClass: "ዋና ክፍል",
+      actions: "እርምጃዎች",
+      loadingProfile: "መገለጫ በመጫን ላይ...",
+      profileUnavailable: "መገለጫው አልተገኘም",
+      profileUnavailableBody: "ይህን መገለጫ መጫን አልቻልንም።",
+      backToDashboard: "ወደ ዳሽቦርድ ተመለስ",
+      classSchedule: "የክፍል መርሃ ግብር",
+      grade: "ክፍል",
+      section: "ክፍለ ክፍል",
+      todayPill: "ዛሬ",
+      freePeriod: "ነጻ ጊዜ",
+      unassigned: "አልተመደበም",
+      noPeriodsScheduled: "ምንም ክፍለ ጊዜ አልተያዘም።",
+      tapToViewDay: "ይህን ቀን ለማየት ይጫኑ",
+      tapToViewPeriods: (count) => `${count} ክፍለ ጊዜ${count === 1 ? "" : "ዎች"} ለማየት ይጫኑ`,
+      noClassesScheduledToday: "ዛሬ ምንም ክፍሎች አልተያዙም",
+      noClassesScheduledOn: (day) => `${day} ምንም ክፍሎች አልተያዙም`,
+      scheduledToday: (count) => `${count} ክፍለ ጊዜ${count === 1 ? "" : "ዎች"} ዛሬ`,
+      scheduledOn: (count, day) => `${count} ክፍለ ጊዜ${count === 1 ? "" : "ዎች"} በ${day}`,
+    };
+  }
+
+  return {
+    roleLabels: {
+      Student: "Student",
+      Teacher: "Teacher",
+      Parent: "Parent",
+      Admin: "Admin",
+      Profile: "Profile",
+    },
+    dayLabels: {
+      Monday: "Monday",
+      Tuesday: "Tuesday",
+      Wednesday: "Wednesday",
+      Thursday: "Thursday",
+      Friday: "Friday",
+    },
+    main: "Main",
+    info: "Info",
+    share: "Share",
+    reportUser: "Report User",
+    profileFallback: "Profile",
+    userFallback: "User",
+    selfProfile: "This is your profile",
+    studentProfile: "Student Profile",
+    parentProfile: "Parent Profile",
+    schoolManagement: "School Management",
+    schoolProfile: "School Profile",
+    teacherSuffix: "Teacher",
+    notAllowed: "Not allowed",
+    cannotMessageYourself: "You cannot message yourself.",
+    chatUnavailable: "Chat unavailable",
+    noChatAvailable: (name) => `No chat available for ${name || "this user"}.`,
+    noPhoneTitle: "No phone number",
+    noPhoneBody: "No phone number available.",
+    sharingFailed: "Sharing failed",
+    shareFailedBody: "Unable to share this profile.",
+    shareMessage: (name, link) => `View ${name || "this user"}'s profile\n${link}`,
+    reportedTitle: "Reported",
+    reportedBody: "Reported. We will review this user.",
+    reportFailedTitle: "Error",
+    reportFailedBody: "Could not submit the report.",
+    contactCountText: (count) => `${count} ${count === 1 ? "Contact" : "Contacts"}`,
+    subjectCountText: (count) => `${count} ${count === 1 ? "Subject" : "Subjects"}`,
+    classCountText: (count) => `${count} ${count === 1 ? "class" : "classes"}`,
+    assigned: "assigned",
+    reachable: "Reachable",
+    school: "School",
+    sendMessage: "Send Message",
+    callUser: "Call User",
+    shareProfile: "Share Profile",
+    startChatWith: (name) => `Start a chat with ${name || "this user"}`,
+    reachByPhone: "Reach this profile by phone",
+    sendLink: "Send a link to this profile",
+    sendReviewRequest: "Send a review request for this profile",
+    todayAtSchool: "Today at school",
+    schedule: "Schedule",
+    parents: "Parents",
+    teachers: "Teachers",
+    account: "Account",
+    subjects: "Subjects",
+    relation: "Relation",
+    noLinkedParents: "No linked parents found.",
+    noAssignedTeachers: "No assigned teachers found.",
+    noAssignedSubjects: "No assigned subjects found.",
+    profileInfo: "Profile info",
+    name: "Name",
+    username: "Username",
+    role: "Role",
+    summary: "Summary",
+    classLabel: "Class",
+    assignedSubjects: "Assigned subjects",
+    phone: "Phone",
+    email: "Email",
+    classOverview: "Class overview",
+    todayLabel: "Today",
+    plannedPeriods: "Planned periods",
+    classes: "Classes",
+    freePeriods: "Free periods",
+    teachingOverview: "Teaching overview",
+    firstSubject: "First subject",
+    primaryClass: "Primary class",
+    actions: "Actions",
+    loadingProfile: "Loading profile...",
+    profileUnavailable: "Profile unavailable",
+    profileUnavailableBody: "We could not load this profile.",
+    backToDashboard: "Back to dashboard",
+    classSchedule: "Class Schedule",
+    grade: "Grade",
+    section: "Section",
+    todayPill: "Today",
+    freePeriod: "Free Period",
+    unassigned: "Unassigned",
+    noPeriodsScheduled: "No periods scheduled.",
+    tapToViewDay: "Tap to view this day",
+    tapToViewPeriods: (count) => `Tap to view ${count} period${count === 1 ? "" : "s"}`,
+    noClassesScheduledToday: "No classes scheduled today",
+    noClassesScheduledOn: (day) => `No classes scheduled on ${day}`,
+    scheduledToday: (count) => `${count} period${count === 1 ? "" : "s"} today`,
+    scheduledOn: (count, day) => `${count} period${count === 1 ? "" : "s"} on ${day}`,
+  };
 }
 
 export default function UserProfile() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const { PALETTE, styles, statusBarStyle } = useUserProfileThemeConfig();
+  const { PALETTE, styles, statusBarStyle, amharic, oromo } = useUserProfileThemeConfig();
+  const labels = useMemo(() => getUserProfileLabels(amharic, oromo), [amharic, oromo]);
 
   const { recordId: paramRecordId, userId: paramUserId, roleName: paramRoleName } = params ?? {};
 
@@ -123,6 +437,24 @@ export default function UserProfile() {
     [schoolKey]
   );
 
+  const applyCachedProfile = useCallback((cachedProfile) => {
+    if (!cachedProfile || typeof cachedProfile !== "object") return;
+
+    setUser(cachedProfile.user || null);
+    setRoleName(cachedProfile.roleName || paramRoleName || null);
+    setResolvedUserId(cachedProfile.resolvedUserId || null);
+    setParents(Array.isArray(cachedProfile.parents) ? cachedProfile.parents : []);
+    setTeachers(dedupeTeacherRows(Array.isArray(cachedProfile.teachers) ? cachedProfile.teachers : []));
+    setTeacherCourses(Array.isArray(cachedProfile.teacherCourses) ? cachedProfile.teacherCourses : []);
+    setStudentWeeklySchedule(
+      cachedProfile.studentWeeklySchedule && typeof cachedProfile.studentWeeklySchedule === "object"
+        ? cachedProfile.studentWeeklySchedule
+        : {}
+    );
+    setStudentGradeSection(cachedProfile.studentGradeSection || null);
+    setSelectedScheduleDay(cachedProfile.selectedScheduleDay || null);
+  }, [paramRoleName]);
+
   useEffect(() => {
     (async () => {
       const [sk, parentId] = await Promise.all([
@@ -147,19 +479,62 @@ export default function UserProfile() {
     let mounted = true;
 
     const load = async () => {
-      setLoading(true);
+      const cacheKey = getUserProfileCacheKey(schoolKey, paramRecordId, paramUserId);
+      const cachedProfileRecord = await readCachedJsonRecord(cacheKey);
+      const cachedProfile = cachedProfileRecord?.value || null;
+      const cacheFresh = cachedProfileRecord
+        ? Date.now() - cachedProfileRecord.savedAt <= USER_PROFILE_CACHE_TTL_MS
+        : false;
+
+      if (cachedProfile && mounted) {
+        applyCachedProfile(cachedProfile);
+        setLoading(false);
+
+        if (cacheFresh) {
+          return;
+        }
+      } else {
+        setLoading(true);
+      }
+
+      const onlineNow = await isInternetReachableNow();
+      if (!onlineNow) {
+        if (mounted) setLoading(false);
+        return;
+      }
+
       try {
         let localResolvedUserId = paramUserId ?? null;
         const rId = paramRecordId ?? null;
-        let detectedRole = roleName;
+        let detectedRole = paramRoleName ?? null;
+        let resolvedUser = null;
+        let nextUser = null;
+        let nextParents = [];
+        let nextTeachers = [];
+        let nextTeacherCourses = [];
+        let nextStudentWeeklySchedule = {};
+        let nextStudentGradeSection = null;
+        let nextSelectedScheduleDay = null;
 
         if (!localResolvedUserId && rId) {
-          const roleNodes = ["Students", "Teachers", "School_Admins", "Parents"];
+          const resolvedRecordIdentity = await resolveUserIdentity(rId, schoolKey);
+          if (resolvedRecordIdentity) {
+            localResolvedUserId = resolvedRecordIdentity._nodeKey || resolvedRecordIdentity.userId || null;
+            resolvedUser = resolvedRecordIdentity;
+            detectedRole = detectedRole || resolvedRecordIdentity.role || detectedRole;
+            if (detectedRole) setRoleName(detectedRole);
+          }
+        }
+
+        if (rId && !resolvedUser) {
+          const roleNodes = ["Students", "Teachers", "School_Admins", "Registerers", "Finances", "HR", "Parents"];
           for (const node of roleNodes) {
             const snap = await get(child(ref(database), `${schoolAwarePath(node)}/${rId}`));
             if (snap.exists()) {
               const row = snap.val() || {};
-              localResolvedUserId = row.userId || null;
+              if (!localResolvedUserId) {
+                localResolvedUserId = row.userId || null;
+              }
               detectedRole =
                 node === "Students"
                   ? "Student"
@@ -174,15 +549,19 @@ export default function UserProfile() {
           }
         }
 
+        if (!resolvedUser && localResolvedUserId) {
+          const resolvedIdentity = await resolveUserIdentity(localResolvedUserId, schoolKey);
+          if (resolvedIdentity) {
+            localResolvedUserId = resolvedIdentity._nodeKey || localResolvedUserId;
+            resolvedUser = resolvedIdentity;
+          }
+        }
+
         if (mounted) setResolvedUserId(localResolvedUserId || null);
 
         const usersSnap = await get(child(ref(database), schoolAwarePath("Users")));
         const usersData = usersSnap.exists() ? usersSnap.val() : {};
-
-        if (localResolvedUserId) {
-          const userSnap = await get(child(ref(database), `${schoolAwarePath("Users")}/${localResolvedUserId}`));
-          if (mounted) setUser(userSnap.exists() ? userSnap.val() : null);
-        }
+        nextUser = localResolvedUserId ? resolvedUser || usersData[localResolvedUserId] || null : resolvedUser || null;
 
         if (rId && detectedRole === "Student") {
           // fetch student, teachers node, schedules and grade management
@@ -202,7 +581,7 @@ export default function UserProfile() {
             const grade = student?.grade;
             const section = student?.section;
             const gradeSectionKey = `Grade ${grade}${section || ""}`;
-            setStudentGradeSection({ grade, section, key: gradeSectionKey });
+            nextStudentGradeSection = { grade, section, key: gradeSectionKey };
 
             // Parents resolution (unchanged)
             let parentRows = [];
@@ -261,9 +640,18 @@ export default function UserProfile() {
                     );
                   }) || null;
 
-                const teacherId = teacherEntry?.teacherId || period.teacherName;
-                if (!teacherMap[teacherId]) {
-                  teacherMap[teacherId] = {
+                const teacherMapKey =
+                  findTeacherMapKey(teacherMap, {
+                    teacherId: teacherEntry?.teacherId || null,
+                    userId: teacherEntry?.userId || null,
+                    name: period.teacherName,
+                  }) ||
+                  teacherEntry?.teacherId ||
+                  teacherEntry?.userId ||
+                  String(period.teacherName || "").trim();
+
+                if (!teacherMap[teacherMapKey]) {
+                  teacherMap[teacherMapKey] = {
                     teacherId: teacherEntry?.teacherId || null,
                     userId: teacherEntry?.userId || null,
                     name: period.teacherName || "Teacher",
@@ -275,7 +663,7 @@ export default function UserProfile() {
                 }
 
                 if (period?.subject && period.subject !== "Free Period") {
-                  teacherMap[teacherId].subjects.add(period.subject);
+                  teacherMap[teacherMapKey].subjects.add(period.subject);
                 }
               });
             });
@@ -303,14 +691,23 @@ export default function UserProfile() {
                       null;
                   }
 
-                  const mapKey = teacherNode?.teacherId || assignedTeacherId;
                   const teacherUser = teacherNode ? usersData[teacherNode.userId] || {} : {};
+                  const teacherName = teacherUser?.name || assignment?.teacherName || assignedTeacherId || "Teacher";
+                  const mapKey =
+                    findTeacherMapKey(teacherMap, {
+                      teacherId: teacherNode?.teacherId || assignedTeacherId,
+                      userId: teacherNode?.userId || null,
+                      name: teacherName,
+                    }) ||
+                    teacherNode?.teacherId ||
+                    teacherNode?.userId ||
+                    assignedTeacherId;
 
                   if (!teacherMap[mapKey]) {
                     teacherMap[mapKey] = {
-                      teacherId: teacherNode?.teacherId || null,
+                      teacherId: teacherNode?.teacherId || assignedTeacherId || null,
                       userId: teacherNode?.userId || null,
-                      name: teacherUser?.name || assignment?.teacherName || assignedTeacherId || "Teacher",
+                      name: teacherName,
                       profileImage: teacherUser?.profileImage || defaultProfile,
                       subjects: new Set(),
                     };
@@ -352,12 +749,10 @@ export default function UserProfile() {
             const todayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
             const defaultDay = WEEK_DAYS.includes(todayName) ? todayName : "Monday";
 
-            if (mounted) {
-              setParents(parentRows);
-              setTeachers(teacherRows);
-              setStudentWeeklySchedule(weekly);
-              setSelectedScheduleDay(defaultDay);
-            }
+            nextParents = parentRows;
+            nextTeachers = dedupeTeacherRows(teacherRows);
+            nextStudentWeeklySchedule = weekly;
+            nextSelectedScheduleDay = defaultDay;
           }
         }
 
@@ -386,8 +781,34 @@ export default function UserProfile() {
             });
           });
 
-          if (mounted) setTeacherCourses(courseRows);
+          nextTeacherCourses = courseRows;
         }
+
+        if (mounted) {
+          setResolvedUserId(localResolvedUserId || null);
+          setRoleName(detectedRole || null);
+          setUser(nextUser || null);
+          setParents(nextParents);
+          setTeachers(dedupeTeacherRows(nextTeachers));
+          setTeacherCourses(nextTeacherCourses);
+          setStudentWeeklySchedule(nextStudentWeeklySchedule);
+          setStudentGradeSection(nextStudentGradeSection);
+          setSelectedScheduleDay(nextSelectedScheduleDay || null);
+        }
+
+        const cachedTeachers = dedupeTeacherRows(nextTeachers);
+        writeCachedJson(cacheKey, {
+          user: nextUser || null,
+          roleName: detectedRole || null,
+          resolvedUserId: localResolvedUserId || null,
+          parents: nextParents,
+          teachers: cachedTeachers,
+          teacherCourses: nextTeacherCourses,
+          studentWeeklySchedule: nextStudentWeeklySchedule,
+          studentGradeSection: nextStudentGradeSection,
+          selectedScheduleDay: nextSelectedScheduleDay,
+          fetchedAt: Date.now(),
+        }).catch(() => {});
       } catch (e) {
         console.warn("userProfile load error:", e);
       } finally {
@@ -399,7 +820,7 @@ export default function UserProfile() {
     return () => {
       mounted = false;
     };
-  }, [paramRecordId, paramUserId, roleName, schoolKey, schoolAwarePath]);
+  }, [applyCachedProfile, paramRecordId, paramRoleName, paramUserId, schoolKey, schoolAwarePath]);
 
   const isSelfProfile =
     !!parentUserId && !!resolvedUserId && String(parentUserId) === String(resolvedUserId);
@@ -484,7 +905,7 @@ export default function UserProfile() {
   }, [router]);
 
   const openChat = () => {
-    if (!canMessageMain) return Alert.alert("Not allowed", "You cannot message yourself.");
+    if (!canMessageMain) return Alert.alert(labels.notAllowed, labels.cannotMessageYourself);
     router.push({ pathname: "/chat", params: { userId: resolvedUserId } });
     console.log("Opening chat with userId:", resolvedUserId);
   };
@@ -492,31 +913,31 @@ export default function UserProfile() {
   const openChatWith = useCallback(
     (targetUserId, displayName) => {
       if (!targetUserId) {
-        return Alert.alert("Chat unavailable", `No chat available for ${displayName || "this user"}.`);
+        return Alert.alert(labels.chatUnavailable, labels.noChatAvailable(displayName || labels.userFallback));
       }
       if (parentUserId && String(targetUserId) === String(parentUserId)) {
-        return Alert.alert("Not allowed", "You cannot message yourself.");
+        return Alert.alert(labels.notAllowed, labels.cannotMessageYourself);
       }
       console.log("Opening chat with userId:", targetUserId);
 
       router.push({ pathname: "/chat", params: { userId: targetUserId } });
     },
-    [router, parentUserId]
+    [router, parentUserId, labels]
   );
 
   const handleCall = () => {
     const phone = user?.phone || "";
-    if (!phone) return Alert.alert("No phone number", "No phone number available.");
+    if (!phone) return Alert.alert(labels.noPhoneTitle, labels.noPhoneBody);
     Linking.openURL(`tel:${String(phone).trim()}`);
   };
 
   const handleShare = async () => {
     try {
-      const name = user?.name || "User";
+      const name = user?.name || labels.userFallback;
       const link = `https://gojo.app/userProfile?recordId=${paramRecordId ?? ""}&userId=${paramUserId ?? ""}`;
-      await Share.share({ message: `View ${name}'s profile\n${link}` });
+      await Share.share({ message: labels.shareMessage(name, link) });
     } catch {
-      Alert.alert("Sharing failed", "Unable to share this profile.");
+      Alert.alert(labels.sharingFailed, labels.shareFailedBody);
     }
   };
 
@@ -532,13 +953,13 @@ export default function UserProfile() {
         createdAt: Date.now(),
         status: "open",
       });
-      const msg = "Reported. We will review this user.";
+      const msg = labels.reportedBody;
       if (Platform.OS === "android") ToastAndroid.show(msg, ToastAndroid.SHORT);
-      else Alert.alert("Reported", msg);
+      else Alert.alert(labels.reportedTitle, msg);
     } catch {
-      const msg = "Could not submit the report.";
+      const msg = labels.reportFailedBody;
       if (Platform.OS === "android") ToastAndroid.show(msg, ToastAndroid.SHORT);
-      else Alert.alert("Error", msg);
+      else Alert.alert(labels.reportFailedTitle, msg);
     }
   };
 
@@ -546,27 +967,6 @@ export default function UserProfile() {
     if (!user?.username) return null;
     return String(user.username).startsWith("@") ? String(user.username) : `@${user.username}`;
   }, [user?.username]);
-
-  const heroQuickStat = useMemo(() => {
-    if (roleName === "Student") {
-      const contactCount = parents.length + teachers.length;
-      return `${contactCount} ${contactCount === 1 ? "Contact" : "Contacts"}`;
-    }
-    if (roleName === "Teacher") {
-      const subjectCount = teacherCourses.length;
-      return `${subjectCount} ${subjectCount === 1 ? "Subject" : "Subjects"}`;
-    }
-    if (roleName === "Parent") return "Parent";
-    if (roleName === "Admin") return "Admin";
-    return "Profile";
-  }, [parents.length, roleName, teacherCourses.length, teachers.length]);
-
-  const heroQuickStatIcon = useMemo(() => {
-    if (roleName === "Student") return "people-outline";
-    if (roleName === "Teacher") return "book-outline";
-    if (roleName === "Parent") return "person-outline";
-    return "briefcase-outline";
-  }, [roleName]);
 
   const heroRoleIcon = useMemo(() => {
     if (roleName === "Student") return "school-outline";
@@ -577,19 +977,19 @@ export default function UserProfile() {
 
   const heroSecondaryMeta = useMemo(() => {
     if (roleName === "Student" && studentGradeSection?.grade) {
-      return `Grade ${studentGradeSection.grade}${studentGradeSection.section || ""}`;
+      return `${labels.grade} ${studentGradeSection.grade}${studentGradeSection.section || ""}`;
     }
     if (roleName === "Teacher") {
-      return teacherCourses.length ? `${teacherCourses.length} assigned` : "Teacher";
+      return teacherCourses.length ? `${labels.subjectCountText(teacherCourses.length)} ${labels.assigned}` : labels.roleLabels.Teacher;
     }
     if (roleName === "Parent") {
-      return user?.phone ? "Reachable" : "Profile";
+      return user?.phone ? labels.reachable : labels.profileFallback;
     }
     if (roleName === "Admin") {
-      return "School";
+      return labels.school;
     }
     return null;
-  }, [roleName, studentGradeSection, teacherCourses.length, user?.phone]);
+  }, [roleName, studentGradeSection, teacherCourses.length, user?.phone, labels]);
 
   const heroSecondaryIcon = useMemo(() => {
     if (roleName === "Student") return "layers-outline";
@@ -598,54 +998,15 @@ export default function UserProfile() {
     return "sparkles-outline";
   }, [roleName]);
 
-  const primaryActionLabel = canMessageMain ? "Send Message" : user?.phone ? "Call User" : "Share Profile";
+  const primaryActionLabel = canMessageMain ? labels.sendMessage : user?.phone ? labels.callUser : labels.shareProfile;
   const handlePrimaryAction = canMessageMain ? openChat : user?.phone ? handleCall : handleShare;
-
-  const renderActionRows = (includeReport = false) => (
-    <>
-      {canMessageMain && (
-        <ActionRow
-          icon="chatbubble-ellipses-outline"
-          title="Send message"
-          subtitle={`Start a chat with ${user?.name || "this user"}`}
-          onPress={openChat}
-        />
-      )}
-
-      {!!user?.phone && (
-        <ActionRow
-          icon="call-outline"
-          title="Call user"
-          subtitle="Reach this profile by phone"
-          onPress={handleCall}
-        />
-      )}
-
-      <ActionRow
-        icon="share-social-outline"
-        title="Share profile"
-        subtitle="Send a link to this profile"
-        onPress={handleShare}
-      />
-
-      {includeReport && !isSelfProfile && (
-        <ActionRow
-          icon="flag-outline"
-          title="Report user"
-          subtitle="Send a review request for this profile"
-          onPress={handleReport}
-          destructive
-        />
-      )}
-    </>
-  );
 
   const renderMainSection = () => {
     if (roleName === "Student") {
       return (
         <>
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Today at school</Text>
+            <Text style={styles.sectionTitle}>{labels.todayAtSchool}</Text>
 
             <TouchableOpacity style={styles.scheduleCard} activeOpacity={0.9} onPress={openScheduleSheet}>
               <View style={styles.scheduleTop}>
@@ -653,7 +1014,7 @@ export default function UserProfile() {
                   <Ionicons name="time-outline" size={18} color={PALETTE.accent} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.scheduleTitle}>{previewScheduleDay} Schedule</Text>
+                  <Text style={styles.scheduleTitle}>{`${previewScheduleDay} ${labels.schedule}`}</Text>
                   <Text numberOfLines={1} style={styles.scheduleSub}>
                     {previewScheduleSubtitle}
                   </Text>
@@ -664,13 +1025,13 @@ export default function UserProfile() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Parents</Text>
+            <Text style={styles.sectionTitle}>{labels.parents}</Text>
             {parents.length ? (
               parents.map((parent) => (
                 <PersonRow
                   key={parent.parentId}
                   name={parent.name}
-                  subtitle={`Relation: ${parent.relationship}`}
+                  subtitle={`${labels.relation}: ${parent.relationship}`}
                   image={parent.profileImage}
                   onPress={() => {
                     if (parentRecordId && parent.parentId === parentRecordId) router.push("/dashboard/profile");
@@ -686,19 +1047,19 @@ export default function UserProfile() {
             ) : (
               <View style={styles.noteStateCard}>
                 <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
-                <Text style={styles.noteStateText}>No linked parents found.</Text>
+                <Text style={styles.noteStateText}>{labels.noLinkedParents}</Text>
               </View>
             )}
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Teachers</Text>
+            <Text style={styles.sectionTitle}>{labels.teachers}</Text>
             {teachers.length ? (
               teachers.map((teacher) => (
                 <PersonRow
-                  key={teacher.teacherId || teacher.name}
+                  key={teacher.userId || teacher.teacherId || `${teacher.name}-${teacher.subjects?.join("|") || "teacher"}`}
                   name={teacher.name}
-                  subtitle={teacher.subjects?.length ? teacher.subjects.join(", ") : "Teacher"}
+                  subtitle={teacher.subjects?.length ? teacher.subjects.join(", ") : labels.roleLabels.Teacher}
                   image={teacher.profileImage}
                   onPress={() =>
                     teacher.teacherId ? router.push(`/userProfile?recordId=${teacher.teacherId}`) : null
@@ -713,14 +1074,9 @@ export default function UserProfile() {
             ) : (
               <View style={styles.noteStateCard}>
                 <Ionicons name="school-outline" size={18} color={PALETTE.muted} />
-                <Text style={styles.noteStateText}>No assigned teachers found.</Text>
+                <Text style={styles.noteStateText}>{labels.noAssignedTeachers}</Text>
               </View>
             )}
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Account</Text>
-            {renderActionRows(false)}
           </View>
         </>
       );
@@ -730,86 +1086,73 @@ export default function UserProfile() {
       return (
         <>
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Subjects</Text>
+            <Text style={styles.sectionTitle}>{labels.subjects}</Text>
             {teacherCourses.length ? (
               teacherCourses.map((course) => (
                 <View key={course.courseId} style={styles.subjectRow}>
                   <Text style={styles.subjectName}>{course.subject}</Text>
-                  <Text style={styles.subjectMeta}>Grade {course.grade} • Section {course.section}</Text>
+                  <Text style={styles.subjectMeta}>{labels.grade} {course.grade} • {labels.section} {course.section}</Text>
                 </View>
               ))
             ) : (
               <View style={styles.noteStateCard}>
                 <Ionicons name="book-outline" size={18} color={PALETTE.muted} />
-                <Text style={styles.noteStateText}>No assigned subjects found.</Text>
+                <Text style={styles.noteStateText}>{labels.noAssignedSubjects}</Text>
               </View>
             )}
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Account</Text>
-            {renderActionRows(true)}
-          </View>
         </>
       );
     }
 
-    return (
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Account</Text>
-        {renderActionRows(true)}
-      </View>
-    );
+    return null;
   };
 
   const renderInfoSection = () => (
     <>
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Profile info</Text>
-        <InfoRow label="Name" value={user?.name} />
-        <InfoRow label="Username" value={usernameHandle} />
-        <InfoRow label="Role" value={roleName || "Profile"} />
-        <InfoRow label="Summary" value={profileSubtitle} />
-        {roleName === "Student" && <InfoRow label="Class" value={studentGradeSection?.key} />}
+        <Text style={styles.sectionTitle}>{labels.profileInfo}</Text>
+        <InfoRow label={labels.name} value={user?.name} />
+        <InfoRow label={labels.username} value={usernameHandle} />
+        <InfoRow label={labels.role} value={roleName || labels.profileFallback} />
+        <InfoRow label={labels.summary} value={profileSubtitle} />
+        {roleName === "Student" && <InfoRow label={labels.classLabel} value={studentGradeSection?.key} />}
         {roleName === "Teacher" && (
-          <InfoRow label="Assigned subjects" value={String(teacherCourses.length)} />
+          <InfoRow label={labels.assignedSubjects} value={String(teacherCourses.length)} />
         )}
-        <InfoRow label="Phone" value={user?.phone} />
-        <InfoRow label="Email" value={user?.email} />
+        <InfoRow label={labels.phone} value={user?.phone} />
+        <InfoRow label={labels.email} value={user?.email} />
       </View>
 
       {roleName === "Student" && (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Class overview</Text>
-          <InfoRow label="Today" value={selectedScheduleDay || "Monday"} />
-          <InfoRow label="Planned periods" value={String(selectedDaySummary.total)} />
-          <InfoRow label="Classes" value={String(selectedDaySummary.classCount)} />
-          <InfoRow label="Free periods" value={String(selectedDaySummary.freeCount)} />
-          <InfoRow label="Teachers" value={String(teachers.length)} />
-          <InfoRow label="Parents" value={String(parents.length)} />
+          <Text style={styles.sectionTitle}>{labels.classOverview}</Text>
+          <InfoRow label={labels.todayLabel} value={getDayLabel(selectedScheduleDay || "Monday", labels)} />
+          <InfoRow label={labels.plannedPeriods} value={String(selectedDaySummary.total)} />
+          <InfoRow label={labels.classes} value={String(selectedDaySummary.classCount)} />
+          <InfoRow label={labels.freePeriods} value={String(selectedDaySummary.freeCount)} />
+          <InfoRow label={labels.teachers} value={String(teachers.length)} />
+          <InfoRow label={labels.parents} value={String(parents.length)} />
         </View>
       )}
 
       {roleName === "Teacher" && (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Teaching overview</Text>
-          <InfoRow label="Assigned subjects" value={String(teacherCourses.length)} />
-          <InfoRow label="First subject" value={teacherCourses[0]?.subject} />
+          <Text style={styles.sectionTitle}>{labels.teachingOverview}</Text>
+          <InfoRow label={labels.assignedSubjects} value={String(teacherCourses.length)} />
+          <InfoRow label={labels.firstSubject} value={teacherCourses[0]?.subject} />
           <InfoRow
-            label="Primary class"
+            label={labels.primaryClass}
             value={
               teacherCourses[0]
-                ? `Grade ${teacherCourses[0].grade} • Section ${teacherCourses[0].section}`
+                ? `${labels.grade} ${teacherCourses[0].grade} • ${labels.section} ${teacherCourses[0].section}`
                 : null
             }
           />
         </View>
       )}
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Actions</Text>
-        {renderActionRows(true)}
-      </View>
     </>
   );
 
@@ -817,7 +1160,7 @@ export default function UserProfile() {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator size="large" color={PALETTE.accent} />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+        <Text style={styles.loadingText}>{labels.loadingProfile}</Text>
       </View>
     );
   }
@@ -826,10 +1169,10 @@ export default function UserProfile() {
     return (
       <View style={styles.loadingWrap}>
         <Ionicons name="person-circle-outline" size={56} color={PALETTE.offline} />
-        <Text style={styles.loadingTitle}>Profile unavailable</Text>
-        <Text style={styles.loadingText}>We could not load this profile.</Text>
+        <Text style={styles.loadingTitle}>{labels.profileUnavailable}</Text>
+        <Text style={styles.loadingText}>{labels.profileUnavailableBody}</Text>
         <TouchableOpacity style={styles.emptyBackBtn} onPress={handleBack} activeOpacity={0.88}>
-          <Text style={styles.emptyBackText}>Back to dashboard</Text>
+          <Text style={styles.emptyBackText}>{labels.backToDashboard}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -850,7 +1193,7 @@ export default function UserProfile() {
                 await handleShare();
               }}
             >
-              <Text style={styles.menuText}>Share</Text>
+              <Text style={styles.menuText}>{labels.share}</Text>
             </TouchableOpacity>
             {!isSelfProfile && (
               <TouchableOpacity
@@ -860,7 +1203,7 @@ export default function UserProfile() {
                   await handleReport();
                 }}
               >
-                <Text style={[styles.menuText, { color: "#F59E0B" }]}>Report User</Text>
+                <Text style={[styles.menuText, { color: "#F59E0B" }]}>{labels.reportUser}</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -882,10 +1225,6 @@ export default function UserProfile() {
               </TouchableOpacity>
 
               <View style={styles.heroTopActions}>
-                <View style={styles.heroQuickStats}>
-                  <MiniPill icon={heroQuickStatIcon} text={heroQuickStat} />
-                </View>
-
                 <TouchableOpacity style={styles.heroTopIconBtn} onPress={() => setShowMenu((value) => !value)}>
                   <Ionicons name="ellipsis-horizontal" size={18} color={PALETTE.white} />
                 </TouchableOpacity>
@@ -897,7 +1236,11 @@ export default function UserProfile() {
             <View style={styles.avatarWrap}>
               <View style={styles.photoCard}>
                 <View style={styles.photoCardImageClip}>
-                  <Image source={{ uri: user.profileImage || defaultProfile }} style={styles.photoCardImage} />
+                  <AppImage
+                    uri={user.profileImage || defaultProfile}
+                    fallbackSource={require("../assets/images/avatar_placeholder.png")}
+                    style={styles.photoCardImage}
+                  />
                 </View>
               </View>
             </View>
@@ -906,13 +1249,13 @@ export default function UserProfile() {
           <View style={styles.heroIdentityBlock}>
             <View style={styles.identityTopRow}>
               <Text style={styles.name} numberOfLines={1}>
-                {user.name || "Profile"}
+                {user.name || labels.profileFallback}
               </Text>
             </View>
 
             <View style={styles.subRow}>
               {!!usernameHandle && <Text style={styles.subText}>{usernameHandle}</Text>}
-              <MiniPill icon={heroRoleIcon} text={roleName || "Profile"} compact />
+              <MiniPill icon={heroRoleIcon} text={roleName || labels.profileFallback} compact />
               {!!heroSecondaryMeta && <MiniPill icon={heroSecondaryIcon} text={heroSecondaryMeta} compact />}
             </View>
 
@@ -935,7 +1278,7 @@ export default function UserProfile() {
                     profileSectionTab === "main" && styles.profileFilterTextActive,
                   ]}
                 >
-                  Main
+                  {labels.main}
                 </Text>
               </TouchableOpacity>
 
@@ -953,7 +1296,7 @@ export default function UserProfile() {
                     profileSectionTab === "info" && styles.profileFilterTextActive,
                   ]}
                 >
-                  Info
+                  {labels.info}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -986,9 +1329,9 @@ export default function UserProfile() {
 
             <View style={styles.sheetHeader}>
               <View style={styles.sheetHeaderInfo}>
-                <Text style={styles.sheetTitle}>Class Schedule</Text>
+                <Text style={styles.sheetTitle}>{labels.classSchedule}</Text>
                 <Text style={styles.sheetSub}>
-                  Grade {studentGradeSection?.grade || "--"} • Section {studentGradeSection?.section || "--"}
+                  {labels.grade} {studentGradeSection?.grade || "--"} • {labels.section} {studentGradeSection?.section || "--"}
                 </Text>
               </View>
 
@@ -1014,10 +1357,10 @@ export default function UserProfile() {
                         <View style={styles.dayHeaderIconWrap}>
                           <Ionicons name="calendar-clear-outline" size={14} color={PALETTE.accent} />
                         </View>
-                        <Text style={styles.daySectionTitle}>{day}</Text>
+                        <Text style={styles.daySectionTitle}>{getDayLabel(day, labels)}</Text>
                         {isToday ? (
                           <View style={styles.todayPill}>
-                            <Text style={styles.todayPillText}>Today</Text>
+                            <Text style={styles.todayPillText}>{labels.todayPill}</Text>
                           </View>
                         ) : null}
                       </View>
@@ -1025,7 +1368,7 @@ export default function UserProfile() {
                       <View style={styles.daySectionHeaderRight}>
                         <View style={styles.dayCountPill}>
                           <Text style={styles.dayCountPillText}>
-                            {entries.length} {entries.length === 1 ? "class" : "classes"}
+                            {labels.classCountText(entries.length)}
                           </Text>
                         </View>
                         <View style={[styles.dayChevronWrap, isExpanded && styles.dayChevronWrapActive]}>
@@ -1048,11 +1391,11 @@ export default function UserProfile() {
                               </View>
 
                               <View style={styles.periodContent}>
-                                <Text style={styles.periodSubject}>{item.subject || "Free Period"}</Text>
+                                <Text style={styles.periodSubject}>{item.subject === "Free Period" ? labels.freePeriod : item.subject || labels.freePeriod}</Text>
                                 <View style={styles.periodTeacherRow}>
                                   <Ionicons name="person-outline" size={12} color={PALETTE.muted} />
                                   <Text numberOfLines={1} ellipsizeMode="tail" style={styles.periodTeacher}>
-                                    {item.teacherName || "Unassigned"}
+                                    {item.teacherName === "Unassigned" ? labels.unassigned : item.teacherName || labels.unassigned}
                                   </Text>
                                 </View>
                               </View>
@@ -1064,13 +1407,13 @@ export default function UserProfile() {
                           ))}
                         </View>
                       ) : (
-                        <Text style={styles.dayEmptyText}>No periods scheduled.</Text>
+                        <Text style={styles.dayEmptyText}>{labels.noPeriodsScheduled}</Text>
                       )
                     ) : (
                       <Text style={styles.dayCollapsedHint}>
                         {entries.length
-                          ? `Tap to view ${entries.length} period${entries.length === 1 ? "" : "s"}`
-                          : "Tap to view this day"}
+                          ? labels.tapToViewPeriods(entries.length)
+                          : labels.tapToViewDay}
                       </Text>
                     )}
                   </View>
@@ -1095,23 +1438,6 @@ function MiniPill({ icon, text, compact = false }) {
   );
 }
 
-function ActionRow({ icon, title, subtitle, onPress, destructive = false }) {
-  const { PALETTE, styles } = useUserProfileThemeConfig();
-
-  return (
-    <TouchableOpacity style={styles.actionRow} onPress={onPress} activeOpacity={0.8}>
-      <View style={[styles.iconWrap, destructive ? styles.iconWrapDanger : null]}>
-        <Ionicons name={icon} size={18} color={destructive ? PALETTE.danger : PALETTE.accent} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.actionTitle, destructive ? styles.actionTitleDanger : null]}>{title}</Text>
-        <Text numberOfLines={1} style={styles.actionSub}>{subtitle}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
-    </TouchableOpacity>
-  );
-}
-
 function InfoRow({ label, value }) {
   const { styles } = useUserProfileThemeConfig();
 
@@ -1129,7 +1455,11 @@ function PersonRow({ name, subtitle, extra, image, onPress, onMessage }) {
 
   return (
     <TouchableOpacity style={styles.childCard} onPress={onPress} activeOpacity={0.88}>
-      <Image source={{ uri: image || defaultProfile }} style={styles.childImage} />
+      <AppImage
+        uri={image || defaultProfile}
+        fallbackSource={require("../assets/images/avatar_placeholder.png")}
+        style={styles.childImage}
+      />
       <View style={styles.childBody}>
         <Text style={styles.childName}>{name}</Text>
         {!!subtitle && <Text style={styles.childMeta}>{subtitle}</Text>}

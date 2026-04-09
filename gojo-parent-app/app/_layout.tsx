@@ -1,10 +1,12 @@
 import { Slot, usePathname, useRouter } from "expo-router";
+import { addNetworkStateListener } from "expo-network";
 import { off, onValue, ref } from "firebase/database";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Linking } from "react-native";
 import BlockedAccountModal from "../components/ui/BlockedAccountModal";
 import { database } from "../constants/firebaseConfig";
 import { ParentThemeProvider } from "../hooks/use-parent-theme";
+import { flushQueuedPostActions } from "./lib/postActionQueue";
 import {
   BLOCKED_ACCOUNT_MESSAGE,
   clearParentSession,
@@ -80,6 +82,23 @@ export default function RootLayout() {
       router.replace("/");
     }
   };
+
+  useEffect(() => {
+    void flushQueuedPostActions();
+
+    const subscription = addNetworkStateListener((state) => {
+      const online = Boolean(state.isConnected && state.isInternetReachable !== false);
+      if (online) {
+        void flushQueuedPostActions();
+      }
+    });
+
+    return () => {
+      if (subscription?.remove) {
+        subscription.remove();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;

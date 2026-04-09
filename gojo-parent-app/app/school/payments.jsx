@@ -5,7 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
 export default function PaymentsTab() {
-  const { colors, isDark } = useParentTheme();
+  const { colors, isDark, amharic, oromo } = useParentTheme();
   const palette = useMemo(
     () => ({
       primary: colors.primary,
@@ -32,6 +32,44 @@ export default function PaymentsTab() {
     [colors, isDark]
   );
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const labels = useMemo(
+    () => {
+      if (oromo) {
+        return {
+          heroTitle: "Kaffaltii raawwadhu",
+          heroSub: "Kaffaltii mana barumsaa nagaadhaan kaffaluun dhihoo keessatti ni qophaa'a.",
+          status: "Haala",
+          gatewayPending: "Qophiin karaa kaffaltii eeggamaa jira",
+          comingSoon: "Dhihootti",
+          card: "Kaardii",
+          wallet: "Waleetii",
+          bank: "Baankii",
+          payNowDisabled: "Amma kaffali (cufaa)",
+          supportedTitle: "Kan deggaraman",
+          bulletOne: "• Kaffaltii barnootaa / fee",
+          bulletTwo: "• Filannoo mobile wallet / card / bank",
+          bulletThree: "• Ragaa kaffaltii saffisaa",
+        };
+      }
+
+      return {
+        heroTitle: amharic ? "ክፍያ ፈጽም" : "Make Payment",
+        heroSub: amharic ? "የትምህርት ቤት ክፍያን በደህንነት ለመክፈል በቅርቡ ይዘጋጃል።" : "Secure school fee payment, coming soon.",
+        status: amharic ? "ሁኔታ" : "Status",
+        gatewayPending: amharic ? "የክፍያ መስመር በዝግጅት ላይ ነው" : "Gateway setup pending",
+        comingSoon: amharic ? "በቅርቡ" : "Coming Soon",
+        card: amharic ? "ካርድ" : "Card",
+        wallet: amharic ? "ዋሌት" : "Wallet",
+        bank: amharic ? "ባንክ" : "Bank",
+        payNowDisabled: amharic ? "አሁን ይክፈሉ (ዝግ)" : "Pay Now (Disabled)",
+        supportedTitle: amharic ? "የሚደገፉ አገልግሎቶች" : "What will be supported",
+        bulletOne: amharic ? "• የትምህርት ክፍያ / ፊ ክፍያ" : "• Tuition / Fee payment",
+        bulletTwo: amharic ? "• የሞባይል ዋሌት / ካርድ / ባንክ አማራጮች" : "• Mobile wallet / Card / Bank options",
+        bulletThree: amharic ? "• ፈጣን የክፍያ ማረጋገጫ ደረሰኝ" : "• Instant confirmation receipt",
+      };
+    },
+    [amharic, oromo]
+  );
 
   return (
     <View>
@@ -44,43 +82,43 @@ export default function PaymentsTab() {
         <View style={styles.heroGlowOne} />
         <View style={styles.heroGlowTwo} />
 
-        <Text style={styles.heroTitle}>Make Payment</Text>
-        <Text style={styles.heroSub}>Secure school fee payment, coming soon.</Text>
+        <Text style={styles.heroTitle}>{labels.heroTitle}</Text>
+        <Text style={styles.heroSub}>{labels.heroSub}</Text>
 
         <View style={styles.heroStatusCard}>
           <View>
-            <Text style={styles.heroStatusLabel}>Status</Text>
-            <Text style={styles.heroStatusValue}>Gateway setup pending</Text>
+            <Text style={styles.heroStatusLabel}>{labels.status}</Text>
+            <Text style={styles.heroStatusValue}>{labels.gatewayPending}</Text>
           </View>
-          <Text style={styles.heroStatusBadge}>Coming Soon</Text>
+          <Text style={styles.heroStatusBadge}>{labels.comingSoon}</Text>
         </View>
 
         <View style={styles.heroFeatureRow}>
           <View style={styles.heroFeatureChip}>
             <Ionicons name="card-outline" size={13} color={palette.primary} />
-            <Text style={styles.heroFeatureText}>Card</Text>
+            <Text style={styles.heroFeatureText}>{labels.card}</Text>
           </View>
           <View style={styles.heroFeatureChip}>
             <Ionicons name="phone-portrait-outline" size={13} color={palette.primary} />
-            <Text style={styles.heroFeatureText}>Wallet</Text>
+            <Text style={styles.heroFeatureText}>{labels.wallet}</Text>
           </View>
           <View style={styles.heroFeatureChip}>
             <Ionicons name="business-outline" size={13} color={palette.primary} />
-            <Text style={styles.heroFeatureText}>Bank</Text>
+            <Text style={styles.heroFeatureText}>{labels.bank}</Text>
           </View>
         </View>
 
         <TouchableOpacity style={styles.heroPrimaryBtn} disabled activeOpacity={0.9}>
           <Ionicons name="lock-closed-outline" size={16} color={palette.white} style={styles.heroPrimaryBtnIcon} />
-          <Text style={styles.heroPrimaryBtnText}>Pay Now (Disabled)</Text>
+          <Text style={styles.heroPrimaryBtnText}>{labels.payNowDisabled}</Text>
         </TouchableOpacity>
       </LinearGradient>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>What will be supported</Text>
-        <Text style={styles.bullet}>• Tuition / Fee payment</Text>
-        <Text style={styles.bullet}>• Mobile wallet / Card / Bank options</Text>
-        <Text style={styles.bullet}>• Instant confirmation receipt</Text>
+        <Text style={styles.cardTitle}>{labels.supportedTitle}</Text>
+        <Text style={styles.bullet}>{labels.bulletOne}</Text>
+        <Text style={styles.bullet}>{labels.bulletTwo}</Text>
+        <Text style={styles.bullet}>{labels.bulletThree}</Text>
       </View>
     </View>
   );

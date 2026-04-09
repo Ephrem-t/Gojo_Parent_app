@@ -5,10 +5,10 @@ import HistoryTab from "../school/history";
 import CalendarTab from "../school/calendar";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
-const TABS = ["Payments", "History", "Calendar"];
+const TABS = ["payments", "history", "calendar"];
 
 export default function SchoolScreen() {
-  const { colors, isDark } = useParentTheme();
+  const { colors, isDark, amharic, oromo } = useParentTheme();
   const palette = useMemo(
     () => ({
       background: colors.background,
@@ -21,7 +21,15 @@ export default function SchoolScreen() {
     [colors, isDark]
   );
   const styles = useMemo(() => createStyles(palette), [palette]);
-  const [activeTab, setActiveTab] = useState("Payments");
+  const tabLabels = useMemo(
+    () => ({
+      payments: oromo ? "Kaffaltii" : amharic ? "ክፍያ" : "Payments",
+      history: oromo ? "Seenaa" : amharic ? "ታሪክ" : "History",
+      calendar: oromo ? "Kaaleendarii" : amharic ? "የቀን መቁጠሪያ" : "Calendar",
+    }),
+    [amharic, oromo]
+  );
+  const [activeTab, setActiveTab] = useState("payments");
   const tabAnim = useRef(new Animated.Value(0)).current;
   const [tabWidth, setTabWidth] = useState(0);
 
@@ -37,8 +45,8 @@ export default function SchoolScreen() {
   }, [activeTab, tabAnim]);
 
   const renderTab = () => {
-    if (activeTab === "Payments") return <PaymentsTab />;
-    if (activeTab === "History") return <HistoryTab />;
+    if (activeTab === "payments") return <PaymentsTab />;
+    if (activeTab === "history") return <HistoryTab />;
     return <CalendarTab />;
   };
 
@@ -63,16 +71,16 @@ export default function SchoolScreen() {
             />
           )}
 
-          {TABS.map((t) => {
-            const active = activeTab === t;
+          {TABS.map((tabKey) => {
+            const active = activeTab === tabKey;
             return (
               <TouchableOpacity
-                key={t}
-                onPress={() => setActiveTab(t)}
+                key={tabKey}
+                onPress={() => setActiveTab(tabKey)}
                 style={styles.tabBtn}
                 activeOpacity={0.86}
               >
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{t}</Text>
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{tabLabels[tabKey]}</Text>
               </TouchableOpacity>
             );
           })}
@@ -81,7 +89,7 @@ export default function SchoolScreen() {
 
       <View style={[
         styles.body,
-        activeTab === "Calendar" ? styles.bodyCalendar : styles.bodyPadded,
+        activeTab === "calendar" ? styles.bodyCalendar : styles.bodyPadded,
       ]}>
         {renderTab()}
       </View>

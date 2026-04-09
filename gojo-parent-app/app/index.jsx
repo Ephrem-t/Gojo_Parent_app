@@ -38,7 +38,7 @@ export const options = { headerShown: false };
 export default function LoginScreen() {
   const router = useRouter();
   const passwordRef = useRef(null);
-  const { colors, expoStatusBarStyle } = useParentTheme();
+  const { colors, expoStatusBarStyle, amharic, oromo } = useParentTheme();
   const palette = useMemo(
     () => ({
       background: colors.background,
@@ -57,6 +57,66 @@ export default function LoginScreen() {
     [colors]
   );
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const labels = useMemo(
+    () => {
+      if (oromo) {
+        return {
+          unavailable: "Hin argamu",
+          schoolPhoneMissing: "Lakkoofsi bilbilaa mana barumsaa hin jiru.",
+          cannotOpenDialer: "Bilbila banuu hin danda'amu:",
+          error: "Dogoggora",
+          couldNotResolveSchool: "Qunnamtii mana barumsaa hin arganne. Dura maqaa fayyadamaa galchi.",
+          schoolContactUnavailable: "Qunnamtiin mana barumsaa hin argamu.",
+          couldNotOpenDialer: "App bilbilaa banuu hin dandeenye.",
+          pleaseEnterCredentials: "Maqaa fayyadamaa fi jecha darbii galchi.",
+          noAccountForPrefix: "Koodiin mana barumsaa prefix kanaaf hin argamne",
+          noAccountResolvedSchool: "Maqaa kanaan account mana barumsaa keessatti hin argamne.",
+          lookupFailed: "Barbaaduun hin milkoofne.",
+          noAccountFound: "Maqaa kanaan account hin argamne.",
+          notParentAccount: "Account kun account maatii miti.",
+          incorrectPassword: "Jechi darbii sirrii miti.",
+          somethingWentWrong: "Rakkoon uumameera. Irra deebi'ii yaali.",
+          parentLogin: "Seensa Maatii",
+          loginSubtitle: "Gara account Gojo Parent keetti seeni",
+          username: "Maqaa fayyadamaa",
+          password: "Jecha darbii",
+          login: "Seeni",
+          needHelp: "Gargaarsa barbaaddaa? Mana barumsaa kee qunnami",
+          rights: "Mirgi hundi eegameera.",
+          ok: "Tole",
+        };
+      }
+
+      return {
+        unavailable: amharic ? "አልተገኘም" : "Unavailable",
+        schoolPhoneMissing: amharic ? "የትምህርት ቤቱ ስልክ ቁጥር የለም።" : "School phone number is missing.",
+        cannotOpenDialer: amharic ? "ለዚህ ቁጥር የጥሪ መተግበሪያ መክፈት አይቻልም:" : "Cannot open dialer for:",
+        error: amharic ? "ስህተት" : "Error",
+        couldNotResolveSchool: amharic
+          ? "የትምህርት ቤቱን የመገናኛ መረጃ ገና ማግኘት አልተቻለም። መጀመሪያ የተጠቃሚ ስምዎን ያስገቡ።"
+          : "Could not resolve school contact yet. Enter your username first.",
+        schoolContactUnavailable: amharic ? "የትምህርት ቤቱ የመገናኛ መረጃ አይገኝም።" : "School contact is not available.",
+        couldNotOpenDialer: amharic ? "የጥሪ መተግበሪያን መክፈት አልተቻለም።" : "Could not open dialer.",
+        pleaseEnterCredentials: amharic ? "እባክዎ የተጠቃሚ ስምና የይለፍ ቃል ያስገቡ።" : "Please enter username and password.",
+        noAccountForPrefix: amharic ? "ለዚህ የተጠቃሚ ስም ቅድመ ቁጥር ትምህርት ቤት አልተገኘም" : "School code not found for username prefix",
+        noAccountResolvedSchool: amharic ? "በተገኘው ትምህርት ቤት ውስጥ በዚህ የተጠቃሚ ስም የተመዘገበ መለያ አልተገኘም።" : "No account found with that username in the resolved school.",
+        lookupFailed: amharic ? "ፍለጋው አልተሳካም።" : "Lookup failed.",
+        noAccountFound: amharic ? "በዚህ የተጠቃሚ ስም መለያ አልተገኘም።" : "No account found with that username.",
+        notParentAccount: amharic ? "ይህ መለያ የወላጅ መለያ አይደለም።" : "This account is not a parent account.",
+        incorrectPassword: amharic ? "የይለፍ ቃሉ ትክክል አይደለም።" : "Incorrect password.",
+        somethingWentWrong: amharic ? "አንድ ችግር ተፈጥሯል። እንደገና ይሞክሩ።" : "Something went wrong. Try again.",
+        parentLogin: amharic ? "የወላጅ መግቢያ" : "Parent Login",
+        loginSubtitle: amharic ? "ወደ Gojo Parent መለያዎ ይግቡ" : "Sign in to your Gojo Parent account",
+        username: amharic ? "የተጠቃሚ ስም" : "Username",
+        password: amharic ? "የይለፍ ቃል" : "Password",
+        login: amharic ? "ግባ" : "Login",
+        needHelp: amharic ? "እርዳታ ይፈልጋሉ? ትምህርት ቤትዎን ያነጋግሩ" : "Need help? Contact your school",
+        rights: amharic ? "መብቱ የተጠበቀ ነው።" : "All rights reserved.",
+        ok: amharic ? "እሺ" : "OK",
+      };
+    },
+    [amharic, oromo]
+  );
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -85,7 +145,7 @@ export default function LoginScreen() {
     const phone = normalizePhoneNumber(rawPhone);
 
     if (!phone) {
-      Alert.alert("Unavailable", "School phone number is missing.");
+      Alert.alert(labels.unavailable, labels.schoolPhoneMissing);
       return;
     }
 
@@ -93,7 +153,7 @@ export default function LoginScreen() {
     const can = await Linking.canOpenURL(tel);
 
     if (!can) {
-      Alert.alert("Unavailable", `Cannot open dialer for: ${phone}`);
+      Alert.alert(labels.unavailable, `${labels.cannotOpenDialer} ${phone}`);
       return;
     }
 
@@ -164,10 +224,39 @@ export default function LoginScreen() {
     return null;
   };
 
+  const findUserByUsernameWithoutIndex = async (usersRef, uname, schoolKey) => {
+    const normalizedUsername = String(uname || "").trim().toLowerCase();
+    const usersSnap = await get(usersRef);
+
+    if (!usersSnap.exists()) {
+      return null;
+    }
+
+    let matchedUser = null;
+    usersSnap.forEach((child) => {
+      if (matchedUser) return true;
+
+      const value = child.val() || {};
+      const childUsername = String(value.username || "").trim().toLowerCase();
+      if (childUsername === normalizedUsername) {
+        matchedUser = {
+          ...value,
+          _nodeKey: child.key,
+          _schoolKey: schoolKey,
+        };
+        return true;
+      }
+
+      return false;
+    });
+
+    return matchedUser;
+  };
+
   const findUserByUsername = async (uname) => {
     const schoolKey = await resolveSchoolKeyFromUsername(uname);
     if (!schoolKey) {
-      return { error: `School code not found for username prefix (${uname.substring(0, 3)})` };
+      return { error: `${labels.noAccountForPrefix} (${uname.substring(0, 3)})` };
     }
 
     try {
@@ -176,7 +265,7 @@ export default function LoginScreen() {
       const snap = await get(q);
 
       if (!snap.exists()) {
-        return { error: "No account found with that username in the resolved school." };
+        return { error: labels.noAccountResolvedSchool };
       }
 
       let found = null;
@@ -191,8 +280,27 @@ export default function LoginScreen() {
 
       return { user: found };
     } catch (err) {
+      const message = String(err?.message || "");
+      const missingIndex = /index not defined/i.test(message);
+
+      if (missingIndex) {
+        try {
+          const usersRef = ref(database, `Platform1/Schools/${schoolKey}/Users`);
+          const fallbackUser = await findUserByUsernameWithoutIndex(usersRef, uname, schoolKey);
+
+          if (fallbackUser) {
+            return { user: fallbackUser };
+          }
+
+          return { error: labels.noAccountResolvedSchool };
+        } catch (fallbackErr) {
+          console.error("[Parent Login] fallback username lookup error:", fallbackErr);
+          return { error: labels.lookupFailed };
+        }
+      }
+
       console.error("[Parent Login] findUserByUsername error:", err);
-      return { error: "Lookup failed." };
+      return { error: labels.lookupFailed };
     }
   };
 
@@ -210,12 +318,12 @@ export default function LoginScreen() {
       }
 
       if (!schoolKey) {
-        return Alert.alert("Unavailable", "Could not resolve school contact yet. Enter your username first.");
+        return Alert.alert(labels.unavailable, labels.couldNotResolveSchool);
       }
 
       const infoSnap = await get(ref(database, `Platform1/Schools/${schoolKey}/schoolInfo`));
       if (!infoSnap.exists()) {
-        return Alert.alert("Unavailable", "School contact is not available.");
+        return Alert.alert(labels.unavailable, labels.schoolContactUnavailable);
       }
 
       const info = infoSnap.val() || {};
@@ -223,7 +331,7 @@ export default function LoginScreen() {
       await openPhoneNumber(rawPhone);
     } catch (e) {
       console.warn("[Parent Login] handleNeedHelp error:", e);
-      Alert.alert("Error", "Could not open dialer.");
+      Alert.alert(labels.error, labels.couldNotOpenDialer);
     }
   };
 
@@ -233,7 +341,7 @@ export default function LoginScreen() {
     const pwd = String(password || "").trim();
 
     if (!uname || !pwd) {
-      setError("Please enter username and password.");
+      setError(labels.pleaseEnterCredentials);
       return;
     }
 
@@ -246,18 +354,18 @@ export default function LoginScreen() {
       }
 
       if (!user) {
-        setError("No account found with that username.");
+        setError(labels.noAccountFound);
         return;
       }
 
       if (String(user.role || "").toLowerCase() !== "parent") {
-        setError("This account is not a parent account.");
+        setError(labels.notParentAccount);
         return;
       }
 
       const storedPwd = user.password == null ? "" : String(user.password).trim();
       if (!storedPwd || storedPwd !== pwd) {
-        setError("Incorrect password.");
+        setError(labels.incorrectPassword);
         return;
       }
 
@@ -284,7 +392,7 @@ export default function LoginScreen() {
       router.replace("/dashboard/home");
     } catch (err) {
       console.error("Parent login error:", err);
-      setError("Something went wrong. Try again.");
+      setError(labels.somethingWentWrong);
     } finally {
       setLoading(false);
     }
@@ -306,8 +414,8 @@ export default function LoginScreen() {
           >
             <View style={styles.top}>
               <Image source={require("../assets/images/logo.png")} style={styles.logo} resizeMode="contain" />
-              <Text style={styles.title}>Parent Login</Text>
-              <Text style={styles.subtitle}>Sign in to your Gojo Parent account</Text>
+              <Text style={styles.title}>{labels.parentLogin}</Text>
+              <Text style={styles.subtitle}>{labels.loginSubtitle}</Text>
             </View>
 
             <View style={styles.form}>
@@ -317,7 +425,7 @@ export default function LoginScreen() {
                 <Ionicons name="person-outline" size={22} color={palette.muted} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="Username"
+                  placeholder={labels.username}
                   placeholderTextColor={palette.placeholder}
                   value={username}
                   onChangeText={setUsername}
@@ -333,7 +441,7 @@ export default function LoginScreen() {
                 <TextInput
                   ref={passwordRef}
                   style={[styles.input, { paddingRight: 44 }]}
-                  placeholder="Password"
+                  placeholder={labels.password}
                   placeholderTextColor={palette.placeholder}
                   value={password}
                   onChangeText={setPassword}
@@ -347,16 +455,16 @@ export default function LoginScreen() {
               </View>
 
               <TouchableOpacity style={[styles.button, loading && styles.buttonDisabled]} onPress={handleSignIn} disabled={loading}>
-                {loading ? <ActivityIndicator color={palette.buttonText} /> : <Text style={styles.buttonText}>Login</Text>}
+                {loading ? <ActivityIndicator color={palette.buttonText} /> : <Text style={styles.buttonText}>{labels.login}</Text>}
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.linkRow} onPress={handleNeedHelp}>
-                <Text style={styles.linkText}>Need help? Contact your school</Text>
+                <Text style={styles.linkText}>{labels.needHelp}</Text>
               </TouchableOpacity>
             </View>
 
             <View style={styles.footer}>
-              <Text style={styles.copyright}>© 2026 Gojo Parent. All rights reserved.</Text>
+              <Text style={styles.copyright}>{`© 2026 Gojo Parent. ${labels.rights}`}</Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -369,7 +477,7 @@ export default function LoginScreen() {
         onPrimaryPress={() => openPhoneNumber(blockedNotice.phone || blockedNotice.phoneLabel)}
         onSecondaryPress={() => setBlockedNotice((current) => ({ ...current, visible: false }))}
         primaryDisabled={!blockedNotice.phone && !blockedNotice.phoneLabel}
-        secondaryLabel="OK"
+        secondaryLabel={labels.ok}
       />
     </SafeAreaView>
   );

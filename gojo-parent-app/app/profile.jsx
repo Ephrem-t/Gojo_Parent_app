@@ -3,7 +3,6 @@ import { addNetworkStateListener, getNetworkStateAsync } from "expo-network";
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   StyleSheet,
   Animated,
@@ -25,7 +24,14 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as MediaLibrary from "expo-media-library";
 import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getLinkedChildrenForParent } from "./lib/parentChildren";
+import { readCachedJsonRecord, writeCachedJson } from "./lib/dataCache";
+import AppImage from "../components/ui/AppImage";
 import { useParentTheme } from "../hooks/use-parent-theme";
+
+function getProfileCacheKey(schoolKey, parentNodeId) {
+  return `cache:profile:${String(schoolKey || "root")}:${String(parentNodeId || "unknown")}`;
+}
+
 const makePalette = (colors, isDark) => ({
   background: colors.background,
   card: colors.card,
@@ -68,20 +74,292 @@ const makePalette = (colors, isDark) => ({
 });
 
 function useProfileThemeConfig() {
-  const { colors, isDark, statusBarStyle, toggleTheme } = useParentTheme();
+  const { colors, isDark, statusBarStyle, toggleTheme, languageCode, amharic, setLanguageCode } = useParentTheme();
 
   const PALETTE = useMemo(() => makePalette(colors, isDark), [colors, isDark]);
   const styles = useMemo(() => createStyles(PALETTE), [PALETTE]);
 
-  return { PALETTE, styles, isDark, statusBarStyle, toggleTheme };
+  return { PALETTE, styles, isDark, statusBarStyle, toggleTheme, languageCode, amharic, setLanguageCode };
 }
 
 const TERMS_URL = "https://example.com/terms";
 
+function getProfileLabels(languageCode) {
+  const amharic = languageCode === "am";
+  const oromo = languageCode === "om";
+  const tigrinya = languageCode === "ti";
+
+  if (tigrinya) {
+    return {
+      loadingProfile: "ፕሮፋይል ይጽዕን ኣሎ...",
+      profileUnavailableTitle: "ፕሮፋይል ኣይተረኽበን",
+      profileUnavailableBody: "እዚ ወላዲ ፕሮፋይል ምጽዓን ኣይተኻእለን።",
+      backToDashboard: "ናብ ዳሽቦርድ ተመለስ",
+      menuEditInfo: "ሓበሬታ ኣርትዕ",
+      menuChangePhoto: "ፎቶ ቀይር",
+      menuChangePassword: "መሕለፊ ቃል ቀይር",
+      menuLanguage: "ቋንቋ ቀይር",
+      menuSaveToGallery: "ናብ ጋለሪ ኣቐምጥ",
+      menuTerms: "ውዕላትን ምስጢራዊነትን",
+      menuLogout: "ውጻእ",
+      childSingle: "ውሉድ",
+      childPlural: "ውሉዳት",
+      parentRole: "ወላዲ",
+      online: "ኣብ መስመር",
+      offline: "ካብ መስመር ወጻኢ",
+      editProfile: "ፕሮፋይል ኣርትዕ",
+      tabMain: "ዋና",
+      tabInfo: "ሓበሬታ",
+      familyOverview: "ኣጠቓላሊ ስድራ",
+      parentAccount: "ኣካውንት ወላዲ",
+      linkedChildSingular: "ዝተኣሳሰረ ውሉድ",
+      linkedChildPlural: "ዝተኣሳሰሩ ውሉዳት",
+      noLinkedChildrenYet: "ክሳብ ሕጂ ዝተኣሳሰሩ ውሉዳት የለዉን",
+      grade: "ክፍሊ",
+      section: "ሴክሽን",
+      fallbackChildRole: "ውሉድ",
+      noLinkedChildrenFound: "ዝተኣሳሰሩ ውሉዳት ኣይተረኽቡን።",
+      support: "ደገፍ",
+      telegram: "ቴሌግራም",
+      telegramSubtitle: "ምስ ጎጆ ጉጅለ ኣብ ቴሌግራም ተዘራረብ",
+      email: "ኢመይል",
+      emailSubtitle: "ብኢመይል መልእኽቲ ስደድልና",
+      profileInfo: "ሓበሬታ ፕሮፋይል",
+      name: "ስም",
+      username: "ስም ተጠቃሚ",
+      role: "ተራ",
+      status: "ኩነታት",
+      children: "ውሉዳት",
+      phone: "ስልኪ",
+      emailLabel: "ኢመይል",
+      editProfileTitle: "ፕሮፋይል ኣርትዕ",
+      changePasswordTitle: "መሕለፊ ቃል ቀይር",
+      currentPassword: "ናይ ሕጂ መሕለፊ ቃል",
+      newPassword: "ሓድሽ መሕለፊ ቃል",
+      confirmNewPassword: "ሓድሽ መሕለፊ ቃል ኣረጋግጽ",
+      enterCurrentPassword: "ናይ ሕጂ መሕለፊ ቃል ኣእቱ",
+      enterNewPassword: "ሓድሽ መሕለፊ ቃል ኣእቱ (እንተኾነ 6 ፊደላት)",
+      confirmNewPasswordPlaceholder: "ሓድሽ መሕለፊ ቃል ኣረጋግጽ",
+      cancel: "ሰርዝ",
+      save: "ኣቐምጥ",
+      saving: "ይቕመጥ ኣሎ...",
+      languageTitle: "ቋንቋ ቀይር",
+      languageEnglish: "English",
+      languageAmharic: "Amharic",
+      languageOromo: "Afaan Oromoo",
+      languageTigrinya: "ትግርኛ",
+      languageEnglishSubtitle: "ኣፕን ብእንግሊዝኛ ኣርእይ",
+      languageAmharicSubtitle: "ኣፕን ብአማርኛ ኣርእይ",
+      languageOromoSubtitle: "ኣፕን ብኣፋን ኦሮሞ ኣርእይ",
+      languageTigrinyaSubtitle: "ኣፕን ብትግርኛ ኣርእይ",
+      languageValue: "TI",
+      recentlyJoined: "ቀረባ ጊዜ ተጸንቢሩ",
+    };
+  }
+
+  if (amharic) {
+    return {
+      loadingProfile: "መገለጫ በመጫን ላይ...",
+      profileUnavailableTitle: "መገለጫው አልተገኘም",
+      profileUnavailableBody: "የዚህን ወላጅ መገለጫ መጫን አልቻልንም።",
+      backToDashboard: "ወደ ዳሽቦርድ ተመለስ",
+      menuEditInfo: "መረጃ አርትዕ",
+      menuChangePhoto: "ፎቶ ቀይር",
+      menuChangePassword: "የይለፍ ቃል ቀይር",
+      menuLanguage: "ቋንቋ ቀይር",
+      menuSaveToGallery: "ወደ ጋለሪ አስቀምጥ",
+      menuTerms: "ውሎች እና ግላዊነት",
+      menuLogout: "ውጣ",
+      childSingle: "ልጅ",
+      childPlural: "ልጆች",
+      parentRole: "ወላጅ",
+      online: "መስመር ላይ",
+      offline: "ከመስመር ውጭ",
+      editProfile: "መገለጫ አርትዕ",
+      tabMain: "ዋና",
+      tabInfo: "መረጃ",
+      familyOverview: "የቤተሰብ አጠቃላይ እይታ",
+      parentAccount: "የወላጅ መለያ",
+      linkedChildSingular: "የተገናኘ ልጅ",
+      linkedChildPlural: "የተገናኙ ልጆች",
+      noLinkedChildrenYet: "እስካሁን የተገናኙ ልጆች የሉም",
+      grade: "ክፍል",
+      section: "ሴክሽን",
+      fallbackChildRole: "ልጅ",
+      noLinkedChildrenFound: "እስካሁን የተገናኙ ልጆች አልተገኙም።",
+      support: "ድጋፍ",
+      telegram: "ቴሌግራም",
+      telegramSubtitle: "ከ Gojo ቡድን ጋር በቴሌግራም ይነጋገሩ",
+      email: "ኢሜይል",
+      emailSubtitle: "በኢሜይል መልዕክት ይላኩልን",
+      profileInfo: "የመገለጫ መረጃ",
+      name: "ስም",
+      username: "የተጠቃሚ ስም",
+      role: "ሚና",
+      status: "ሁኔታ",
+      children: "ልጆች",
+      phone: "ስልክ",
+      emailLabel: "ኢሜይል",
+      editProfileTitle: "መገለጫ አርትዕ",
+      changePasswordTitle: "የይለፍ ቃል ቀይር",
+      currentPassword: "የአሁኑ የይለፍ ቃል",
+      newPassword: "አዲስ የይለፍ ቃል",
+      confirmNewPassword: "አዲሱን የይለፍ ቃል ያረጋግጡ",
+      enterCurrentPassword: "የአሁኑን የይለፍ ቃል ያስገቡ",
+      enterNewPassword: "አዲስ የይለፍ ቃል ያስገቡ (ቢያንስ 6 ቁምፊዎች)",
+      confirmNewPasswordPlaceholder: "አዲሱን የይለፍ ቃል ያረጋግጡ",
+      cancel: "ሰርዝ",
+      save: "አስቀምጥ",
+      saving: "በማስቀመጥ ላይ...",
+      languageTitle: "ቋንቋ ቀይር",
+      languageEnglish: "English",
+      languageAmharic: "አማርኛ",
+      languageOromo: "Afaan Oromoo",
+      languageEnglishSubtitle: "መተግበሪያውን በእንግሊዝኛ አሳይ",
+      languageAmharicSubtitle: "መተግበሪያውን በአማርኛ አሳይ",
+      languageOromoSubtitle: "መተግበሪያውን በአፋን ኦሮሞ አሳይ",
+      languageValue: "AM",
+      recentlyJoined: "በቅርቡ ተቀላቀለ",
+    };
+  }
+
+  if (oromo) {
+    return {
+      loadingProfile: "Profaayilii fe'aa jira...",
+      profileUnavailableTitle: "Profaayiliin hin argamne",
+      profileUnavailableBody: "Profaayilii maatii kana fe'uu hin dandeenye.",
+      backToDashboard: "Gara daashboordii deebi'i",
+      menuEditInfo: "Odeeffannoo gulaali",
+      menuChangePhoto: "Suuraa jijjiiri",
+      menuChangePassword: "Jecha darbii jijjiiri",
+      menuLanguage: "Afaan jijjiiri",
+      menuSaveToGallery: "Galarii keessatti kaa'i",
+      menuTerms: "Seerota fi dhuunfaa",
+      menuLogout: "Ba'i",
+      childSingle: "Ijoollee",
+      childPlural: "Ijoollee",
+      parentRole: "Maatii",
+      online: "Toora irratti",
+      offline: "Toora ala",
+      editProfile: "Profaayilii gulaali",
+      tabMain: "Ijo",
+      tabInfo: "Odeeffannoo",
+      familyOverview: "Ilaalcha maatii",
+      parentAccount: "Akkaawuntii maatii",
+      linkedChildSingular: "ijoollee walqabate",
+      linkedChildPlural: "ijoollee walqabatan",
+      noLinkedChildrenYet: "Ammaaf ijoolleen walqabatan hin jiran",
+      grade: "Kutaa",
+      section: "Kutaa xiqqaa",
+      fallbackChildRole: "Ijoollee",
+      noLinkedChildrenFound: "Ijoolleen walqabatan hin argamne.",
+      support: "Deeggarsa",
+      telegram: "Telegram",
+      telegramSubtitle: "Garee Gojo wajjin Telegram irratti haasayi",
+      email: "Imeelii",
+      emailSubtitle: "Nuutti ergaa imeeliin ergi",
+      profileInfo: "Odeeffannoo profaayilii",
+      name: "Maqaa",
+      username: "Maqaa fayyadamaa",
+      role: "Gahee hojii",
+      status: "Haala",
+      children: "Ijoollee",
+      phone: "Bilbila",
+      emailLabel: "Imeelii",
+      editProfileTitle: "Profaayilii gulaali",
+      changePasswordTitle: "Jecha darbii jijjiiri",
+      currentPassword: "Jecha darbii amma jiru",
+      newPassword: "Jecha darbii haaraa",
+      confirmNewPassword: "Jecha darbii haaraa mirkaneessi",
+      enterCurrentPassword: "Jecha darbii amma jiru galchi",
+      enterNewPassword: "Jecha darbii haaraa galchi (xiqqaate qubee 6)",
+      confirmNewPasswordPlaceholder: "Jecha darbii haaraa mirkaneessi",
+      cancel: "Dhiisi",
+      save: "Kaa'i",
+      saving: "Kaa'aa jira...",
+      languageTitle: "Afaan jijjiiri",
+      languageEnglish: "English",
+      languageAmharic: "Amharic",
+      languageOromo: "Afaan Oromoo",
+      languageEnglishSubtitle: "Appicha Englishiin agarsiisi",
+      languageAmharicSubtitle: "Appicha Amaariffaan agarsiisi",
+      languageOromoSubtitle: "Appicha Afaan Oromoon agarsiisi",
+      languageValue: "OM",
+      recentlyJoined: "Dhiheenya kana makame",
+    };
+  }
+
+  return {
+    loadingProfile: "Loading profile...",
+    profileUnavailableTitle: "Profile unavailable",
+    profileUnavailableBody: "We could not load this parent profile.",
+    backToDashboard: "Back to dashboard",
+    menuEditInfo: "Edit Info",
+    menuChangePhoto: "Change Photo",
+    menuChangePassword: "Change Password",
+    menuLanguage: "Change Language",
+    menuSaveToGallery: "Save to Gallery",
+    menuTerms: "Terms & Privacy",
+    menuLogout: "Logout",
+    childSingle: "Child",
+    childPlural: "Children",
+    parentRole: "Parent",
+    online: "Online",
+    offline: "Offline",
+    editProfile: "Edit Profile",
+    tabMain: "Main",
+    tabInfo: "Info",
+    familyOverview: "Family overview",
+    parentAccount: "Parent account",
+    linkedChildSingular: "linked child",
+    linkedChildPlural: "linked children",
+    noLinkedChildrenYet: "No linked children yet",
+    grade: "Grade",
+    section: "Section",
+    fallbackChildRole: "Child",
+    noLinkedChildrenFound: "No linked children found yet.",
+    support: "Support",
+    telegram: "Telegram",
+    telegramSubtitle: "Chat with the Gojo team on Telegram",
+    email: "Email",
+    emailSubtitle: "Send us a message by email",
+    profileInfo: "Profile info",
+    name: "Name",
+    username: "Username",
+    role: "Role",
+    status: "Status",
+    children: "Children",
+    phone: "Phone",
+    emailLabel: "Email",
+    editProfileTitle: "Edit Profile",
+    changePasswordTitle: "Change Password",
+    currentPassword: "Current Password",
+    newPassword: "New Password",
+    confirmNewPassword: "Confirm New Password",
+    enterCurrentPassword: "Enter current password",
+    enterNewPassword: "Enter new password (min 6 characters)",
+    confirmNewPasswordPlaceholder: "Confirm new password",
+    cancel: "Cancel",
+    save: "Save",
+    saving: "Saving...",
+    languageTitle: "Change Language",
+    languageEnglish: "English",
+    languageAmharic: "Amharic",
+    languageOromo: "Afaan Oromo",
+    languageTigrinya: "Tigrinya",
+    languageEnglishSubtitle: "Use English across the app",
+    languageAmharicSubtitle: "Use Amharic across the app",
+    languageOromoSubtitle: "Use Afaan Oromo across the app",
+    languageTigrinyaSubtitle: "Use Tigrinya across the app",
+    languageValue: "EN",
+    recentlyJoined: "Recently joined",
+  };
+}
+
 export default function ParentProfile() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { PALETTE, styles, isDark, statusBarStyle, toggleTheme } = useProfileThemeConfig();
+  const { PALETTE, styles, isDark, statusBarStyle, toggleTheme, languageCode, setLanguageCode } = useProfileThemeConfig();
 
   const [schoolKey, setSchoolKey] = useState(null);
   const [parentNodeId, setParentNodeId] = useState(null);
@@ -103,10 +381,13 @@ export default function ParentProfile() {
   const [newPasswordError, setNewPasswordError] = useState("");
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
   const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+  const labels = useMemo(() => getProfileLabels(languageCode), [languageCode]);
 
   const schoolAwarePath = useCallback(
     (subPath) => (schoolKey ? `Platform1/Schools/${schoolKey}/${subPath}` : subPath),
@@ -133,7 +414,25 @@ export default function ParentProfile() {
     }
 
     const loadParentData = async () => {
-      setLoading(true);
+      const cacheKey = getProfileCacheKey(schoolKey, parentNodeId);
+      const cachedProfileRecord = await readCachedJsonRecord(cacheKey);
+      const cachedProfile = cachedProfileRecord?.value || null;
+
+      if (cachedProfile && typeof cachedProfile === "object") {
+        setParentUser(cachedProfile.parentUser || null);
+        setChildren(Array.isArray(cachedProfile.children) ? cachedProfile.children : []);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
+      const networkState = await getNetworkStateAsync();
+      const onlineNow = Boolean(networkState.isConnected && networkState.isInternetReachable !== false);
+      if (!onlineNow) {
+        setLoading(false);
+        return;
+      }
+
       try {
         const prefix = schoolKey ? `Platform1/Schools/${schoolKey}/` : "";
         const parentSnap = await get(ref(database, `${prefix}Parents/${parentNodeId}`));
@@ -149,23 +448,29 @@ export default function ParentProfile() {
           parentNode.userId
             ? get(ref(database, `${prefix}Users/${parentNode.userId}`))
             : Promise.resolve(null),
-          getLinkedChildrenForParent(prefix, parentNodeId),
+          getLinkedChildrenForParent(prefix, parentNodeId, { forceNetwork: true }),
         ]);
 
         const userData = userSnap?.exists() ? userSnap.val() || {} : {};
-        setParentUser({
+        const nextParentUser = {
           ...userData,
           userId: parentNode.userId,
           status: parentNode.status,
           createdAt: parentNode.createdAt,
-        });
+        };
 
-        setChildren(
-          (linkedChildren || []).map((child) => ({
+        const nextChildren = (linkedChildren || []).map((child) => ({
             ...child,
             profileImage: child.profileImage || defaultProfile,
-          }))
-        );
+          }));
+
+        setParentUser(nextParentUser);
+        setChildren(nextChildren);
+        writeCachedJson(cacheKey, {
+          parentUser: nextParentUser,
+          children: nextChildren,
+          fetchedAt: Date.now(),
+        }).catch(() => {});
       } catch (error) {
         console.log("Error fetching parent profile:", error);
       } finally {
@@ -199,7 +504,21 @@ export default function ParentProfile() {
   }, [router]);
 
   const handleChildPress = (child) => {
-    router.push(`/userProfile?recordId=${child.studentId}`);
+    const params = { roleName: "Student" };
+
+    if (child?.studentId) {
+      params.recordId = String(child.studentId);
+    }
+
+    if (child?.userId) {
+      params.userId = String(child.userId);
+    }
+
+    if (!params.recordId && !params.userId) {
+      return;
+    }
+
+    router.push({ pathname: "/userProfile", params });
   };
 
   const handleLogout = async () => {
@@ -233,6 +552,13 @@ export default function ParentProfile() {
     try {
       setShowMenu(false);
       setShowEditModal(false);
+
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert("Permission Required", "Please allow photo access to change your profile picture.");
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -240,9 +566,15 @@ export default function ParentProfile() {
         quality: 0.75,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        await uploadProfileImage(result.assets[0].uri);
+      if (result.canceled) return;
+
+      const selectedAsset = result.assets?.[0];
+      if (!selectedAsset?.uri) {
+        Alert.alert("Error", "No image was selected.");
+        return;
       }
+
+      await uploadProfileImage(selectedAsset.uri);
     } catch {
       Alert.alert("Error", "Failed to pick image");
     }
@@ -251,20 +583,35 @@ export default function ParentProfile() {
   const uploadProfileImage = async (imageUri) => {
     try {
       if (!parentUser?.userId) return Alert.alert("Error", "User not found");
+      setUploadingPhoto(true);
 
-      const blob = await (await fetch(imageUri)).blob();
-      const imageRef = storageRef(storage, `profileImages/${parentUser.userId}`);
-      await uploadBytes(imageRef, blob);
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      if (!blob || blob.size === 0) {
+        throw new Error("Selected image is empty or unreadable.");
+      }
+
+      const imageRef = storageRef(storage, `profileImages/${parentUser.userId}/${Date.now()}.jpg`);
+      await uploadBytes(imageRef, blob, { contentType: blob.type || "image/jpeg" });
       const downloadURL = await getDownloadURL(imageRef);
 
       await update(ref(database, schoolAwarePath(`Users/${parentUser.userId}`)), {
         profileImage: downloadURL,
       });
 
-      setParentUser((prev) => ({ ...prev, profileImage: downloadURL }));
+      const nextParentUser = { ...(parentUser || {}), profileImage: downloadURL };
+      setParentUser(nextParentUser);
+      AsyncStorage.setItem("profileImage", downloadURL).catch(() => {});
+      writeCachedJson(getProfileCacheKey(schoolKey, parentNodeId), {
+        parentUser: nextParentUser,
+        children,
+        fetchedAt: Date.now(),
+      }).catch(() => {});
       Alert.alert("Success", "Profile picture updated successfully");
     } catch (error) {
       Alert.alert("Error", `Failed to upload image: ${error.message}`);
+    } finally {
+      setUploadingPhoto(false);
     }
   };
 
@@ -389,6 +736,20 @@ export default function ParentProfile() {
     setShowPasswordModal(true);
   }, []);
 
+  const openLanguageModal = useCallback(() => {
+    setShowMenu(false);
+    setShowLanguageModal(true);
+  }, []);
+
+  const closeLanguageModal = useCallback(() => {
+    setShowLanguageModal(false);
+  }, []);
+
+  const handleLanguageChange = useCallback((nextLanguageCode) => {
+    setLanguageCode(nextLanguageCode);
+    setShowLanguageModal(false);
+  }, [setLanguageCode]);
+
   const pullY = scrollY.interpolate({
     inputRange: [-220, 0],
     outputRange: [220, 0],
@@ -411,7 +772,7 @@ export default function ParentProfile() {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator size="large" color={PALETTE.accent} />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+        <Text style={styles.loadingText}>{labels.loadingProfile}</Text>
       </View>
     );
   }
@@ -420,10 +781,10 @@ export default function ParentProfile() {
     return (
       <View style={styles.loadingWrap}>
         <Ionicons name="person-circle-outline" size={56} color={PALETTE.offline} />
-        <Text style={styles.loadingTitle}>Profile unavailable</Text>
-        <Text style={styles.loadingText}>We could not load this parent profile.</Text>
+        <Text style={styles.loadingTitle}>{labels.profileUnavailableTitle}</Text>
+        <Text style={styles.loadingText}>{labels.profileUnavailableBody}</Text>
         <TouchableOpacity style={styles.emptyBackBtn} onPress={handleBack} activeOpacity={0.88}>
-          <Text style={styles.emptyBackText}>Back to dashboard</Text>
+          <Text style={styles.emptyBackText}>{labels.backToDashboard}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -435,13 +796,6 @@ export default function ParentProfile() {
       ? String(parentUser.username)
       : `@${parentUser.username}`
     : "@parent";
-  const joinedDate = parentUser.createdAt
-    ? new Date(parentUser.createdAt).toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-    : "Recently joined";
 
   return (
     <View style={styles.container}>
@@ -464,253 +818,313 @@ export default function ParentProfile() {
         <>
           <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setShowMenu(false)} />
           <View style={[styles.dropdownMenu, { top: insets.top + 52 }]}>
-            <TouchableOpacity style={styles.menuItem} onPress={handleEditInfo}>
-              <Text style={styles.menuText}>Edit Info</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={handleImagePicker}>
-              <Text style={styles.menuText}>Change Photo</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.menuItem} onPress={openPasswordModalFromActions}>
-              <Text style={styles.menuText}>Change Password</Text>
+            <TouchableOpacity style={styles.menuItem} onPress={openLanguageModal}>
+              <Text style={styles.menuText}>{`${labels.menuLanguage} (${labels.languageValue})`}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={handleSaveProfilePhoto}>
-              <Text style={styles.menuText}>Save to Gallery</Text>
+              <Text style={styles.menuText}>{labels.menuSaveToGallery}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.menuItem} onPress={handleTerms}>
-              <Text style={styles.menuText}>Terms & Privacy</Text>
+              <Text style={styles.menuText}>{labels.menuTerms}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.menuItem, styles.menuItemNoBorder]} onPress={handleLogout}>
-              <Text style={[styles.menuText, { color: PALETTE.danger, fontWeight: "700" }]}>Logout</Text>
+              <Text style={[styles.menuText, { color: PALETTE.danger, fontWeight: "700" }]}>{labels.menuLogout}</Text>
             </TouchableOpacity>
           </View>
         </>
       )}
 
-      <Animated.ScrollView
-        contentContainerStyle={[
-          styles.scroll,
-          { paddingBottom: Math.max(88, insets.bottom + 64) },
-        ]}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
-          useNativeDriver: false,
-        })}
-        scrollEventThrottle={16}
-        bounces
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.heroCard}>
-            <View style={[styles.heroBanner, { height: 110 + insets.top }]}> 
-              <View style={styles.heroBannerFallback}>
-                <View style={styles.heroBannerOrbPrimary} />
-                <View style={styles.heroBannerOrbSecondary} />
-              </View>
-              <View style={styles.heroBannerOverlay} />
+      <View style={styles.heroCard}>
+        <View style={[styles.heroBanner, { height: 110 + insets.top }]}>
+          <View style={styles.heroBannerFallback}>
+            <View style={styles.heroBannerOrbPrimary} />
+            <View style={styles.heroBannerOrbSecondary} />
+          </View>
+          <View style={styles.heroBannerOverlay} />
 
-              <View style={[styles.heroTopBar, { top: insets.top + 6 }]}> 
-                <TouchableOpacity style={styles.heroTopIconBtn} onPress={handleBack}>
-                  <Ionicons name="chevron-back" size={20} color={PALETTE.white} />
-                </TouchableOpacity>
+          <View style={[styles.heroTopBar, { top: insets.top + 6 }]}>
+            <TouchableOpacity style={styles.heroTopIconBtn} onPress={handleBack}>
+              <Ionicons name="chevron-back" size={20} color={PALETTE.white} />
+            </TouchableOpacity>
 
-                <View style={styles.heroTopActions}>
-                  <View style={styles.heroQuickStats}>
-                    <MiniPill
-                      icon="people-outline"
-                      text={`${children.length} ${children.length === 1 ? "Child" : "Children"}`}
-                    />
-                  </View>
-
-                  <TouchableOpacity
-                    style={[styles.heroTopIconBtn, styles.heroTopIconBtnSpacing]}
-                    onPress={handleDarkModePress}
-                    activeOpacity={0.88}
-                  >
-                    <Ionicons name={isDark ? "sunny-outline" : "moon-outline"} size={17} color={PALETTE.white} />
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.heroTopIconBtn} onPress={() => setShowMenu((v) => !v)}>
-                    <Ionicons name="ellipsis-horizontal" size={18} color={PALETTE.white} />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.heroAvatarSlot}>
-              <View style={styles.avatarWrap}>
-                <View style={styles.photoCard}>
-                  <View style={styles.photoCardImageClip}>
-                    <Image source={{ uri: parentUser.profileImage || defaultProfile }} style={styles.photoCardImage} />
-                  </View>
-                  <TouchableOpacity style={styles.photoCardCamera} onPress={handleImagePicker} activeOpacity={0.9}>
-                    <Ionicons name="camera" size={16} color="#fff" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.heroIdentityBlock}>
-              <View style={styles.identityTopRow}>
-                <Text style={styles.name} numberOfLines={1}>
-                  {parentUser.name || "Parent"}
-                </Text>
-              </View>
-
-              <View style={styles.subRow}>
-                <Text style={styles.subText}>{usernameHandle}</Text>
-                <MiniPill icon="person-outline" text="Parent" compact />
+            <View style={styles.heroTopActions}>
+              <View style={styles.heroQuickStats}>
                 <MiniPill
-                  icon={isOnline ? "wifi-outline" : "cloud-offline-outline"}
-                  text={isOnline ? "Online" : "Offline"}
-                  compact
+                  icon="people-outline"
+                  text={`${children.length} ${children.length === 1 ? labels.childSingle : labels.childPlural}`}
                 />
               </View>
 
-              <TouchableOpacity style={styles.editProfileBtn} onPress={openEditModal} activeOpacity={0.88}>
-                <Text style={styles.editProfileText}>Edit Profile</Text>
+              <TouchableOpacity
+                style={[styles.heroTopIconBtn, styles.heroTopIconBtnSpacing]}
+                onPress={handleDarkModePress}
+                activeOpacity={0.88}
+              >
+                <Ionicons name={isDark ? "sunny-outline" : "moon-outline"} size={17} color={PALETTE.white} />
               </TouchableOpacity>
 
-              <View style={styles.profileFilterRow}>
-                <TouchableOpacity
-                  style={[
-                    styles.profileFilterBtn,
-                    profileSectionTab === "main" && styles.profileFilterBtnActive,
-                  ]}
-                  onPress={() => setProfileSectionTab("main")}
-                  activeOpacity={0.85}
-                >
-                  <Text
-                    style={[
-                      styles.profileFilterText,
-                      profileSectionTab === "main" && styles.profileFilterTextActive,
-                    ]}
-                  >
-                    Main
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.profileFilterBtn,
-                    profileSectionTab === "info" && styles.profileFilterBtnActive,
-                  ]}
-                  onPress={() => setProfileSectionTab("info")}
-                  activeOpacity={0.85}
-                >
-                  <Text
-                    style={[
-                      styles.profileFilterText,
-                      profileSectionTab === "info" && styles.profileFilterTextActive,
-                    ]}
-                  >
-                    Info
-                  </Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={styles.heroTopIconBtn} onPress={() => setShowMenu((v) => !v)}>
+                <Ionicons name="ellipsis-horizontal" size={18} color={PALETTE.white} />
+              </TouchableOpacity>
             </View>
+          </View>
         </View>
 
-        {profileSectionTab === "main" ? (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Family overview</Text>
-
-              <TouchableOpacity style={styles.featureCard} activeOpacity={0.9} onPress={openEditModal}>
-                <View style={styles.featureTop}>
-                  <View style={styles.featureIconWrap}>
-                    <Ionicons name="people-outline" size={18} color={PALETTE.accent} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.featureTitle}>Parent account</Text>
-                    <Text numberOfLines={1} style={styles.featureSub}>
-                      {children.length
-                        ? `${children.length} linked ${children.length === 1 ? "child" : "children"} • ${joinedDate}`
-                        : `No linked children yet • ${joinedDate}`}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
-                </View>
+        <View style={styles.heroAvatarSlot}>
+          <View style={styles.avatarWrap}>
+            <View style={styles.photoCard}>
+              <View style={styles.photoCardImageClip}>
+                <AppImage
+                  uri={parentUser.profileImage || defaultProfile}
+                  fallbackSource={require("../assets/images/avatar_placeholder.png")}
+                  style={styles.photoCardImage}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.photoCardCamera}
+                onPress={handleImagePicker}
+                activeOpacity={0.9}
+                disabled={uploadingPhoto}
+              >
+                <Ionicons name="camera" size={16} color="#fff" />
               </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
-              {children.length ? (
-                children.map((child) => (
-                  <TouchableOpacity
-                    key={child.studentId}
-                    style={styles.childCard}
-                    onPress={() => handleChildPress(child)}
-                    activeOpacity={0.88}
-                  >
-                    <Image source={{ uri: child.profileImage }} style={styles.childImage} />
-                    <View style={styles.childBody}>
-                      <View style={styles.childTopRow}>
-                        <Text style={styles.childName}>{child.name}</Text>
-                        <View style={styles.childRolePill}>
-                          <Text style={styles.childRoleText}>{child.relationship || "Child"}</Text>
+        <View style={styles.heroIdentityBlock}>
+          <View style={styles.identityTopRow}>
+            <Text style={styles.name} numberOfLines={1}>
+              {parentUser.name || "Parent"}
+            </Text>
+          </View>
+
+          <View style={styles.subRow}>
+            <Text style={styles.subText}>{usernameHandle}</Text>
+            <MiniPill icon="person-outline" text={labels.parentRole} compact />
+            <MiniPill
+              icon={isOnline ? "wifi-outline" : "cloud-offline-outline"}
+              text={isOnline ? labels.online : labels.offline}
+              compact
+            />
+          </View>
+
+          <TouchableOpacity style={styles.editProfileBtn} onPress={openEditModal} activeOpacity={0.88}>
+            <Text style={styles.editProfileText}>{labels.editProfile}</Text>
+          </TouchableOpacity>
+
+          <View style={styles.profileFilterRow}>
+            <TouchableOpacity
+              style={[
+                styles.profileFilterBtn,
+                profileSectionTab === "main" && styles.profileFilterBtnActive,
+              ]}
+              onPress={() => setProfileSectionTab("main")}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.profileFilterText,
+                  profileSectionTab === "main" && styles.profileFilterTextActive,
+                ]}
+              >
+                {labels.tabMain}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.profileFilterBtn,
+                profileSectionTab === "info" && styles.profileFilterBtnActive,
+              ]}
+              onPress={() => setProfileSectionTab("info")}
+              activeOpacity={0.85}
+            >
+              <Text
+                style={[
+                  styles.profileFilterText,
+                  profileSectionTab === "info" && styles.profileFilterTextActive,
+                ]}
+              >
+                {labels.tabInfo}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.contentWrap}>
+        <Animated.ScrollView
+          style={styles.sectionScroll}
+          contentContainerStyle={[
+            styles.sectionScrollContent,
+            { paddingBottom: Math.max(88, insets.bottom + 64) },
+          ]}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+            useNativeDriver: false,
+          })}
+          scrollEventThrottle={16}
+          bounces
+          showsVerticalScrollIndicator={false}
+        >
+          {profileSectionTab === "main" ? (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>{labels.familyOverview}</Text>
+
+                {children.length ? (
+                  children.map((child) => (
+                    <TouchableOpacity
+                      key={child.studentId}
+                      style={styles.childCard}
+                      onPress={() => handleChildPress(child)}
+                      activeOpacity={0.88}
+                    >
+                      <AppImage
+                        uri={child.profileImage}
+                        fallbackSource={require("../assets/images/avatar_placeholder.png")}
+                        style={styles.childImage}
+                      />
+                      <View style={styles.childBody}>
+                        <View style={styles.childTopRow}>
+                          <Text style={styles.childName}>{child.name}</Text>
+                          <View style={styles.childRolePill}>
+                            <Text style={styles.childRoleText}>{labels.fallbackChildRole}</Text>
+                          </View>
                         </View>
+                        <Text style={styles.childMeta}>
+                          {labels.grade} {child.grade || "--"} • {labels.section} {child.section || "--"}
+                        </Text>
                       </View>
-                      <Text style={styles.childMeta}>
-                        Grade {child.grade || "--"} • Section {child.section || "--"}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <View style={styles.noteStateCard}>
-                  <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
-                  <Text style={styles.noteStateText}>No linked children found yet.</Text>
-                </View>
-              )}
-            </View>
+                      <Ionicons name="chevron-forward" size={18} color={PALETTE.muted} />
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={styles.noteStateCard}>
+                    <Ionicons name="people-outline" size={18} color={PALETTE.muted} />
+                    <Text style={styles.noteStateText}>{labels.noLinkedChildrenFound}</Text>
+                  </View>
+                )}
+              </View>
 
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>{labels.support}</Text>
+                <ActionRow
+                  icon="paper-plane-outline"
+                  title={labels.telegram}
+                  subtitle={labels.telegramSubtitle}
+                  onPress={() => Linking.openURL("https://t.me/gojo_edu")}
+                />
+                <ActionRow
+                  icon="mail-outline"
+                  title={labels.email}
+                  subtitle={labels.emailSubtitle}
+                  onPress={() => Linking.openURL("mailto:gojo.education1@gmail.com")}
+                />
+              </View>
+            </>
+          ) : (
             <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Support</Text>
-              <ActionRow
-                icon="paper-plane-outline"
-                title="Telegram"
-                subtitle="Chat with the Gojo team on Telegram"
-                onPress={() => Linking.openURL("https://t.me/gojo_edu")}
-              />
-              <ActionRow
-                icon="mail-outline"
-                title="Email"
-                subtitle="Send us a message by email"
-                onPress={() => Linking.openURL("mailto:gojo.education1@gmail.com")}
-              />
+              <Text style={styles.sectionTitle}>{labels.profileInfo}</Text>
+              <InfoRow label={labels.name} value={parentUser.name} />
+              <InfoRow label={labels.username} value={parentUser.username ? usernameHandle : null} />
+              <InfoRow label={labels.role} value={labels.parentRole} />
+              <InfoRow label={labels.status} value={isOnline ? labels.online : labels.offline} />
+              <InfoRow label={labels.children} value={`${children.length}`} />
+              <InfoRow label={labels.phone} value={parentUser.phone} />
+              <InfoRow label={labels.emailLabel} value={parentUser.email} />
             </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Profile info</Text>
-              <InfoRow label="Name" value={parentUser.name} />
-              <InfoRow label="Username" value={parentUser.username ? usernameHandle : null} />
-              <InfoRow label="Role" value="Parent" />
-              <InfoRow label="Status" value={isOnline ? "Online" : "Offline"} />
-              <InfoRow label="Children" value={`${children.length}`} />
-              <InfoRow label="Phone" value={parentUser.phone} />
-              <InfoRow label="Email" value={parentUser.email} />
-            </View>
-          </>
-        )}
-      </Animated.ScrollView>
+          )}
+        </Animated.ScrollView>
+      </View>
+
+      <Modal visible={showLanguageModal} transparent animationType="fade" onRequestClose={closeLanguageModal}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>{labels.languageTitle}</Text>
+
+            <TouchableOpacity
+              style={[styles.languageOptionBtn, languageCode === "en" && styles.languageOptionBtnActive]}
+              onPress={() => handleLanguageChange("en")}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="language-outline" size={18} color={PALETTE.text} />
+              <View style={styles.languageOptionBody}>
+                <Text style={styles.languageOptionTitle}>{labels.languageEnglish}</Text>
+                <Text style={styles.languageOptionSubtitle}>{labels.languageEnglishSubtitle}</Text>
+              </View>
+              {languageCode === "en" ? <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} /> : null}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.languageOptionBtn, languageCode === "am" && styles.languageOptionBtnActive]}
+              onPress={() => handleLanguageChange("am")}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="language-outline" size={18} color={PALETTE.text} />
+              <View style={styles.languageOptionBody}>
+                <Text style={styles.languageOptionTitle}>{labels.languageAmharic}</Text>
+                <Text style={styles.languageOptionSubtitle}>{labels.languageAmharicSubtitle}</Text>
+              </View>
+              {languageCode === "am" ? <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} /> : null}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.languageOptionBtn, languageCode === "om" && styles.languageOptionBtnActive]}
+              onPress={() => handleLanguageChange("om")}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="language-outline" size={18} color={PALETTE.text} />
+              <View style={styles.languageOptionBody}>
+                <Text style={styles.languageOptionTitle}>{labels.languageOromo}</Text>
+                <Text style={styles.languageOptionSubtitle}>{labels.languageOromoSubtitle}</Text>
+              </View>
+              {languageCode === "om" ? <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} /> : null}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.languageOptionBtn, languageCode === "ti" && styles.languageOptionBtnActive]}
+              onPress={() => handleLanguageChange("ti")}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="language-outline" size={18} color={PALETTE.text} />
+              <View style={styles.languageOptionBody}>
+                <Text style={styles.languageOptionTitle}>{labels.languageTigrinya}</Text>
+                <Text style={styles.languageOptionSubtitle}>{labels.languageTigrinyaSubtitle}</Text>
+              </View>
+              {languageCode === "ti" ? <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} /> : null}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.editOptionBtn, styles.editOptionCancel]}
+              onPress={closeLanguageModal}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="close-outline" size={18} color={PALETTE.muted} />
+              <Text style={[styles.editOptionText, styles.editOptionCancelText]}>{labels.cancel}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={showEditModal} transparent animationType="fade" onRequestClose={closeEditModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Edit Profile</Text>
+            <Text style={styles.modalTitle}>{labels.editProfileTitle}</Text>
 
             <TouchableOpacity style={styles.editOptionBtn} onPress={handleEditInfo} activeOpacity={0.88}>
               <Ionicons name="create-outline" size={18} color={PALETTE.text} />
-              <Text style={styles.editOptionText}>Edit Info</Text>
+              <Text style={styles.editOptionText}>{labels.menuEditInfo}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.editOptionBtn} onPress={handleImagePicker} activeOpacity={0.88}>
               <Ionicons name="image-outline" size={18} color={PALETTE.text} />
-              <Text style={styles.editOptionText}>Change Photo</Text>
+              <Text style={styles.editOptionText}>{labels.menuChangePhoto}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.editOptionBtn} onPress={openPasswordModalFromActions} activeOpacity={0.88}>
               <Ionicons name="key-outline" size={18} color={PALETTE.text} />
-              <Text style={styles.editOptionText}>Change Password</Text>
+              <Text style={styles.editOptionText}>{labels.menuChangePassword}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -719,7 +1133,7 @@ export default function ParentProfile() {
               activeOpacity={0.88}
             >
               <Ionicons name="close-outline" size={18} color={PALETTE.muted} />
-              <Text style={[styles.editOptionText, styles.editOptionCancelText]}>Cancel</Text>
+              <Text style={[styles.editOptionText, styles.editOptionCancelText]}>{labels.cancel}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -728,22 +1142,22 @@ export default function ParentProfile() {
       <Modal visible={showPasswordModal} transparent animationType="fade" onRequestClose={handleClosePasswordModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Change Password</Text>
+            <Text style={styles.modalTitle}>{labels.changePasswordTitle}</Text>
 
             <Field
-              label="Current Password"
+              label={labels.currentPassword}
               value={currentPassword}
               onChangeText={(text) => {
                 setCurrentPassword(text);
                 setCurrentPasswordError("");
               }}
               secureTextEntry
-              placeholder="Enter current password"
+              placeholder={labels.enterCurrentPassword}
               error={currentPasswordError}
             />
 
             <Field
-              label="New Password"
+              label={labels.newPassword}
               value={newPassword}
               onChangeText={(text) => {
                 setNewPassword(text);
@@ -755,12 +1169,12 @@ export default function ParentProfile() {
                 }
               }}
               secureTextEntry
-              placeholder="Enter new password (min 6 characters)"
+              placeholder={labels.enterNewPassword}
               error={newPasswordError}
             />
 
             <Field
-              label="Confirm New Password"
+              label={labels.confirmNewPassword}
               value={confirmPassword}
               onChangeText={(text) => {
                 setConfirmPassword(text);
@@ -771,7 +1185,7 @@ export default function ParentProfile() {
                 }
               }}
               secureTextEntry
-              placeholder="Confirm new password"
+              placeholder={labels.confirmNewPasswordPlaceholder}
               error={confirmPasswordError}
             />
 
@@ -781,14 +1195,14 @@ export default function ParentProfile() {
                 onPress={handleClosePasswordModal}
                 disabled={isChangingPassword}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>{labels.cancel}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.confirmButton]}
                 onPress={handleChangePassword}
                 disabled={isChangingPassword}
               >
-                <Text style={styles.confirmButtonText}>{isChangingPassword ? "Saving..." : "Save"}</Text>
+                <Text style={styles.confirmButtonText}>{isChangingPassword ? labels.saving : labels.save}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -917,7 +1331,7 @@ const createStyles = (PALETTE) => StyleSheet.create({
 
   heroCard: {
     marginTop: 0,
-    marginHorizontal: -14,
+    marginHorizontal: 0,
     backgroundColor: PALETTE.card,
     borderRadius: 0,
     marginBottom: 12,
@@ -1451,6 +1865,37 @@ const createStyles = (PALETTE) => StyleSheet.create({
     fontSize: 12,
     color: PALETTE.muted,
     marginTop: 2,
+  },
+  languageOptionBtn: {
+    minHeight: 56,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: PALETTE.border,
+    backgroundColor: PALETTE.inputBackground,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  languageOptionBtnActive: {
+    borderColor: PALETTE.accent,
+    backgroundColor: PALETTE.accentSoft,
+  },
+  languageOptionBody: {
+    flex: 1,
+    marginLeft: 10,
+    marginRight: 10,
+  },
+  languageOptionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: PALETTE.text,
+  },
+  languageOptionSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: PALETTE.muted,
   },
 
   infoRow: {

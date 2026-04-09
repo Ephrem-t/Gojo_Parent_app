@@ -1,15 +1,15 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { View, Text, ActivityIndicator, StyleSheet, Dimensions, TouchableOpacity } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { child, get, ref } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
-import { Image as ExpoImage } from "expo-image";
+import AppImage from "../../components/ui/AppImage";
 import { useParentTheme } from "../../hooks/use-parent-theme";
+import { resolvePostAuthor } from "../lib/userHelpers";
 
-const { width, height } = Dimensions.get("window");
-
-const fallbackAvatar = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+const { width } = Dimensions.get("window");
 
 const STRINGS = {
   back: "Back",
@@ -17,42 +17,56 @@ const STRINGS = {
   notFound: "Post not found",
 };
 
-const mapPost = (postId, post, usersData, schoolAdminData) => {
-  let adminName = "School Admin";
-  let adminImage = fallbackAvatar;
-  let adminRecordId = post.adminId || null;
-  let adminUserId = null;
+function getLikeCount(likeCount, likes) {
+  if (likes && typeof likes === "object") {
+    return Object.keys(likes).length;
+  }
 
-  if (adminRecordId && schoolAdminData[adminRecordId]) {
-    const adminInfo = schoolAdminData[adminRecordId];
-    adminUserId = adminInfo.userId;
-    if (adminUserId && usersData[adminUserId]) {
-      const userInfo = usersData[adminUserId];
-      adminName = userInfo.name || userInfo.username || adminName;
-      adminImage = userInfo.profileImage || adminImage;
+  const numericLikeCount = Number(likeCount);
+  return Number.isFinite(numericLikeCount) ? numericLikeCount : 0;
+}
+
+async function findPostRecord(postsPath, identifier) {
+  const normalizedIdentifier = String(identifier || "").trim();
+  if (!normalizedIdentifier) return null;
+
+  try {
+    const directSnap = await get(child(ref(database), `${postsPath}/${normalizedIdentifier}`));
+    if (directSnap.exists()) {
+      return {
+        key: normalizedIdentifier,
+        value: directSnap.val() || {},
+      };
     }
+  } catch {
+    // ignore and try scanning by postId field
   }
 
-  if (!adminUserId && post.userId && usersData[post.userId]) {
-    adminUserId = post.userId;
-    const userInfo = usersData[adminUserId];
-    adminName = userInfo?.name || userInfo?.username || adminName;
-    adminImage = userInfo?.profileImage || adminImage;
-  }
+  try {
+    const postsSnap = await get(child(ref(database), postsPath));
+    if (!postsSnap.exists()) return null;
 
-  return {
-    id: postId,
-    message: post.message || "",
-    postUrl: post.postUrl || null,
-    time: post.time || "",
-    likes: post.likes || {},
-    likeCount: post.likeCount || 0,
-    adminName,
-    adminImage,
-    adminId: adminRecordId,
-    userId: adminUserId,
-  };
-};
+    let match = null;
+    postsSnap.forEach((childSnap) => {
+      if (match) return true;
+
+      const value = childSnap.val() || {};
+      if (String(value.postId || "").trim() === normalizedIdentifier) {
+        match = {
+          key: childSnap.key,
+          value,
+        };
+        return true;
+      }
+
+      return false;
+    });
+
+    return match;
+  } catch {
+    return null;
+  }
+}
 
 const getRelativeTime = (postTime) => {
   const date = new Date(postTime);
@@ -71,6 +85,10 @@ export default function PostScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { colors, isDark } = useParentTheme();
+  const postRouteId = useMemo(() => {
+    if (Array.isArray(id)) return String(id[0] || "").trim();
+    return typeof id === "string" ? id.trim() : "";
+  }, [id]);
   const palette = useMemo(
     () => ({
       background: colors.backgroundAlt,
@@ -102,24 +120,48 @@ export default function PostScreen() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (!id) return;
-      const postsSnap = await get(child(ref(database), `Posts/${id}`));
-      if (!postsSnap.exists()) {
+      if (!postRouteId) {
         setPost(null);
         return;
       }
-      const postData = postsSnap.val();
-      const usersSnap = await get(child(ref(database), "Users"));
-      const usersData = usersSnap.exists() ? usersSnap.val() : {};
-      const schoolAdminSnap = await get(child(ref(database), "School_Admins"));
-      const schoolAdminData = schoolAdminSnap.exists() ? schoolAdminSnap.val() : {};
-      setPost(mapPost(id, postData, usersData, schoolAdminData));
-    } catch (e) {
+
+      const schoolKey = await AsyncStorage.getItem("schoolKey");
+      let postRecord = null;
+
+      if (schoolKey) {
+        postRecord = await findPostRecord(`Platform1/Schools/${schoolKey}/Posts`, postRouteId);
+      }
+
+      if (!postRecord) {
+        postRecord = await findPostRecord("Posts", postRouteId);
+      }
+
+      if (!postRecord) {
+        setPost(null);
+        return;
+      }
+
+      const postData = postRecord.value || {};
+      const author = await resolvePostAuthor(postData, schoolKey);
+
+      setPost({
+        id: postRecord.key,
+        message: postData.message || "",
+        postUrl: postData.postUrl || null,
+        time: postData.time || "",
+        likes: postData.likes || {},
+        likeCount: getLikeCount(postData.likeCount, postData.likes),
+        adminName: author?.name || author?.username || postData.adminName || "School Admin",
+        adminImage: author?.profileImage || postData.adminProfile || null,
+        adminId: author?._recordId || postData.adminId || null,
+        userId: author?._nodeKey || null,
+      });
+    } catch {
       setPost(null);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [postRouteId]);
 
   useEffect(() => {
     load();
@@ -158,7 +200,11 @@ export default function PostScreen() {
       </View>
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <ExpoImage source={{ uri: post.adminImage }} style={styles.avatar} contentFit="cover" transition={150} />
+          <AppImage
+            uri={post.adminImage}
+            fallbackSource={require("../../assets/images/avatar_placeholder.png")}
+            style={styles.avatar}
+          />
           <View style={{ flex: 1 }}>
             <Text style={styles.adminName}>{post.adminName}</Text>
             <Text style={styles.time}>{getRelativeTime(post.time)}</Text>
@@ -166,7 +212,7 @@ export default function PostScreen() {
         </View>
         {post.message ? <Text style={styles.message}>{post.message}</Text> : null}
         {post.postUrl ? (
-          <ExpoImage source={{ uri: post.postUrl }} style={styles.postImage} contentFit="cover" transition={150} />
+          <AppImage uri={post.postUrl} style={styles.postImage} />
         ) : null}
         <Text style={styles.likes}>{post.likeCount} likes</Text>
       </View>

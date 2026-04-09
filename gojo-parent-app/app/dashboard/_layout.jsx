@@ -8,6 +8,7 @@ import { Image, Text, TouchableOpacity, View, StyleSheet, Animated, Platform } f
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
+import AppImage from "../../components/ui/AppImage";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
@@ -15,7 +16,7 @@ const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 export default function DashboardLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colors, expoStatusBarStyle, navigationBarButtonStyle } = useParentTheme();
+  const { colors, expoStatusBarStyle, navigationBarButtonStyle, amharic, oromo } = useParentTheme();
 
   const tabColors = useMemo(
     () => ({
@@ -37,8 +38,20 @@ export default function DashboardLayout() {
     [colors]
   );
   const styles = useMemo(() => createStyles(tabColors), [tabColors]);
+  const labels = useMemo(
+    () => ({
+      classMark: oromo ? "Qormaata" : amharic ? "ውጤት" : "Class Mark",
+      attendance: oromo ? "Argama" : amharic ? "መገኘት" : "Attendance",
+      home: oromo ? "Mana" : amharic ? "መነሻ" : "Home",
+      services: oromo ? "Tajaajiloota" : amharic ? "አገልግሎቶች" : "Services",
+      servicesCenter: oromo ? "Giddugala Tajaajilaa" : amharic ? "የአገልግሎት ማዕከል" : "Services Center",
+      profile: oromo ? "Profaayilii" : amharic ? "መገለጫ" : "Profile",
+      school: oromo ? "Mana Barumsaa" : amharic ? "ትምህርት ቤት" : "School",
+    }),
+    [amharic, oromo]
+  );
 
-  const [schoolName, setSchoolName] = useState("");
+  const [, setSchoolName] = useState("");
   const [schoolKey, setSchoolKey] = useState(null);
 
   const [profileImage, setProfileImage] = useState(null);
@@ -47,12 +60,6 @@ export default function DashboardLayout() {
   const [totalUnread, setTotalUnread] = useState(0);
 
   const shimmerAnim = useRef(new Animated.Value(0)).current;
-
-  const parentRefRef = useRef(null);
-  const parentCallbackRef = useRef(null);
-
-  const userRefRef = useRef(null);
-  const userCallbackRef = useRef(null);
 
   const chatsRefRef = useRef(null);
   const chatsCallbackRef = useRef(null);
@@ -90,26 +97,6 @@ export default function DashboardLayout() {
     },
     [schoolKey]
   );
-
-  const cleanupParentListener = useCallback(() => {
-    if (parentRefRef.current && parentCallbackRef.current) {
-      try {
-        off(parentRefRef.current, "value", parentCallbackRef.current);
-      } catch {}
-    }
-    parentRefRef.current = null;
-    parentCallbackRef.current = null;
-  }, []);
-
-  const cleanupUserListener = useCallback(() => {
-    if (userRefRef.current && userCallbackRef.current) {
-      try {
-        off(userRefRef.current, "value", userCallbackRef.current);
-      } catch {}
-    }
-    userRefRef.current = null;
-    userCallbackRef.current = null;
-  }, []);
 
   const cleanupChatsListener = useCallback(() => {
     if (chatsRefRef.current && chatsCallbackRef.current) {
@@ -157,22 +144,22 @@ export default function DashboardLayout() {
 
           if (schoolSnap.exists()) {
             const info = schoolSnap.val() || {};
-            setSchoolName(info.name || "School");
+              setSchoolName(info.name || labels.school);
           } else {
-            setSchoolName("School");
+              setSchoolName(labels.school);
           }
         } else {
-          setSchoolName("School");
+            setSchoolName(labels.school);
         }
       } catch {
-        if (mounted) setSchoolName("School");
+        if (mounted) setSchoolName(labels.school);
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [labels.school]);
 
   useEffect(() => {
     let mounted = true;
@@ -190,57 +177,37 @@ export default function DashboardLayout() {
         }
 
         const parentRefPath = schoolAwarePath(`Parents/${parentNodeKey}`);
-        const parentDbRef = ref(database, parentRefPath);
+        const parentSnap = await get(ref(database, parentRefPath));
+        if (!mounted) return;
 
-        cleanupParentListener();
-        cleanupUserListener();
+        if (!parentSnap.exists()) {
+          setProfileImage(DEFAULT_AVATAR);
+          setLoading(false);
+          return;
+        }
 
-        const parentCallback = (parentSnap) => {
-          if (!mounted) return;
+        const parentData = parentSnap.val() || {};
+        const actualUserId = parentData.userId || null;
+        setParentUserId(actualUserId);
 
-          if (!parentSnap.exists()) {
-            setProfileImage(DEFAULT_AVATAR);
-            setLoading(false);
-            return;
-          }
+        if (!actualUserId) {
+          setProfileImage(DEFAULT_AVATAR);
+          setLoading(false);
+          return;
+        }
 
-          const parentData = parentSnap.val() || {};
-          const actualUserId = parentData.userId || null;
-          setParentUserId(actualUserId);
+        const userRefPath = schoolAwarePath(`Users/${actualUserId}`);
+        const userSnap = await get(ref(database, userRefPath));
+        if (!mounted) return;
 
-          if (!actualUserId) {
-            setProfileImage(DEFAULT_AVATAR);
-            setLoading(false);
-            cleanupUserListener();
-            return;
-          }
+        if (userSnap.exists()) {
+          const user = userSnap.val() || {};
+          setProfileImage(user.profileImage || DEFAULT_AVATAR);
+        } else {
+          setProfileImage(DEFAULT_AVATAR);
+        }
 
-          const userRefPath = schoolAwarePath(`Users/${actualUserId}`);
-          const userDbRef = ref(database, userRefPath);
-
-          cleanupUserListener();
-
-          const userCallback = (userSnap) => {
-            if (!mounted) return;
-
-            if (userSnap.exists()) {
-              const user = userSnap.val() || {};
-              setProfileImage(user.profileImage || DEFAULT_AVATAR);
-            } else {
-              setProfileImage(DEFAULT_AVATAR);
-            }
-
-            setLoading(false);
-          };
-
-          userRefRef.current = userDbRef;
-          userCallbackRef.current = userCallback;
-          onValue(userDbRef, userCallback);
-        };
-
-        parentRefRef.current = parentDbRef;
-        parentCallbackRef.current = parentCallback;
-        onValue(parentDbRef, parentCallback);
+        setLoading(false);
       } catch {
         if (mounted) {
           setProfileImage(DEFAULT_AVATAR);
@@ -255,10 +222,8 @@ export default function DashboardLayout() {
 
     return () => {
       mounted = false;
-      cleanupParentListener();
-      cleanupUserListener();
     };
-  }, [schoolKey, schoolAwarePath, cleanupParentListener, cleanupUserListener]);
+  }, [schoolKey, schoolAwarePath]);
 
   useEffect(() => {
     if (!parentUserId) {
@@ -267,32 +232,51 @@ export default function DashboardLayout() {
       return;
     }
 
-    const chatsRefPath = schoolAwarePath("Chats");
-    const chatsDbRef = ref(database, chatsRefPath);
+    const chatSummaryRefPath = schoolAwarePath(`ChatSummaries/${parentUserId}`);
+    const summaryDbRef = ref(database, chatSummaryRefPath);
 
     cleanupChatsListener();
 
     const chatsCallback = (snap) => {
-      if (!snap.exists()) {
-        setTotalUnread(0);
+      if (snap.exists()) {
+        let total = 0;
+        snap.forEach((chatSnap) => {
+          const value = chatSnap.val() || {};
+          total += Number(value.unread || 0);
+        });
+        setTotalUnread(total);
         return;
       }
 
-      let total = 0;
-      snap.forEach((chatSnap) => {
-        const unreadNode = chatSnap.child("unread");
-        if (unreadNode.exists()) {
-          const val = unreadNode.child(parentUserId).val();
-          if (typeof val === "number") total += val;
+      const legacyChatsRefPath = schoolAwarePath("Chats");
+      const legacyChatsDbRef = ref(database, legacyChatsRefPath);
+      const legacyCallback = (legacySnap) => {
+        if (!legacySnap.exists()) {
+          setTotalUnread(0);
+          return;
         }
-      });
 
-      setTotalUnread(total);
+        let total = 0;
+        legacySnap.forEach((chatSnap) => {
+          const unreadNode = chatSnap.child("unread");
+          if (unreadNode.exists()) {
+            const val = unreadNode.child(parentUserId).val();
+            if (typeof val === "number") total += val;
+          }
+        });
+
+        setTotalUnread(total);
+      };
+
+      cleanupChatsListener();
+      chatsRefRef.current = legacyChatsDbRef;
+      chatsCallbackRef.current = legacyCallback;
+      onValue(legacyChatsDbRef, legacyCallback);
     };
 
-    chatsRefRef.current = chatsDbRef;
+    chatsRefRef.current = summaryDbRef;
     chatsCallbackRef.current = chatsCallback;
-    onValue(chatsDbRef, chatsCallback);
+    onValue(summaryDbRef, chatsCallback);
 
     return () => {
       cleanupChatsListener();
@@ -301,11 +285,9 @@ export default function DashboardLayout() {
 
   useEffect(() => {
     return () => {
-      cleanupParentListener();
-      cleanupUserListener();
       cleanupChatsListener();
     };
-  }, [cleanupParentListener, cleanupUserListener, cleanupChatsListener]);
+  }, [cleanupChatsListener]);
 
   const skeletonOpacity = shimmerAnim.interpolate({
     inputRange: [0, 1],
@@ -352,8 +334,6 @@ export default function DashboardLayout() {
     </View>
   );
 
-  const HomeHeaderSpacer = () => <View style={styles.headerLeftSpacer} />;
-
   const ClassMarkTabIcon = ({ color, size }) => (
     <View style={[styles.tabIconShell, styles.classMarkTabIconWrap]}>
       <Ionicons name="stats-chart-outline" size={size - 1} color={color} />
@@ -381,8 +361,9 @@ export default function DashboardLayout() {
 
     if (imageUri) {
       return (
-        <Image
-          source={{ uri: imageUri }}
+        <AppImage
+          uri={imageUri}
+          fallbackSource={require("../../assets/images/avatar_placeholder.png")}
           style={[
             styles.tabProfileImage,
             focused && { borderColor: color, transform: [{ scale: 1.06 }] },
@@ -490,9 +471,9 @@ export default function DashboardLayout() {
         <Tabs.Screen
           name="classMark"
           options={{
-            title: "Class Mark",
-            tabBarLabel: "Class Mark",
-            headerTitle: "Class Mark",
+            title: labels.classMark,
+            tabBarLabel: labels.classMark,
+            headerTitle: labels.classMark,
             headerRight: () => null,
             tabBarIcon: ({ color, size }) => <ClassMarkTabIcon color={color} size={size} />,
           }}
@@ -501,9 +482,9 @@ export default function DashboardLayout() {
         <Tabs.Screen
           name="attendance"
           options={{
-            title: "Attendance",
-            tabBarLabel: "Attendance",
-            headerTitle: "Attendance",
+            title: labels.attendance,
+            tabBarLabel: labels.attendance,
+            headerTitle: labels.attendance,
             headerRight: () => null,
             tabBarIcon: ({ color, size }) => <AttendanceTabIcon color={color} size={size} />,
           }}
@@ -512,8 +493,7 @@ export default function DashboardLayout() {
         <Tabs.Screen
           name="home"
           options={{
-            title: "Home",
-            headerLeft: () => <HomeHeaderSpacer />,
+            title: labels.home,
             headerTitle: () => <HomeHeaderTitle />,
             headerRight: () => <HomeHeaderControls />,
             tabBarIcon: ({ color, focused }) => <HomeTabIcon color={color} focused={focused} />,
@@ -524,11 +504,11 @@ export default function DashboardLayout() {
           name="school"
           options={{
             href: null,
-            title: "Services Center",
-            tabBarLabel: "Services",
+            title: labels.servicesCenter,
+            tabBarLabel: labels.services,
             headerTitle: () => (
               <Text style={styles.schoolTitle} numberOfLines={1} ellipsizeMode="tail">
-                Services Center
+                {labels.servicesCenter}
               </Text>
             ),
             tabBarIcon: ({ color, size }) => <SchoolTabIcon color={color} size={size} />,
@@ -538,7 +518,7 @@ export default function DashboardLayout() {
         <Tabs.Screen
           name="profile"
           options={{
-            title: "Profile",
+            title: labels.profile,
             headerShown: false,
             tabBarIcon: ({ color, size, focused }) => <ProfileTabIcon color={color} size={size} focused={focused} />,
           }}
@@ -654,10 +634,6 @@ const createStyles = (tabColors) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     marginRight: 12,
-  },
-
-  headerLeftSpacer: {
-    width: 46,
   },
 
   tabIconShell: {

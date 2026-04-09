@@ -10,10 +10,14 @@ import React, {
 } from "react";
 import { Appearance } from "react-native";
 
-const STORAGE_KEY = "parent_app_theme_mode";
+const THEME_STORAGE_KEY = "parent_app_theme_mode";
+const LANGUAGE_STORAGE_KEY = "parent_app_language";
+
+type ThemeMode = "light" | "dark";
+type LanguageCode = "en" | "am" | "om" | "ti";
 
 const lightTheme = {
-  mode: "light",
+  mode: "light" as ThemeMode,
   isDark: false,
   statusBarStyle: "dark-content",
   expoStatusBarStyle: "dark",
@@ -81,7 +85,7 @@ const lightTheme = {
 };
 
 const darkTheme = {
-  mode: "dark",
+  mode: "dark" as ThemeMode,
   isDark: true,
   statusBarStyle: "light-content",
   expoStatusBarStyle: "light",
@@ -148,10 +152,42 @@ const darkTheme = {
   },
 };
 
-const ParentThemeContext = createContext(lightTheme);
+type ParentThemeContextValue = {
+  mode: ThemeMode;
+  isDark: boolean;
+  statusBarStyle: string;
+  expoStatusBarStyle: string;
+  navigationBarButtonStyle: string;
+  colors: typeof lightTheme.colors;
+  loaded: boolean;
+  languageCode: LanguageCode;
+  amharic: boolean;
+  oromo: boolean;
+  tigrinya: boolean;
+  setThemeMode: (nextMode: ThemeMode) => void;
+  toggleTheme: () => void;
+  setLanguageCode: (nextLanguageCode: LanguageCode) => void;
+  toggleLanguage: () => void;
+};
 
-export function ParentThemeProvider({ children }) {
-  const [mode, setMode] = useState(() => (Appearance.getColorScheme() === "dark" ? "dark" : "light"));
+const ParentThemeContext = createContext<ParentThemeContextValue>({
+  ...lightTheme,
+  loaded: false,
+  languageCode: "en",
+  amharic: false,
+  oromo: false,
+  tigrinya: false,
+  setThemeMode: () => {},
+  toggleTheme: () => {},
+  setLanguageCode: () => {},
+  toggleLanguage: () => {},
+});
+
+export function ParentThemeProvider({ children }: { children: React.ReactNode }) {
+  const [mode, setMode] = useState<ThemeMode>(() =>
+    Appearance.getColorScheme() === "dark" ? "dark" : "light"
+  );
+  const [languageCode, setLanguageCodeState] = useState<LanguageCode>("en");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -159,10 +195,16 @@ export function ParentThemeProvider({ children }) {
 
     (async () => {
       try {
-        const savedMode = await AsyncStorage.getItem(STORAGE_KEY);
+        const [savedMode, savedLanguageCode] = await Promise.all([
+          AsyncStorage.getItem(THEME_STORAGE_KEY),
+          AsyncStorage.getItem(LANGUAGE_STORAGE_KEY),
+        ]);
         if (!mounted) return;
         if (savedMode === "light" || savedMode === "dark") {
           setMode(savedMode);
+        }
+        if (savedLanguageCode === "en" || savedLanguageCode === "am" || savedLanguageCode === "om" || savedLanguageCode === "ti") {
+          setLanguageCodeState(savedLanguageCode);
         }
       } catch {}
       if (mounted) setLoaded(true);
@@ -174,13 +216,19 @@ export function ParentThemeProvider({ children }) {
   }, []);
 
   const theme = mode === "dark" ? darkTheme : lightTheme;
+  const amharic = languageCode === "am" || languageCode === "ti";
+  const oromo = languageCode === "om";
+  const tigrinya = languageCode === "ti";
 
   useEffect(() => {
-    AsyncStorage.setItem(STORAGE_KEY, mode).catch(() => {});
+    AsyncStorage.multiSet([
+      [THEME_STORAGE_KEY, mode],
+      [LANGUAGE_STORAGE_KEY, languageCode],
+    ]).catch(() => {});
     SystemUI.setBackgroundColorAsync(theme.colors.background).catch(() => {});
-  }, [mode, theme.colors.background]);
+  }, [languageCode, mode, theme.colors.background]);
 
-  const setThemeMode = useCallback((nextMode) => {
+  const setThemeMode = useCallback((nextMode: ThemeMode) => {
     if (nextMode === "dark" || nextMode === "light") {
       setMode(nextMode);
     }
@@ -190,14 +238,35 @@ export function ParentThemeProvider({ children }) {
     setMode((current) => (current === "dark" ? "light" : "dark"));
   }, []);
 
+  const setLanguageCode = useCallback((nextLanguageCode: LanguageCode) => {
+    if (nextLanguageCode === "en" || nextLanguageCode === "am" || nextLanguageCode === "om" || nextLanguageCode === "ti") {
+      setLanguageCodeState(nextLanguageCode);
+    }
+  }, []);
+
+  const toggleLanguage = useCallback(() => {
+    setLanguageCodeState((current) => {
+      if (current === "en") return "am";
+      if (current === "am") return "om";
+      if (current === "om") return "ti";
+      return "en";
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       ...theme,
       loaded,
+      languageCode,
+      amharic,
+      oromo,
+      tigrinya,
       setThemeMode,
       toggleTheme,
+      setLanguageCode,
+      toggleLanguage,
     }),
-    [theme, loaded, setThemeMode, toggleTheme]
+    [theme, loaded, languageCode, amharic, oromo, tigrinya, setThemeMode, toggleTheme, setLanguageCode, toggleLanguage]
   );
 
   return <ParentThemeContext.Provider value={value}>{children}</ParentThemeContext.Provider>;

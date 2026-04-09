@@ -20,12 +20,15 @@ import { useRouter } from "expo-router";
 import { setOpenedChat } from "./lib/chatStore";
 import { useFocusEffect } from "@react-navigation/native";
 import { getUserVal } from "./lib/userHelpers";
+import { readCachedJson, writeCachedJson } from "./lib/dataCache";
+import AppImage from "../components/ui/AppImage";
 import { useParentTheme } from "../hooks/use-parent-theme";
 
 const AVATAR_PLACEHOLDER = require("../assets/images/avatar_placeholder.png");
 
-const FILTERS = ["Children", "Management", "Teachers"];
+const FILTERS = ["children", "management", "teachers"];
 const debounceWindowMs = 15 * 1000;
+const directoryCacheWindowMs = 10 * 60 * 1000;
 
 function shortText(s, n = 60) {
   if (!s && s !== 0) return "";
@@ -50,7 +53,7 @@ function fmtTime12(ts) {
 
 export default function MessagesScreen() {
   const router = useRouter();
-  const { colors, statusBarStyle } = useParentTheme();
+  const { colors, statusBarStyle, amharic, oromo } = useParentTheme();
   const palette = useMemo(
     () => ({
       background: colors.background,
@@ -71,10 +74,99 @@ export default function MessagesScreen() {
     [colors]
   );
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const labels = useMemo(
+    () => {
+      if (oromo) {
+        return {
+          title: "Ergaawwan",
+          searchPlaceholder: "Maqaa, gahee yookaan ergaa barbaadi",
+          noContacts: "Qunnamtiin hin jiru",
+          noResults: "Barbaacha kee keessatti bu'aan hin argamne.",
+          noContactsByFilter: {
+            children: "Qunnamtiin ijoollee ammaaf hin argamne.",
+            management: "Qunnamtiin bulchiinsaa ammaaf hin argamne.",
+            teachers: "Qunnamtiin barsiisotaa ammaaf hin argamne.",
+          },
+          startConversation: "Haasa'aa jalqabi",
+          filterLabels: {
+            children: "Ijoollee",
+            management: "Bulchiinsa",
+            teachers: "Barsiisota",
+          },
+          roleLabels: {
+            Child: "Ijoollee",
+            Teacher: "Barsiisaa",
+            Management: "Bulchiinsa",
+            Registerer: "Galmeessaa",
+            Finance: "Faayinaansii",
+          },
+          childFallback: "Ijoollee",
+          teacherFallback: "Barsiisaa",
+        };
+      }
+
+      if (amharic) {
+        return {
+          title: "መልዕክቶች",
+          searchPlaceholder: "በስም፣ በሚና ወይም በመልዕክት ይፈልጉ",
+          noContacts: "ምንም ግንኙነት የለም",
+          noResults: "ለፍለጋዎ ምንም ውጤት አልተገኘም።",
+          noContactsByFilter: {
+            children: "እስካሁን የልጆች ግንኙነቶች አልተገኙም።",
+            management: "እስካሁን የአስተዳደር ግንኙነቶች አልተገኙም።",
+            teachers: "እስካሁን የመምህራን ግንኙነቶች አልተገኙም።",
+          },
+          startConversation: "ውይይት ይጀምሩ",
+          filterLabels: {
+            children: "ልጆች",
+            management: "አስተዳደር",
+            teachers: "መምህራን",
+          },
+          roleLabels: {
+            Child: "ልጅ",
+            Teacher: "መምህር",
+            Management: "አስተዳደር",
+            Registerer: "ሬጅስትራር",
+            Finance: "ፋይናንስ",
+          },
+          childFallback: "ልጅ",
+          teacherFallback: "መምህር",
+        };
+      }
+
+      return {
+        title: "Messages",
+        searchPlaceholder: "Search by name, role, or message",
+        noContacts: "No contacts",
+        noResults: "No results for your search.",
+        noContactsByFilter: {
+          children: "No children contacts found yet.",
+          management: "No management contacts found yet.",
+          teachers: "No teacher contacts found yet.",
+        },
+        startConversation: "Start a conversation",
+        filterLabels: {
+          children: "Children",
+          management: "Management",
+          teachers: "Teachers",
+        },
+        roleLabels: {
+          Child: "Child",
+          Teacher: "Teacher",
+          Management: "Management",
+          Registerer: "Registerer",
+          Finance: "Finance",
+        },
+        childFallback: "Child",
+        teacherFallback: "Teacher",
+      };
+    },
+    [amharic, oromo]
+  );
 
   const [loadingInitial, setLoadingInitial] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [filter, setFilter] = useState("Children");
+  const [filter, setFilter] = useState("children");
   const [contacts, setContacts] = useState([]);
   const [currentUserId, setCurrentUserId] = useState(null);
 
@@ -138,6 +230,7 @@ export default function MessagesScreen() {
 
     try {
       const parentId = (await AsyncStorage.getItem("parentId")) || null;
+      const schoolKey = (await AsyncStorage.getItem("schoolKey")) || "root";
       const resolvedUserId = await resolveCurrentUserId();
       setCurrentUserId(resolvedUserId || null);
 
@@ -150,16 +243,28 @@ export default function MessagesScreen() {
         const studentUserIds = new Set();
 
         try {
-          const studentsSnap = await get(await getDbRef("Students"));
-          if (studentsSnap.exists()) {
-            studentsSnap.forEach((childSnap) => {
-              const s = childSnap.val() || {};
-              const parentsMap = s.parents || {};
-              if (parentsMap[parentId] && s.userId) {
-                studentUserIds.add(String(s.userId));
-              }
-            });
+          const studentsCacheKey = `cache:messages:students:${schoolKey}`;
+          const cachedStudents = await readCachedJson(studentsCacheKey, directoryCacheWindowMs);
+
+          let studentsObj = cachedStudents;
+          if (!studentsObj || typeof studentsObj !== "object") {
+            const studentsSnap = await get(await getDbRef("Students"));
+            studentsObj = {};
+            if (studentsSnap.exists()) {
+              studentsSnap.forEach((childSnap) => {
+                studentsObj[childSnap.key] = childSnap.val() || {};
+              });
+            }
+            writeCachedJson(studentsCacheKey, studentsObj).catch(() => {});
           }
+
+          Object.values(studentsObj).forEach((s) => {
+            const student = s || {};
+            const parentsMap = student.parents || {};
+            if (parentsMap[parentId] && student.userId) {
+              studentUserIds.add(String(student.userId));
+            }
+          });
         } catch {}
 
         cacheRef.current.parentId = parentId;
@@ -171,43 +276,87 @@ export default function MessagesScreen() {
       const managementMap = new Map();
 
       try {
-        const teachersSnap = await get(await getDbRef("Teachers"));
-        if (teachersSnap.exists()) {
-          teachersSnap.forEach((childSnap) => {
-            const t = childSnap.val() || {};
-            if (t.userId) teacherUserNodeKeys.add(String(t.userId));
-          });
+        const teachersCacheKey = `cache:messages:teachers:${schoolKey}`;
+        const cachedTeachers = await readCachedJson(teachersCacheKey, directoryCacheWindowMs);
+
+        let teachersObj = cachedTeachers;
+        if (!teachersObj || typeof teachersObj !== "object") {
+          const teachersSnap = await get(await getDbRef("Teachers"));
+          teachersObj = {};
+          if (teachersSnap.exists()) {
+            teachersSnap.forEach((childSnap) => {
+              teachersObj[childSnap.key] = childSnap.val() || {};
+            });
+          }
+          writeCachedJson(teachersCacheKey, teachersObj).catch(() => {});
         }
+
+        Object.values(teachersObj).forEach((t) => {
+          if (t?.userId) teacherUserNodeKeys.add(String(t.userId));
+        });
       } catch {}
 
       try {
-        const saSnap = await get(await getDbRef("School_Admins"));
-        if (saSnap.exists()) {
-          saSnap.forEach((childSnap) => {
-            const v = childSnap.val();
-            if (v?.userId) managementMap.set(String(v.userId), "Management");
-          });
+        const saCacheKey = `cache:messages:school_admins:${schoolKey}`;
+        const cachedSa = await readCachedJson(saCacheKey, directoryCacheWindowMs);
+
+        let schoolAdminsObj = cachedSa;
+        if (!schoolAdminsObj || typeof schoolAdminsObj !== "object") {
+          const saSnap = await get(await getDbRef("School_Admins"));
+          schoolAdminsObj = {};
+          if (saSnap.exists()) {
+            saSnap.forEach((childSnap) => {
+              schoolAdminsObj[childSnap.key] = childSnap.val() || {};
+            });
+          }
+          writeCachedJson(saCacheKey, schoolAdminsObj).catch(() => {});
         }
+
+        Object.values(schoolAdminsObj).forEach((v) => {
+          if (v?.userId) managementMap.set(String(v.userId), "Management");
+        });
       } catch {}
 
       try {
-        const regSnap = await get(await getDbRef("Registerers"));
-        if (regSnap.exists()) {
-          regSnap.forEach((childSnap) => {
-            const v = childSnap.val();
-            if (v?.userId) managementMap.set(String(v.userId), "Registerer");
-          });
+        const regCacheKey = `cache:messages:registerers:${schoolKey}`;
+        const cachedReg = await readCachedJson(regCacheKey, directoryCacheWindowMs);
+
+        let registerersObj = cachedReg;
+        if (!registerersObj || typeof registerersObj !== "object") {
+          const regSnap = await get(await getDbRef("Registerers"));
+          registerersObj = {};
+          if (regSnap.exists()) {
+            regSnap.forEach((childSnap) => {
+              registerersObj[childSnap.key] = childSnap.val() || {};
+            });
+          }
+          writeCachedJson(regCacheKey, registerersObj).catch(() => {});
         }
+
+        Object.values(registerersObj).forEach((v) => {
+          if (v?.userId) managementMap.set(String(v.userId), "Registerer");
+        });
       } catch {}
 
       try {
-        const finSnap = await get(await getDbRef("Finances"));
-        if (finSnap.exists()) {
-          finSnap.forEach((childSnap) => {
-            const v = childSnap.val();
-            if (v?.userId) managementMap.set(String(v.userId), "Finance");
-          });
+        const finCacheKey = `cache:messages:finances:${schoolKey}`;
+        const cachedFin = await readCachedJson(finCacheKey, directoryCacheWindowMs);
+
+        let financesObj = cachedFin;
+        if (!financesObj || typeof financesObj !== "object") {
+          const finSnap = await get(await getDbRef("Finances"));
+          financesObj = {};
+          if (finSnap.exists()) {
+            finSnap.forEach((childSnap) => {
+              financesObj[childSnap.key] = childSnap.val() || {};
+            });
+          }
+          writeCachedJson(finCacheKey, financesObj).catch(() => {});
         }
+
+        Object.values(financesObj).forEach((v) => {
+          if (v?.userId) managementMap.set(String(v.userId), "Finance");
+        });
       } catch {}
 
       const userNodeKeysToLoad = new Set([
@@ -235,7 +384,7 @@ export default function MessagesScreen() {
         contactsMap.set(nodeK, {
           key: nodeK,
           userId: p?.userId || nodeK,
-          name: p?.name || p?.username || "Child",
+          name: p?.name || p?.username || labels.childFallback,
           role: "Child",
           profileImage: p?.profileImage || null,
           type: "student",
@@ -253,7 +402,7 @@ export default function MessagesScreen() {
         contactsMap.set(nodeK, {
           key: nodeK,
           userId: p?.userId || nodeK,
-          name: p?.name || p?.username || "Teacher",
+          name: p?.name || p?.username || labels.teacherFallback,
           role: "Teacher",
           profileImage: p?.profileImage || null,
           type: "teacher",
@@ -275,7 +424,7 @@ export default function MessagesScreen() {
         contactsMap.set(nodeK, {
           key: nodeK,
           userId: p?.userId || nodeK,
-          name: p?.name || p?.username || roleLabel,
+          name: p?.name || p?.username || labels.roleLabels[roleLabel] || roleLabel,
           role: roleLabel,
           profileImage: p?.profileImage || null,
           type: "management",
@@ -289,38 +438,63 @@ export default function MessagesScreen() {
       }
 
       try {
-        const chatsSnap = await get(await getDbRef("Chats"));
-        if (chatsSnap.exists()) {
-          chatsSnap.forEach((childSnap) => {
-            const chatKey = childSnap.key;
-            const val = childSnap.val() || {};
-            const participants = val.participants || {};
-            const last = val.lastMessage || null;
-            const unreadObj = val.unread || {};
+        const summarySnap = await get(await getDbRef(`ChatSummaries/${resolvedUserId}`));
 
-            if (!participants[resolvedUserId]) return;
+        if (summarySnap.exists()) {
+          summarySnap.forEach((chatSnap) => {
+            const chatKey = chatSnap.key;
+            const summary = chatSnap.val() || {};
+            const other = summary.otherUserId || "";
 
-            const otherKeys = Object.keys(participants).filter((k) => String(k) !== String(resolvedUserId));
-            if (!otherKeys.length) return;
-            const other = otherKeys[0];
+            if (!other) return;
 
             for (const [mapKey, c] of contactsMap.entries()) {
               if (String(c.userId) === String(other) || String(mapKey) === String(other)) {
                 const next = { ...c };
                 next.chatId = chatKey;
-                next.lastMessage = last?.text || next.lastMessage;
-                next.lastTime = last?.timeStamp || next.lastTime;
-                next.lastSenderId = last?.senderId ?? next.lastSenderId;
-                next.lastSeen = typeof last?.seen === "boolean" ? last.seen : next.lastSeen;
-
-                const unreadCount = Number(unreadObj[resolvedUserId] ?? 0);
-                const lastSender = last?.senderId ?? null;
-                next.unread = lastSender && String(lastSender) === String(resolvedUserId) ? 0 : unreadCount;
-
+                next.lastMessage = summary.lastText || summary.lastMessage || next.lastMessage;
+                next.lastTime = summary.lastTime || summary.updatedAt || next.lastTime;
+                next.lastSenderId = summary.lastSenderId ?? next.lastSenderId;
+                next.lastSeen = typeof summary.seen === "boolean" ? summary.seen : next.lastSeen;
+                next.unread = Number(summary.unread || 0);
                 contactsMap.set(mapKey, next);
               }
             }
           });
+        } else {
+          const chatsSnap = await get(await getDbRef("Chats"));
+          if (chatsSnap.exists()) {
+            chatsSnap.forEach((childSnap) => {
+              const chatKey = childSnap.key;
+              const val = childSnap.val() || {};
+              const participants = val.participants || {};
+              const last = val.lastMessage || null;
+              const unreadObj = val.unread || {};
+
+              if (!participants[resolvedUserId]) return;
+
+              const otherKeys = Object.keys(participants).filter((k) => String(k) !== String(resolvedUserId));
+              if (!otherKeys.length) return;
+              const other = otherKeys[0];
+
+              for (const [mapKey, c] of contactsMap.entries()) {
+                if (String(c.userId) === String(other) || String(mapKey) === String(other)) {
+                  const next = { ...c };
+                  next.chatId = chatKey;
+                  next.lastMessage = last?.text || next.lastMessage;
+                  next.lastTime = last?.timeStamp || next.lastTime;
+                  next.lastSenderId = last?.senderId ?? next.lastSenderId;
+                  next.lastSeen = typeof last?.seen === "boolean" ? last.seen : next.lastSeen;
+
+                  const unreadCount = Number(unreadObj[resolvedUserId] ?? 0);
+                  const lastSender = last?.senderId ?? null;
+                  next.unread = lastSender && String(lastSender) === String(resolvedUserId) ? 0 : unreadCount;
+
+                  contactsMap.set(mapKey, next);
+                }
+              }
+            });
+          }
         }
       } catch {}
 
@@ -345,7 +519,7 @@ export default function MessagesScreen() {
       if (!background) setLoadingInitial(false);
       setRefreshing(false);
     }
-  }, [resolveCurrentUserId]);
+  }, [resolveCurrentUserId, labels]);
 
   useEffect(() => {
     (async () => {
@@ -447,9 +621,9 @@ export default function MessagesScreen() {
   };
 
   const byFilter = useMemo(() => {
-    if (filter === "Management") return contacts.filter((c) => c.type === "management");
-    if (filter === "Teachers") return contacts.filter((c) => c.type === "teacher");
-    if (filter === "Children") return contacts.filter((c) => c.type === "student");
+    if (filter === "management") return contacts.filter((c) => c.type === "management");
+    if (filter === "teachers") return contacts.filter((c) => c.type === "teacher");
+    if (filter === "children") return contacts.filter((c) => c.type === "student");
     return contacts;
   }, [contacts, filter]);
 
@@ -474,7 +648,7 @@ export default function MessagesScreen() {
             <Ionicons name="chevron-back" size={22} color={palette.text} />
           </TouchableOpacity>
 
-          <Text style={styles.headerTitle}>Messages</Text>
+          <Text style={styles.headerTitle}>{labels.title}</Text>
 
           <TouchableOpacity
             onPress={() => {
@@ -493,7 +667,7 @@ export default function MessagesScreen() {
               ref={searchInputRef}
               value={search}
               onChangeText={setSearch}
-              placeholder="Search by name, role, or message"
+              placeholder={labels.searchPlaceholder}
               placeholderTextColor={palette.placeholder}
               style={styles.searchInput}
             />
@@ -515,7 +689,7 @@ export default function MessagesScreen() {
                 style={[styles.filterPill, filter === f ? styles.filterPillActive : null]}
               >
                 <Text style={[styles.filterPillText, filter === f ? styles.filterPillTextActive : null]}>
-                  {f}
+                  {labels.filterLabels[f]}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -528,9 +702,9 @@ export default function MessagesScreen() {
           </View>
         ) : filteredContacts.length === 0 ? (
           <View style={styles.emptyWrap}>
-            <Text style={styles.emptyTitle}>No contacts</Text>
+            <Text style={styles.emptyTitle}>{labels.noContacts}</Text>
             <Text style={styles.emptySubtitle}>
-              {search.trim() ? "No results for your search." : `No ${filter.toLowerCase()} contacts found yet.`}
+              {search.trim() ? labels.noResults : labels.noContactsByFilter[filter]}
             </Text>
           </View>
         ) : (
@@ -553,8 +727,9 @@ export default function MessagesScreen() {
               return (
                 <TouchableOpacity style={styles.itemWrapper} onPress={() => onOpenChat(item)} activeOpacity={0.9}>
                   <View style={styles.row}>
-                    <Image
-                      source={item.profileImage ? { uri: item.profileImage } : AVATAR_PLACEHOLDER}
+                    <AppImage
+                      uri={item.profileImage}
+                      fallbackSource={AVATAR_PLACEHOLDER}
                       style={styles.avatar}
                     />
 
@@ -566,7 +741,7 @@ export default function MessagesScreen() {
                           </Text>
                           {item.role ? (
                             <View style={styles.badge}>
-                              <Text style={styles.badgeText}>{item.role}</Text>
+                              <Text style={styles.badgeText}>{labels.roleLabels[item.role] || item.role}</Text>
                             </View>
                           ) : null}
                         </View>
@@ -595,7 +770,7 @@ export default function MessagesScreen() {
 
                       <View style={{ marginTop: 6 }}>
                         <Text style={styles.subtitleText} numberOfLines={1}>
-                          {shortText(item.lastMessage || "Start a conversation")}
+                          {shortText(item.lastMessage || labels.startConversation)}
                         </Text>
                       </View>
                     </View>

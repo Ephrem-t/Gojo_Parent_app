@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -21,6 +20,10 @@ import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
 import { getLinkedChildrenForParent } from "../lib/parentChildren";
+import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
+import { isInternetReachableNow } from "../lib/networkGuard";
+import { queryUserByChildInSchool } from "../lib/userHelpers";
+import AppImage from "../../components/ui/AppImage";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const makePalette = (colors, isDark) => ({
@@ -74,8 +77,75 @@ function useAttendanceThemeConfig() {
   return { PALETTE, styles };
 }
 
+const getAttendanceLabels = (amharic) =>
+  amharic
+    ? {
+        loading: "ክትትል በመጫን ላይ...",
+        noLinkedTitle: "እስካሁን የተገናኘ ልጅ የለም",
+        noLinkedSubtitle: "የልጅ ፕሮፋይልን ለማገናኘት እባክዎ የትምህርት ቤት አስተዳዳሪን ያነጋግሩ።",
+        student: "ተማሪ",
+        course: "ኮርስ",
+        teacher: "መምህር",
+        grade: "ክፍል",
+        section: "ክፍለ ክፍል",
+        overview: "የክትትል አጠቃላይ እይታ",
+        present: "ተገኝቷል",
+        late: "ዘግይቷል",
+        absent: "ቀርቷል",
+        daily: "ዕለታዊ",
+        weekly: "ሳምንታዊ",
+        monthly: "ወርሃዊ",
+        chooseChild: "ልጅ ይምረጡ",
+        child: "ልጅ",
+        total: "ጠቅላላ",
+        noRecord: "ምንም መዝገብ የለም",
+        noAttendance: "ምንም የክትትል መዝገብ የለም",
+        attendance: "ክትትል",
+        noCourses: "ለዚህ ተማሪ ኮርሶች እስካሁን አልተገኙም።",
+        refreshing: "የቅርብ ጊዜ ክትትል በመዘመን ላይ…",
+        statusByKey: {
+          present: "ተገኝቷል",
+          late: "ዘግይቷል",
+          absent: "ቀርቷል",
+          noRecord: "ምንም መዝገብ የለም",
+        },
+      }
+    : {
+        loading: "Loading attendance...",
+        noLinkedTitle: "No child is linked yet",
+        noLinkedSubtitle: "Please contact school admin to link child profile.",
+        student: "Student",
+        course: "Course",
+        teacher: "Teacher",
+        grade: "Grade",
+        section: "Section",
+        overview: "Attendance Overview",
+        present: "Present",
+        late: "Late",
+        absent: "Absent",
+        daily: "Daily",
+        weekly: "Weekly",
+        monthly: "Monthly",
+        chooseChild: "Choose Child",
+        child: "Child",
+        total: "Total",
+        noRecord: "No Record",
+        noAttendance: "No attendance recorded",
+        attendance: "Attendance",
+        noCourses: "No courses found for this student yet.",
+        refreshing: "Refreshing latest attendance…",
+        statusByKey: {
+          present: "Present",
+          late: "Late",
+          absent: "Absent",
+          noRecord: "No Record",
+        },
+      };
+
 const defaultProfile = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 const CACHE_KEY = "attendance_cache_v6";
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const CHILD_BUNDLE_CACHE_TTL_MS = 30 * 60 * 1000;
 const RING_SIZE = 58;
 const RING_STROKE = 5;
 const RING_RADIUS = (RING_SIZE - RING_STROKE) / 2;
@@ -85,6 +155,9 @@ const getPathPrefix = async () => {
   const sk = (await AsyncStorage.getItem("schoolKey")) || null;
   return sk ? `Platform1/Schools/${sk}/` : "";
 };
+
+const getAttendanceBundleCacheKey = (prefix, studentId) =>
+  `cache:attendance:bundle:${String(prefix || "root")}:${String(studentId || "unknown")}`;
 
 const normalizeKey = (value) => String(value || "").trim().toLowerCase();
 
@@ -160,7 +233,46 @@ const ProgressRing = ({ percent, color, label }) => {
 export default function Attendance() {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { amharic, oromo } = useParentTheme();
   const { PALETTE, styles } = useAttendanceThemeConfig();
+  const labels = useMemo(
+    () =>
+      oromo
+        ? {
+            ...getAttendanceLabels(false),
+            loading: "Argama fe'aa jira...",
+            noLinkedTitle: "Ijoolleen walqabatan hin jiran",
+            noLinkedSubtitle: "Profaayilii ijoollee walqabsiisuuf bulchaa mana barumsaa qunnami.",
+            student: "Barataa",
+            course: "Koorsii",
+            teacher: "Barsiisaa",
+            grade: "Kutaa",
+            section: "Kutaa xiqqaa",
+            overview: "Ilaalcha Argamaa",
+            present: "Argame",
+            late: "Barfate",
+            absent: "Hin argamne",
+            daily: "Guyyaa",
+            weekly: "Torban",
+            monthly: "Ji'a",
+            chooseChild: "Ijoollee filadhu",
+            child: "Ijoollee",
+            total: "Waliigala",
+            noRecord: "Galmeen hin jiru",
+            noAttendance: "Galmeen argamaa hin jiru",
+            attendance: "Argama",
+            noCourses: "Koorsiin barataa kanaaf hin argamne.",
+            refreshing: "Argama haarawa deebi'ee fe'aa jira…",
+            statusByKey: {
+              present: "Argame",
+              late: "Barfate",
+              absent: "Hin argamne",
+              noRecord: "Galmeen hin jiru",
+            },
+          }
+        : getAttendanceLabels(amharic),
+    [amharic, oromo]
+  );
   const scale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1;
   const fontScale = width < 360 ? 0.92 : width >= 768 ? 1.08 : 1;
   const avatarSize = Math.round(72 * scale);
@@ -189,7 +301,7 @@ export default function Attendance() {
   const [expandedCourses, setExpandedCourses] = useState({});
 
   const [tab, setTab] = useState("daily");
-  const tabOptions = ["daily", "weekly", "monthly"];
+  const tabOptions = useMemo(() => ["daily", "weekly", "monthly"], []);
   const tabAnim = useRef(new Animated.Value(0)).current;
   const [tabWidthState, setTabWidthState] = useState(0);
 
@@ -229,7 +341,7 @@ export default function Attendance() {
       damping: 18,
       mass: 0.6,
     }).start();
-  }, [tab]);
+  }, [tab, tabAnim, tabOptions]);
 
   const saveCache = async (payload) => {
     try {
@@ -246,17 +358,41 @@ export default function Attendance() {
     }
   };
 
-  const fetchChildBundle = useCallback(async ({ prefix, studentId, childInfo }) => {
+  const fetchChildBundle = useCallback(async ({ prefix, studentId, childInfo, forceNetwork = false }) => {
+    const cacheKey = getAttendanceBundleCacheKey(prefix, studentId);
+    const cachedRecord = await readCachedJsonRecord(cacheKey);
+    const cachedBundle = cachedRecord?.value || null;
+    const cacheFresh = cachedRecord
+      ? Date.now() - cachedRecord.savedAt <= CHILD_BUNDLE_CACHE_TTL_MS
+      : false;
+
+    if (!forceNetwork && cachedBundle && cacheFresh) {
+      return cachedBundle;
+    }
+
+    const onlineNow = await isInternetReachableNow();
+    if (!onlineNow) {
+      return cachedBundle;
+    }
+
     try {
       const studentSnap = await get(ref(database, `${prefix}Students/${studentId}`));
       const student = studentSnap.exists() ? studentSnap.val() : null;
-      if (!student) return null;
+      if (!student) return cachedBundle;
 
       const studentUserId = student.userId || student.systemAccountInformation?.userId || null;
-      const studentUserSnap = studentUserId
-        ? await get(ref(database, `${prefix}Users/${studentUserId}`))
-        : null;
-      const user = studentUserSnap?.exists() ? studentUserSnap.val() : {};
+      let user = {};
+      if (studentUserId) {
+        try {
+          const studentUserSnap = await queryUserByChildInSchool("userId", studentUserId);
+          if (studentUserSnap?.exists()) {
+            studentUserSnap.forEach((childSnap) => {
+              user = childSnap.val() || {};
+              return true;
+            });
+          }
+        } catch {}
+      }
 
       const grade = String(student.grade || student.basicStudentInformation?.grade || "");
       const section = String(student.section || student.basicStudentInformation?.section || "");
@@ -271,8 +407,8 @@ export default function Attendance() {
           student?.name ||
           student?.basicStudentInformation?.name ||
           childInfo?.name ||
-          "Student",
-        profileImage: user?.profileImage || student?.profileImage || defaultProfile,
+          labels.student,
+        profileImage: user?.profileImage || student?.profileImage || student?.basicStudentInformation?.studentPhoto || defaultProfile,
         _childInfo: childInfo,
       };
 
@@ -362,7 +498,7 @@ export default function Attendance() {
           subjectNode?.name ||
           assignment?.subject ||
           fallbackNameFromCourseId ||
-          "Course";
+          labels.course;
 
         return {
           courseId,
@@ -372,7 +508,7 @@ export default function Attendance() {
           section,
           teacherId: assignment?.teacherId || null,
           teacherUserId: assignment?.teacherUserId || null,
-          teacherName: assignment?.teacherName || teacherUser?.name || "Teacher",
+          teacherName: assignment?.teacherName || teacherUser?.name || labels.teacher,
         };
       });
 
@@ -397,16 +533,19 @@ export default function Attendance() {
         })
       );
 
-      return {
+      const bundle = {
         childUser: childUserObj,
         courses: courseList,
         attendanceByCourse: attendanceMap,
       };
+
+      writeCachedJson(cacheKey, bundle).catch(() => {});
+      return bundle;
     } catch (e) {
       console.warn("fetchChildBundle error:", e);
-      return null;
+      return cachedBundle || null;
     }
-  }, []);
+  }, [labels]);
 
   const applyBundleToState = useCallback(
     async (bundle, index, kids) => {
@@ -416,6 +555,7 @@ export default function Attendance() {
       setAttendanceByCourse(bundle?.attendanceByCourse || {});
 
       await saveCache({
+        parentId,
         children: kids || [],
         currentIndex: index || 0,
         childUser: bundle?.childUser || null,
@@ -425,11 +565,11 @@ export default function Attendance() {
         ts: Date.now(),
       });
     },
-    [tab]
+    [parentId, tab]
   );
 
   const loadFreshData = useCallback(
-    async ({ background = false, forcedIndex = null } = {}) => {
+    async ({ background = false, forcedIndex = null, forceNetwork = false } = {}) => {
       if (!parentId) {
         setLoading(false);
         return;
@@ -440,7 +580,7 @@ export default function Attendance() {
 
       try {
         const prefix = await getPathPrefix();
-        const kids = await getLinkedChildrenForParent(prefix, parentId);
+        const kids = await getLinkedChildrenForParent(prefix, parentId, forceNetwork ? { forceNetwork: true } : {});
 
         setChildren(kids);
 
@@ -461,6 +601,7 @@ export default function Attendance() {
           prefix,
           studentId: chosen.studentId,
           childInfo: chosen,
+          forceNetwork,
         });
 
         if (!bundle) {
@@ -481,6 +622,12 @@ export default function Attendance() {
     [parentId, currentIndex, fetchChildBundle, applyBundleToState]
   );
 
+  const loadFreshDataRef = useRef(loadFreshData);
+
+  useEffect(() => {
+    loadFreshDataRef.current = loadFreshData;
+  }, [loadFreshData]);
+
   useEffect(() => {
     if (parentId === null) return;
 
@@ -488,8 +635,12 @@ export default function Attendance() {
 
     (async () => {
       const cached = await loadCache();
+      const cacheMatchesParent = cached && String(cached.parentId || "") === String(parentId || "");
+      const cacheFresh = cacheMatchesParent
+        && Number.isFinite(Number(cached?.ts || 0))
+        && Date.now() - Number(cached.ts || 0) <= CACHE_TTL_MS;
 
-      if (cached && mounted) {
+      if (cacheMatchesParent && mounted) {
         setChildren(cached.children || []);
         setCurrentIndex(cached.currentIndex || 0);
         setChildUser(cached.childUser || null);
@@ -499,8 +650,8 @@ export default function Attendance() {
         setLoading(false);
       }
 
-      if (mounted) {
-        await loadFreshData({ background: true });
+      if (mounted && !cacheFresh) {
+        await loadFreshDataRef.current({ background: true });
       }
     })();
 
@@ -520,6 +671,7 @@ export default function Attendance() {
         prefix,
         studentId: child.studentId,
         childInfo: child,
+        forceNetwork: false,
       });
 
       if (!bundle) {
@@ -536,7 +688,7 @@ export default function Attendance() {
   };
 
   const onRefresh = async () => {
-    await loadFreshData({ background: false });
+    await loadFreshData({ background: false, forceNetwork: true });
   };
 
   const filteredAttendance = useMemo(() => {
@@ -587,7 +739,7 @@ export default function Attendance() {
     return (
       <View style={styles.loadingWrap}>
         <ActivityIndicator size="large" color={PALETTE.accent} />
-        <Text style={styles.loadingText}>Loading attendance...</Text>
+        <Text style={styles.loadingText}>{labels.loading}</Text>
       </View>
     );
   }
@@ -595,8 +747,8 @@ export default function Attendance() {
   if (!children.length) {
     return (
       <View style={styles.loadingWrap}>
-        <Text style={styles.emptyTitle}>No child is linked yet</Text>
-        <Text style={styles.emptySubtitle}>Please contact school admin to link child profile.</Text>
+        <Text style={styles.emptyTitle}>{labels.noLinkedTitle}</Text>
+        <Text style={styles.emptySubtitle}>{labels.noLinkedSubtitle}</Text>
       </View>
     );
   }
@@ -612,22 +764,23 @@ export default function Attendance() {
       <View style={styles.heroGlowTwo} />
 
       <View style={styles.heroTop}>
-        <Image
-          source={{ uri: childUser?.profileImage || defaultProfile }}
+        <AppImage
+          uri={childUser?.profileImage || defaultProfile}
+          fallbackSource={require("../../assets/images/avatar_placeholder.png")}
           style={[styles.avatar, { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2 }]}
         />
 
         <View style={styles.heroInfo}>
           <Text style={[styles.name, { fontSize: Math.round(20 * fontScale) }]} numberOfLines={1}>
-            {childUser?.name || "Student"}
+            {childUser?.name || labels.student}
           </Text>
           <Text style={styles.subText}>
-            Grade {childUser?.grade ?? "--"} • Section {childUser?.section ?? "--"}
+            {labels.grade} {childUser?.grade ?? "--"} • {labels.section} {childUser?.section ?? "--"}
           </Text>
 
           <View style={{ flexDirection: "row", marginTop: 8, alignItems: "center" }}>
             <View style={[styles.statusDot, { backgroundColor: PALETTE.accent }]} />
-            <Text style={[styles.statusText, { color: PALETTE.accent }]}>Attendance Overview</Text>
+            <Text style={[styles.statusText, { color: PALETTE.accent }]}>{labels.overview}</Text>
           </View>
         </View>
 
@@ -639,9 +792,9 @@ export default function Attendance() {
       </View>
 
       <View style={styles.metricGrid}>
-        <MetricCard label="Present" value={attendanceTotalsAll.present} valueColor={PALETTE.present} />
-        <MetricCard label="Late" value={attendanceTotalsAll.late} valueColor={PALETTE.late} />
-        <MetricCard label="Absent" value={attendanceTotalsAll.absent} valueColor={PALETTE.absent} />
+        <MetricCard label={labels.present} value={attendanceTotalsAll.present} valueColor={PALETTE.present} />
+        <MetricCard label={labels.late} value={attendanceTotalsAll.late} valueColor={PALETTE.late} />
+        <MetricCard label={labels.absent} value={attendanceTotalsAll.absent} valueColor={PALETTE.absent} />
       </View>
     </LinearGradient>
   );
@@ -678,7 +831,7 @@ export default function Attendance() {
               activeOpacity={0.86}
             >
               <Text style={[styles.filterText, active && styles.filterTextActive]}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {labels[t]}
               </Text>
             </TouchableOpacity>
           );
@@ -705,7 +858,7 @@ export default function Attendance() {
       >
         {showChildPicker && children.length > 1 && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Choose Child</Text>
+            <Text style={styles.cardTitle}>{labels.chooseChild}</Text>
             <View style={styles.childList}>
               {children.map((c, i) => {
                 const active = i === currentIndex;
@@ -717,7 +870,7 @@ export default function Attendance() {
                     activeOpacity={0.86}
                   >
                     <Text style={[styles.childName, active && styles.childNameActive]}>
-                      {c.name || `Child ${i + 1}`}
+                      {c.name || `${labels.child} ${i + 1}`}
                     </Text>
                     {active && <Ionicons name="checkmark-circle" size={18} color={PALETTE.accent} />}
                   </TouchableOpacity>
@@ -751,7 +904,7 @@ export default function Attendance() {
             const ringColor = percentColor(attendancePercent, PALETTE);
             const ringValue = attendancePercent;
             const ringLabel = `${attendancePercent}%`;
-            const summaryLabel = "Total";
+            const summaryLabel = labels.total;
             const summaryValue = `${attendedCount}/${entries.length}`;
             const summaryColor = ringColor;
 
@@ -769,7 +922,7 @@ export default function Attendance() {
                   <View style={styles.courseHead}>
                     <View style={{ flex: 1, paddingRight: 12 }}>
                       <Text style={styles.courseName}>{course.name}</Text>
-                      <Text style={styles.teacher}>Teacher: {course.teacherName}</Text>
+                      <Text style={styles.teacher}>{labels.teacher}: {course.teacherName}</Text>
                     </View>
 
                     <View style={styles.courseMetaRight}>
@@ -791,12 +944,12 @@ export default function Attendance() {
                             ]}
                           >
                             {dailyStatusKey === "present"
-                              ? "Present"
+                              ? labels.statusByKey.present
                               : dailyStatusKey === "late"
-                              ? "Late"
+                              ? labels.statusByKey.late
                               : dailyStatusKey === "absent"
-                              ? "Absent"
-                              : "No Record"}
+                              ? labels.statusByKey.absent
+                              : labels.statusByKey.noRecord}
                           </Text>
                         </View>
                       ) : (
@@ -809,11 +962,12 @@ export default function Attendance() {
                 {tab !== "daily" && isExpanded && (
                   <View style={styles.entriesWrap}>
                     {entries.length === 0 ? (
-                      <Text style={styles.noRecords}>No attendance recorded</Text>
+                      <Text style={styles.noRecords}>{labels.noAttendance}</Text>
                     ) : (
                       entries.map(([date, status]) => {
                         const sc = statusColor(status, PALETTE);
                         const icon = statusIcon(status);
+                        const statusKey = String(status || "").toLowerCase();
                         return (
                           <View key={date} style={styles.attRow}>
                             <View style={[styles.statusDotMini, { backgroundColor: sc }]} />
@@ -821,7 +975,7 @@ export default function Attendance() {
                             <View style={styles.statusWrap}>
                               <Ionicons name={icon} size={16} color={sc} style={{ marginRight: 6 }} />
                               <Text style={[styles.attStatus, { color: sc }]}>
-                                {String(status || "").toUpperCase()}
+                                {labels.statusByKey[statusKey] || String(status || "").toUpperCase()}
                               </Text>
                             </View>
                           </View>
@@ -842,14 +996,14 @@ export default function Attendance() {
 
         {!courses.length && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Attendance</Text>
-            <Text style={styles.emptyQuarterText}>No courses found for this student yet.</Text>
+            <Text style={styles.cardTitle}>{labels.attendance}</Text>
+            <Text style={styles.emptyQuarterText}>{labels.noCourses}</Text>
           </View>
         )}
 
         {backgroundRefreshing && !refreshing && (
           <View style={styles.refreshingBgWrap}>
-            <Text style={styles.refreshingBgText}>Refreshing latest attendance…</Text>
+            <Text style={styles.refreshingBgText}>{labels.refreshing}</Text>
           </View>
         )}
       </ScrollView>
@@ -871,7 +1025,8 @@ function MetricCard({ label, value, valueColor }) {
 const createStyles = (PALETTE) => StyleSheet.create({
   container: { flex: 1, backgroundColor: PALETTE.background },
   fixedHeaderWrap: {
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingTop: 4,
     paddingBottom: 0,
   },
   fixedFilterWrap: {

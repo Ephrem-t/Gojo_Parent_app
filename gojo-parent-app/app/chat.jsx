@@ -17,7 +17,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { ref, push, update, get, onValue, off } from "firebase/database";
+import { ref, push, update, get, onValue, off, query, limitToLast } from "firebase/database";
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import * as ImagePicker from "expo-image-picker";
 import { database } from "../constants/firebaseConfig";
@@ -27,14 +27,15 @@ import { getUserVal } from "./lib/userHelpers";
 import { useParentTheme } from "../hooks/use-parent-theme";
 
 const AVATAR_PLACEHOLDER = require("../assets/images/avatar_placeholder.png");
+const CHAT_RECENT_MESSAGE_LIMIT = 80;
 
-function fmtTime12(ts) {
+function fmtTime12(ts, amharic = false, oromo = false) {
   if (!ts) return "";
   try {
     const d = new Date(Number(ts));
     let h = d.getHours();
     const m = d.getMinutes().toString().padStart(2, "0");
-    const ampm = h >= 12 ? "PM" : "AM";
+    const ampm = h >= 12 ? (amharic ? "ከሰዓት" : oromo ? "WB" : "PM") : amharic ? "ጥዋት" : oromo ? "WD" : "AM";
     h = h % 12;
     if (h === 0) h = 12;
     return `${h}:${m} ${ampm}`;
@@ -47,14 +48,14 @@ function stripTime(d) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-function dateLabelForTs(ts) {
+function dateLabelForTs(ts, labels, amharic = false, oromo = false) {
   if (!ts) return "";
   const date = new Date(Number(ts));
   const today = new Date();
   const diffDays = Math.floor((stripTime(today) - stripTime(date)) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Today";
-  if (diffDays === 1) return "Yesterday";
-  return date.toLocaleDateString();
+  if (diffDays === 0) return labels.today;
+  if (diffDays === 1) return labels.yesterday;
+  return date.toLocaleDateString(amharic ? "am-ET" : oromo ? "om-ET" : undefined);
 }
 
 async function getPathPrefix() {
@@ -67,12 +68,52 @@ async function getDbRef(subPath) {
   return ref(database, `${prefix}${subPath}`);
 }
 
+function addChatSummaryUpdates(updates, prefix, payload) {
+  const {
+    chatId,
+    senderId,
+    receiverId,
+    lastText,
+    lastType,
+    timeStamp,
+    seen,
+    senderUnread,
+    receiverUnread,
+  } = payload;
+
+  if (!chatId || !senderId || !receiverId) return;
+
+  updates[`${prefix}ChatSummaries/${senderId}/${chatId}`] = {
+    chatId,
+    otherUserId: receiverId,
+    lastText: lastText || "",
+    lastType: lastType || "text",
+    lastTime: Number(timeStamp || Date.now()),
+    lastSenderId: senderId,
+    unread: Number(senderUnread || 0),
+    seen: typeof seen === "boolean" ? seen : false,
+    updatedAt: Number(timeStamp || Date.now()),
+  };
+
+  updates[`${prefix}ChatSummaries/${receiverId}/${chatId}`] = {
+    chatId,
+    otherUserId: senderId,
+    lastText: lastText || "",
+    lastType: lastType || "text",
+    lastTime: Number(timeStamp || Date.now()),
+    lastSenderId: senderId,
+    unread: Number(receiverUnread || 1),
+    seen: false,
+    updatedAt: Number(timeStamp || Date.now()),
+  };
+}
+
 export default function ChatScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const storage = getStorage();
   const params = useLocalSearchParams();
-  const { colors, statusBarStyle, isDark } = useParentTheme();
+  const { colors, statusBarStyle, isDark, amharic, oromo } = useParentTheme();
   const palette = useMemo(
     () => ({
       primary: colors.primary,
@@ -109,6 +150,126 @@ export default function ChatScreen() {
     [colors, isDark]
   );
   const styles = useMemo(() => createStyles(palette), [palette]);
+  const labels = useMemo(
+    () =>
+      oromo
+        ? {
+            today: "Har'a",
+            yesterday: "Kaleessa",
+            conversation: "Haasa'aa",
+            chatError: "Dogoggora chat",
+            couldNotFindOrCreateChat: "Chat argachuu yookaan uumuu hin dandeenye",
+            permissionRequired: "Eeyyamni barbaachisa",
+            allowPhotoAccess: "Suuraa walqabsiisuuf eeyyama suuraa kenni.",
+            missingSender: "Ergaan kan erge dhabame.",
+            missingReceiver: "Kan fudhatu dhabame.",
+            uploadFailed: "Olkaa'uun hin milkoofne",
+            couldNotUploadImage: "Suuraa olkaa'uu hin dandeenye. Irra deebi'ii yaali.",
+            sendFailed: "Erguun hin milkoofne",
+            couldNotSendMessage: "Ergaa erguu hin dandeenye - irra deebi'ii yaali.",
+            validation: "Mirkaneessa",
+            messageCannotBeEmpty: "Ergaan duwwaa ta'uu hin danda'u.",
+            error: "Dogoggora",
+            failedToEditMessage: "Ergaa gulaaluu hin dandeenye.",
+            failedToDeleteMessage: "Ergaa haquu hin dandeenye.",
+            unavailable: "Hin argamu",
+            profileCouldNotBeOpened: "Profaayiliin banamuu hin dandeenye.",
+            imagePreview: "📷 Suuraa",
+            messageDeleted: "Ergaan haqame",
+            edited: "gulaalame",
+            messagePlaceholder: "Ergaa",
+            editMessage: "Ergaa gulaali",
+            deleteMessage: "Ergaa haqi",
+            cancel: "Dhiisi",
+            save: "Kaa'i",
+            editYourMessage: "Ergaa kee gulaali",
+            roleLabels: {
+              Child: "Ijoollee",
+              Teacher: "Barsiisaa",
+              Management: "Bulchiinsa",
+              Registerer: "Galmeessaa",
+              Finance: "Faayinaansii",
+            },
+          }
+        : amharic
+        ? {
+            today: "ዛሬ",
+            yesterday: "ትናንት",
+            conversation: "ውይይት",
+            chatError: "የውይይት ስህተት",
+            couldNotFindOrCreateChat: "ውይይቱን ማግኘት ወይም መፍጠር አልተቻለም።",
+            permissionRequired: "ፍቃድ ያስፈልጋል",
+            allowPhotoAccess: "ምስሎችን ለማያያዝ የፎቶ ፍቃድን ይፍቀዱ።",
+            missingSender: "ላኪ ጠፍቷል።",
+            missingReceiver: "ተቀባይ ጠፍቷል።",
+            uploadFailed: "ስቀል አልተሳካም",
+            couldNotUploadImage: "ምስሉን መስቀል አልተቻለም። እንደገና ይሞክሩ።",
+            sendFailed: "መላክ አልተሳካም",
+            couldNotSendMessage: "መልዕክቱን መላክ አልተቻለም። እንደገና ይሞክሩ።",
+            validation: "ማረጋገጫ",
+            messageCannotBeEmpty: "መልዕክቱ ባዶ መሆን አይችልም።",
+            error: "ስህተት",
+            failedToEditMessage: "መልዕክቱን ማስተካከል አልተቻለም።",
+            failedToDeleteMessage: "መልዕክቱን ማጥፋት አልተቻለም።",
+            unavailable: "አይገኝም",
+            profileCouldNotBeOpened: "የተጠቃሚው ፕሮፋይል ሊከፈት አልቻለም።",
+            imagePreview: "📷 ምስል",
+            messageDeleted: "መልዕክት ተሰርዟል",
+            edited: "ተስተካክሏል",
+            messagePlaceholder: "መልዕክት",
+            editMessage: "መልዕክት ያስተካክሉ",
+            deleteMessage: "መልዕክት ያጥፉ",
+            cancel: "ይቅር",
+            save: "አስቀምጥ",
+            editYourMessage: "መልዕክትዎን ያስተካክሉ",
+            roleLabels: {
+              Child: "ልጅ",
+              Teacher: "መምህር",
+              Management: "አስተዳደር",
+              Registerer: "ሬጅስትራር",
+              Finance: "ፋይናንስ",
+            },
+          }
+        : {
+            today: "Today",
+            yesterday: "Yesterday",
+            conversation: "Conversation",
+            chatError: "Chat error",
+            couldNotFindOrCreateChat: "Could not find or create chat",
+            permissionRequired: "Permission required",
+            allowPhotoAccess: "Please allow access to photos to attach images.",
+            missingSender: "Missing sender.",
+            missingReceiver: "Missing receiver.",
+            uploadFailed: "Upload failed",
+            couldNotUploadImage: "Could not upload image. Try again.",
+            sendFailed: "Send failed",
+            couldNotSendMessage: "Could not send message - try again.",
+            validation: "Validation",
+            messageCannotBeEmpty: "Message cannot be empty.",
+            error: "Error",
+            failedToEditMessage: "Failed to edit message.",
+            failedToDeleteMessage: "Failed to delete message.",
+            unavailable: "Unavailable",
+            profileCouldNotBeOpened: "User profile could not be opened.",
+            imagePreview: "📷 Image",
+            messageDeleted: "Message deleted",
+            edited: "edited",
+            messagePlaceholder: "Message",
+            editMessage: "Edit message",
+            deleteMessage: "Delete message",
+            cancel: "Cancel",
+            save: "Save",
+            editYourMessage: "Edit your message",
+            roleLabels: {
+              Child: "Child",
+              Teacher: "Teacher",
+              Management: "Management",
+              Registerer: "Registerer",
+              Finance: "Finance",
+            },
+          },
+    [amharic, oromo]
+  );
 
   const routeChatId = typeof params.chatId === "string" ? params.chatId : "";
   const routeUserId = typeof params.userId === "string" ? params.userId : "";
@@ -205,6 +366,17 @@ export default function ChatScreen() {
       updates[`${prefix}Chats/${c1}/participants`] = participants;
       updates[`${prefix}Chats/${c1}/lastMessage`] = lastMessage;
       updates[`${prefix}Chats/${c1}/unread`] = unread;
+      addChatSummaryUpdates(updates, prefix, {
+        chatId: c1,
+        senderId: userA,
+        receiverId: userB,
+        lastText: "",
+        lastType: "system",
+        timeStamp: now,
+        seen: false,
+        senderUnread: 0,
+        receiverUnread: 0,
+      });
 
       await update(ref(database), updates);
       return c1;
@@ -333,7 +505,7 @@ export default function ChatScreen() {
 
         if (userSnap.exists()) {
           const val = userSnap.val() || {};
-          setContactName((prev) => prev || val.name || val.username || "Conversation");
+          setContactName((prev) => prev || val.name || val.username || labels.conversation);
           setContactImage((prev) => prev || val.profileImage || null);
           setContactSubtitle(val.role || "");
         }
@@ -347,7 +519,7 @@ export default function ChatScreen() {
     return () => {
       mounted = false;
     };
-  }, [bootstrapped, currentUserId, chatId, contactUserId]);
+  }, [bootstrapped, currentUserId, chatId, contactUserId, labels]);
 
   useEffect(() => {
     let mounted = true;
@@ -364,7 +536,7 @@ export default function ChatScreen() {
         if (!resolvedChatId) {
           if (mounted) {
             setLoading(false);
-            Alert.alert("Chat error", "Could not find or create chat");
+            Alert.alert(labels.chatError, labels.couldNotFindOrCreateChat);
           }
           return;
         }
@@ -381,7 +553,7 @@ export default function ChatScreen() {
     return () => {
       mounted = false;
     };
-  }, [bootstrapped, currentUserId, contactUserId, chatId, findOrCreateChatId]);
+  }, [bootstrapped, currentUserId, contactUserId, chatId, findOrCreateChatId, labels]);
 
   useEffect(() => {
     let mounted = true;
@@ -393,9 +565,10 @@ export default function ChatScreen() {
       setLoading(true);
 
       const msgsRef = await getDbRef(`Chats/${chatId}/messages`);
-      messagesRefRef.current = msgsRef;
+      const recentMsgsQuery = query(msgsRef, limitToLast(CHAT_RECENT_MESSAGE_LIMIT));
+      messagesRefRef.current = recentMsgsQuery;
 
-      onValue(msgsRef, async (snap) => {
+      onValue(recentMsgsQuery, async (snap) => {
         if (!mounted) return;
 
         const arr = [];
@@ -414,9 +587,17 @@ export default function ChatScreen() {
           try {
             const prefix = await getPathPrefix();
 
-            await update(ref(database), {
+            const unreadResetUpdates = {
               [`${prefix}Chats/${chatId}/unread/${currentUserId}`]: 0,
-            });
+              [`${prefix}ChatSummaries/${currentUserId}/${chatId}/unread`]: 0,
+              [`${prefix}ChatSummaries/${currentUserId}/${chatId}/seen`]: true,
+              [`${prefix}ChatSummaries/${currentUserId}/${chatId}/updatedAt`]: Date.now(),
+            };
+            if (contactUserId) {
+              unreadResetUpdates[`${prefix}ChatSummaries/${contactUserId}/${chatId}/seen`] = true;
+            }
+
+            await update(ref(database), unreadResetUpdates);
 
             const updates = {};
             arr.forEach((m) => {
@@ -447,7 +628,7 @@ export default function ChatScreen() {
         } catch {}
       }
     };
-  }, [bootstrapped, chatId, currentUserId, currentUserNodeKey]);
+  }, [bootstrapped, chatId, currentUserId, currentUserNodeKey, contactUserId]);
 
   useEffect(() => {
     if (!bootstrapped || !chatId) {
@@ -519,7 +700,7 @@ export default function ChatScreen() {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert("Permission required", "Please allow access to photos to attach images.");
+        Alert.alert(labels.permissionRequired, labels.allowPhotoAccess);
         return;
       }
 
@@ -538,11 +719,11 @@ export default function ChatScreen() {
       const { senderId, receiverId } = await resolveReceiver();
 
       if (!senderId) {
-        Alert.alert("Chat error", "Missing sender.");
+        Alert.alert(labels.chatError, labels.missingSender);
         return;
       }
       if (!receiverId) {
-        Alert.alert("Chat error", "Missing receiver.");
+        Alert.alert(labels.chatError, labels.missingReceiver);
         return;
       }
 
@@ -550,7 +731,7 @@ export default function ChatScreen() {
       if (!chatKeyLocal) {
         chatKeyLocal = await findOrCreateChatId(senderId, receiverId, true);
         if (!chatKeyLocal) {
-          Alert.alert("Chat error", "Could not find or create chat");
+          Alert.alert(labels.chatError, labels.couldNotFindOrCreateChat);
           return;
         }
         setChatId(chatKeyLocal);
@@ -601,17 +782,28 @@ export default function ChatScreen() {
       updates[`${prefix}Chats/${chatKeyLocal}/lastMessage`] = {
         seen: false,
         senderId,
-        text: "📷 Image",
+        text: labels.imagePreview,
         timeStamp: now,
         type: "image",
       };
       updates[`${prefix}Chats/${chatKeyLocal}/unread/${receiverId}`] = 1;
       updates[`${prefix}Chats/${chatKeyLocal}/unread/${senderId}`] = 0;
+      addChatSummaryUpdates(updates, prefix, {
+        chatId: chatKeyLocal,
+        senderId,
+        receiverId,
+        lastText: labels.imagePreview,
+        lastType: "image",
+        timeStamp: now,
+        seen: false,
+        senderUnread: 0,
+        receiverUnread: 1,
+      });
 
       await update(ref(database), updates);
     } catch (err) {
       console.warn("[Chat:pickImageAndSend] error", err);
-      Alert.alert("Upload failed", "Could not upload image. Try again.");
+      Alert.alert(labels.uploadFailed, labels.couldNotUploadImage);
     }
   }
 
@@ -623,11 +815,11 @@ export default function ChatScreen() {
       const { senderId, receiverId } = await resolveReceiver();
 
       if (!senderId) {
-        Alert.alert("Chat error", "Missing sender.");
+        Alert.alert(labels.chatError, labels.missingSender);
         return;
       }
       if (!receiverId) {
-        Alert.alert("Chat error", "Missing receiver.");
+        Alert.alert(labels.chatError, labels.missingReceiver);
         return;
       }
 
@@ -635,7 +827,7 @@ export default function ChatScreen() {
       if (!chatKeyLocal) {
         chatKeyLocal = await findOrCreateChatId(senderId, receiverId, true);
         if (!chatKeyLocal) {
-          Alert.alert("Chat error", "Could not find or create chat");
+          Alert.alert(labels.chatError, labels.couldNotFindOrCreateChat);
           return;
         }
         setChatId(chatKeyLocal);
@@ -668,12 +860,23 @@ export default function ChatScreen() {
       };
       updates[`${prefix}Chats/${chatKeyLocal}/unread/${receiverId}`] = 1;
       updates[`${prefix}Chats/${chatKeyLocal}/unread/${senderId}`] = 0;
+      addChatSummaryUpdates(updates, prefix, {
+        chatId: chatKeyLocal,
+        senderId,
+        receiverId,
+        lastText: text.trim(),
+        lastType: "text",
+        timeStamp: now,
+        seen: false,
+        senderUnread: 0,
+        receiverUnread: 1,
+      });
 
       await update(ref(database), updates);
       setText("");
     } catch (err) {
       console.warn("[Chat:send] error", err);
-      Alert.alert("Send failed", "Could not send message — try again.");
+      Alert.alert(labels.sendFailed, labels.couldNotSendMessage);
     } finally {
       setSending(false);
     }
@@ -705,7 +908,7 @@ export default function ChatScreen() {
     if (!activeMessage?.messageId || !chatId) return;
     const nextText = (editDraft || "").trim();
     if (!nextText) {
-      Alert.alert("Validation", "Message cannot be empty.");
+      Alert.alert(labels.validation, labels.messageCannotBeEmpty);
       return;
     }
     try {
@@ -718,7 +921,7 @@ export default function ChatScreen() {
       setEditDraft("");
       setActiveMessage(null);
     } catch {
-      Alert.alert("Error", "Failed to edit message.");
+      Alert.alert(labels.error, labels.failedToEditMessage);
     }
   };
 
@@ -728,18 +931,18 @@ export default function ChatScreen() {
       const prefix = await getPathPrefix();
       const updates = {};
       updates[`${prefix}Chats/${chatId}/messages/${activeMessage.messageId}/deleted`] = true;
-      updates[`${prefix}Chats/${chatId}/messages/${activeMessage.messageId}/text`] = "Message deleted";
+      updates[`${prefix}Chats/${chatId}/messages/${activeMessage.messageId}/text`] = labels.messageDeleted;
       updates[`${prefix}Chats/${chatId}/messages/${activeMessage.messageId}/type`] = "text";
       await update(ref(database), updates);
       closeMessageActions();
     } catch {
-      Alert.alert("Error", "Failed to delete message.");
+      Alert.alert(labels.error, labels.failedToDeleteMessage);
     }
   };
 
   const openContactProfile = useCallback(() => {
     if (!contactUserId) {
-      Alert.alert("Unavailable", "User profile could not be opened.");
+      Alert.alert(labels.unavailable, labels.profileCouldNotBeOpened);
       return;
     }
 
@@ -753,7 +956,7 @@ export default function ChatScreen() {
         chatId: chatId || "",
       },
     });
-  }, [router, contactUserId, contactName, contactImage, chatId]);
+  }, [router, contactUserId, contactName, contactImage, chatId, labels]);
 
   function closeViewer() {
     setViewerVisible(false);
@@ -773,7 +976,7 @@ export default function ChatScreen() {
     let lastDateLabel = null;
 
     messages.forEach((m) => {
-      const label = dateLabelForTs(m.timeStamp);
+      const label = dateLabelForTs(m.timeStamp, labels, amharic, oromo);
       if (label !== lastDateLabel) {
         items.push({ type: "date", id: `date-${m.timeStamp}`, label });
         lastDateLabel = label;
@@ -782,7 +985,7 @@ export default function ChatScreen() {
     });
 
     return items;
-  }, [messages]);
+  }, [messages, labels, amharic, oromo]);
 
   const renderDateSeparator = (label) => (
     <View style={styles.dateSeparator}>
@@ -841,7 +1044,7 @@ export default function ChatScreen() {
               >
                 <Image source={imageSource} style={styles.outgoingImage} />
                 <View style={styles.imageMeta}>
-                  <Text style={styles.imageTime}>{fmtTime12(m.timeStamp)}</Text>
+                  <Text style={styles.imageTime}>{fmtTime12(m.timeStamp, amharic, oromo)}</Text>
                   {renderSeenIcon(m, true)}
                 </View>
               </TouchableOpacity>
@@ -866,7 +1069,7 @@ export default function ChatScreen() {
             <TouchableOpacity activeOpacity={0.9} onPress={() => openImageViewer(m)}>
               <Image source={imageSource} style={styles.incomingImage} />
               <View style={styles.incomingImageMeta}>
-                <Text style={styles.imageTimeIncoming}>{fmtTime12(m.timeStamp)}</Text>
+                <Text style={styles.imageTimeIncoming}>{fmtTime12(m.timeStamp, amharic, oromo)}</Text>
               </View>
             </TouchableOpacity>
             <View style={styles.leftTailContainer}>
@@ -893,15 +1096,15 @@ export default function ChatScreen() {
           >
             <View style={[styles.bubble, isMe ? styles.bubbleRight : styles.bubbleLeft]}>
               <Text style={[styles.bubbleText, isMe ? styles.bubbleTextRight : styles.bubbleTextLeft]}>
-                {m.deleted ? "Message deleted" : m.text}
+                {m.deleted ? labels.messageDeleted : m.text}
               </Text>
 
               <View style={styles.bubbleMetaRow}>
                 {m.edited && !m.deleted ? (
-                  <Text style={[styles.editedLabel, isMe ? styles.editedRight : styles.editedLeft]}>edited</Text>
+                  <Text style={[styles.editedLabel, isMe ? styles.editedRight : styles.editedLeft]}>{labels.edited}</Text>
                 ) : null}
                 <Text style={[styles.bubbleTime, isMe ? styles.bubbleTimeRight : styles.bubbleTimeLeft]}>
-                  {fmtTime12(m.timeStamp)}
+                  {fmtTime12(m.timeStamp, amharic, oromo)}
                 </Text>
                 {renderSeenIcon(m, isMe)}
               </View>
@@ -935,9 +1138,9 @@ export default function ChatScreen() {
 
           <View style={styles.headerCenter}>
             <Text style={styles.headerName} numberOfLines={1}>
-              {contactName || "Conversation"}
+              {contactName || labels.conversation}
             </Text>
-            <Text style={styles.headerSub}>{contactSubtitle || ""}</Text>
+            <Text style={styles.headerSub}>{labels.roleLabels[contactSubtitle] || contactSubtitle || ""}</Text>
           </View>
 
           <TouchableOpacity style={styles.headerRight} onPress={openContactProfile} activeOpacity={0.85}>
@@ -978,7 +1181,7 @@ export default function ChatScreen() {
           </TouchableOpacity>
 
           <TextInput
-            placeholder="Message"
+            placeholder={labels.messagePlaceholder}
             placeholderTextColor={palette.placeholder}
             value={text}
             onChangeText={setText}
@@ -1002,18 +1205,18 @@ export default function ChatScreen() {
               {activeMessage?.type === "text" && !activeMessage?.deleted ? (
                 <TouchableOpacity style={styles.sheetItem} onPress={startEditMessage}>
                   <Ionicons name="create-outline" size={18} color={palette.text} />
-                  <Text style={styles.sheetText}>Edit message</Text>
+                  <Text style={styles.sheetText}>{labels.editMessage}</Text>
                 </TouchableOpacity>
               ) : null}
 
               <TouchableOpacity style={styles.sheetItem} onPress={doDeleteMessage}>
                 <Ionicons name="trash-outline" size={18} color={palette.danger} />
-                <Text style={[styles.sheetText, { color: palette.danger }]}>Delete message</Text>
+                <Text style={[styles.sheetText, { color: palette.danger }]}>{labels.deleteMessage}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.sheetItem} onPress={closeMessageActions}>
                 <Ionicons name="close-outline" size={18} color={palette.cancel} />
-                <Text style={[styles.sheetText, { color: palette.cancel }]}>Cancel</Text>
+                <Text style={[styles.sheetText, { color: palette.cancel }]}>{labels.cancel}</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -1023,7 +1226,7 @@ export default function ChatScreen() {
           <View style={styles.modalOverlayEdit}>
             <View style={styles.editCard}>
               <View style={styles.editHead}>
-                <Text style={styles.editTitle}>Edit Message</Text>
+                <Text style={styles.editTitle}>{labels.editMessage}</Text>
                 <TouchableOpacity onPress={() => setEditModalVisible(false)}>
                   <Ionicons name="close" size={22} color={palette.muted} />
                 </TouchableOpacity>
@@ -1033,17 +1236,17 @@ export default function ChatScreen() {
                 style={styles.editInput}
                 value={editDraft}
                 onChangeText={setEditDraft}
-                placeholder="Edit your message"
+                placeholder={labels.editYourMessage}
                 placeholderTextColor={palette.placeholder}
                 multiline
               />
 
               <View style={styles.editActions}>
                 <TouchableOpacity style={[styles.editBtn, styles.editBtnCancel]} onPress={() => setEditModalVisible(false)}>
-                  <Text style={styles.editBtnCancelText}>Cancel</Text>
+                  <Text style={styles.editBtnCancelText}>{labels.cancel}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[styles.editBtn, styles.editBtnSave]} onPress={doEditMessage}>
-                  <Text style={styles.editBtnSaveText}>Save</Text>
+                  <Text style={styles.editBtnSaveText}>{labels.save}</Text>
                 </TouchableOpacity>
               </View>
             </View>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Modal,
@@ -18,6 +18,10 @@ import * as EthiopianDate from "ethiopian-date";
 
 import { database } from "../../constants/firebaseConfig";
 import { useParentTheme } from "../../hooks/use-parent-theme";
+import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
+import { isInternetReachableNow } from "../lib/networkGuard";
+
+const CALENDAR_CACHE_TTL_MS = 10 * 60 * 1000;
 
 const makeCalendarColors = (colors, isDark) => ({
   text: colors.textStrong,
@@ -39,6 +43,7 @@ const makeCalendarColors = (colors, isDark) => ({
 
 const DAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAYS_AM = ["እሁድ", "ሰኞ", "ማክ", "ረቡዕ", "ሐሙስ", "አርብ", "ቅዳሜ"];
+const DAYS_OM = ["Dil", "Wix", "Qib", "Rob", "Kam", "Jim", "San"];
 
 const ETH_MONTHS_EN = [
   "Meskerem",
@@ -69,6 +74,38 @@ const ETH_MONTHS_AM = [
   "ሰኔ",
   "ሐምሌ",
   "ነሐሴ",
+  "ጳጉሜ",
+];
+
+const ETH_MONTHS_OM = [
+  "Fulbaana",
+  "Onkololeessa",
+  "Sadaasa",
+  "Muddee",
+  "Amajjii",
+  "Guraandhala",
+  "Bitootessa",
+  "Ebla",
+  "Caamsaa",
+  "Waxabajjii",
+  "Adooleessa",
+  "Hagayya",
+  "Qaammee",
+];
+
+const ETH_MONTHS_TI = [
+  "መስከረም",
+  "ጥቅምቲ",
+  "ሕዳር",
+  "ታሕሳስ",
+  "ጥሪ",
+  "የካቲት",
+  "መጋቢት",
+  "ሚያዝያ",
+  "ግንቦት",
+  "ሰነ",
+  "ሓምለ",
+  "ነሓሰ",
   "ጳጉሜ",
 ];
 
@@ -159,13 +196,21 @@ function getGregorianDateFromEth(year, month, day) {
   return new Date(gregorian.year, gregorian.month - 1, gregorian.day);
 }
 
-function getEthMonthName(month, amharic = false) {
-  return (amharic ? ETH_MONTHS_AM : ETH_MONTHS_EN)[month - 1] || "";
+function getEthMonthName(month, amharic = false, oromo = false, tigrinya = false) {
+  const monthNames = tigrinya
+    ? ETH_MONTHS_TI
+    : oromo
+      ? ETH_MONTHS_OM
+      : amharic
+        ? ETH_MONTHS_AM
+        : ETH_MONTHS_EN;
+
+  return monthNames[month - 1] || "";
 }
 
-function formatEthDate(ethiopianDate, amharic = false) {
+function formatEthDate(ethiopianDate, amharic = false, oromo = false, tigrinya = false) {
   if (!ethiopianDate) return "N/A";
-  return `${getEthMonthName(ethiopianDate.month, amharic)} ${ethiopianDate.day}, ${ethiopianDate.year}`;
+  return `${getEthMonthName(ethiopianDate.month, amharic, oromo, tigrinya)} ${ethiopianDate.day}, ${ethiopianDate.year}`;
 }
 
 function getDaysInEthMonth(year, month) {
@@ -229,7 +274,7 @@ function buildEthMonthGrid(year, month) {
   return cells;
 }
 
-function getLabelMap(amharic, schoolName = "") {
+function getLabelMap(amharic, oromo = false, schoolName = "") {
   const cleanSchoolName = String(schoolName || "").trim();
   const dynamicTitleEn = cleanSchoolName ? `${cleanSchoolName} Calendar` : "Your School Calendar";
   const dynamicTitleAm = cleanSchoolName
@@ -237,78 +282,80 @@ function getLabelMap(amharic, schoolName = "") {
     : "የእርስዎ ትምህርት ቤት ቀን መቁጠሪያ";
 
   return {
-    title: amharic ? dynamicTitleAm : dynamicTitleEn,
-    sub: amharic
+    title: oromo ? dynamicTitleEn : amharic ? dynamicTitleAm : dynamicTitleEn,
+    sub: oromo
+      ? `Kaaleendarii waggaa barnootaa fi guyyaa cufaa ${schoolName || "mana barumsaa kee"} hordofi.`
+      : amharic
       ? "የክፍል እና አካዳሚክ ዝግጅቶችን በኢትዮጵያ ቀን መቁጠሪያ ይመልከቱ"
       : "Browse class and academic events",
-    today: amharic ? "ዛሬ" : "Today",
-    selectedDayTitle: amharic ? "የቀኑ ዝርዝር" : "Day Details",
-    todayEvents: amharic ? "የዛሬ ዝርዝር" : "Today's Details",
-    noEventsDay: amharic ? "በዚህ ቀን ምንም ዝግጅት የለም።" : "No events for this date.",
-    upcomingDeadline: amharic ? "የሚመጡ የመጨረሻ ቀኖች" : "Upcoming Deadline",
-    noUpcomingDeadline: amharic ? "የሚመጡ የመጨረሻ ቀኖች የሉም።" : "No upcoming deadlines.",
-    gregorian: amharic ? "ግሪጎሪያን" : "Gregorian",
-    ethiopian: amharic ? "ኢትዮጵያዊ" : "Ethiopian",
-    lang: amharic ? "AM" : "EN",
-    month: amharic ? "ወር" : "Month",
-    year: amharic ? "ዓመት" : "Year",
+    today: oromo ? "Har'a" : amharic ? "ዛሬ" : "Today",
+    selectedDayTitle: oromo ? "Ibsa Guyyaa" : amharic ? "የቀኑ ዝርዝር" : "Day Details",
+    todayEvents: oromo ? "Ibsa Har'aa" : amharic ? "የዛሬ ዝርዝር" : "Today's Details",
+    noEventsDay: oromo ? "Guyyaa kanaaf sagantaan hin jiru." : amharic ? "በዚህ ቀን ምንም ዝግጅት የለም።" : "No events for this date.",
+    upcomingDeadline: oromo ? "Guyyaa xumuraa itti aanu" : amharic ? "የሚመጡ የመጨረሻ ቀኖች" : "Upcoming Deadline",
+    noUpcomingDeadline: oromo ? "Guyyaan xumuraa itti aanu hin jiru." : amharic ? "የሚመጡ የመጨረሻ ቀኖች የሉም።" : "No upcoming deadlines.",
+    gregorian: oromo ? "Giriigooriyaan" : amharic ? "ግሪጎሪያን" : "Gregorian",
+    ethiopian: oromo ? "Itoophiyaa" : amharic ? "ኢትዮጵያዊ" : "Ethiopian",
+    lang: oromo ? "OM" : amharic ? "AM" : "EN",
+    month: oromo ? "Ji'a" : amharic ? "ወር" : "Month",
+    year: oromo ? "Waggaa" : amharic ? "ዓመት" : "Year",
     category: {
-      academic: amharic ? "አካዳሚክ" : "Academic",
-      class: amharic ? "ክፍል" : "Class",
-      defaultClose: amharic ? "መደበኛ የዝግ ቀን" : "Default Closed Day",
+      academic: oromo ? "Barnootaa" : amharic ? "አካዳሚክ" : "Academic",
+      class: oromo ? "Kutaa" : amharic ? "ክፍል" : "Class",
+      defaultClose: oromo ? "Guyyaa cufaa idilee" : amharic ? "መደበኛ የዝግ ቀን" : "Default Closed Day",
     },
   };
 }
 
-function getDefaultClosureDefs(amharic = false) {
+function getDefaultClosureDefs(amharic = false, oromo = false) {
   return [
     {
       month: 1,
       day: 1,
-      title: amharic ? "እንቁጣጣሽ" : "Enkutatash",
-      notes: amharic ? "የኢትዮጵያ አዲስ ዓመት - የትምህርት ዝግ ቀን" : "Ethiopian New Year - School closed day",
+      title: oromo ? "Bara Haaraa Itoophiyaa" : amharic ? "እንቁጣጣሽ" : "Enkutatash",
+      notes: oromo ? "Bara haaraa Itoophiyaa - guyyaa cufaa mana barumsaa" : amharic ? "የኢትዮጵያ አዲስ ዓመት - የትምህርት ዝግ ቀን" : "Ethiopian New Year - School closed day",
     },
     {
       month: 1,
       day: 17,
-      title: amharic ? "መስቀል" : "Meskel",
-      notes: amharic ? "የመስቀል በዓል - የትምህርት ዝግ ቀን" : "Meskel - School closed day",
+      title: oromo ? "Masqal" : amharic ? "መስቀል" : "Meskel",
+      notes: oromo ? "Masqal - guyyaa cufaa mana barumsaa" : amharic ? "የመስቀል በዓል - የትምህርት ዝግ ቀን" : "Meskel - School closed day",
     },
     {
       month: 4,
       day: 29,
-      title: amharic ? "ገና" : "Genna",
-      notes: amharic ? "የገና በዓል - የትምህርት ዝግ ቀን" : "Genna - School closed day",
+      title: oromo ? "Ayyaana Qillee" : amharic ? "ገና" : "Genna",
+      notes: oromo ? "Qillee - guyyaa cufaa mana barumsaa" : amharic ? "የገና በዓል - የትምህርት ዝግ ቀን" : "Genna - School closed day",
     },
     {
       month: 5,
       day: 11,
-      title: amharic ? "ጥምቀት" : "Timket",
-      notes: amharic ? "የጥምቀት በዓል - የትምህርት ዝግ ቀን" : "Timket - School closed day",
+      title: oromo ? "Ximqet" : amharic ? "ጥምቀት" : "Timket",
+      notes: oromo ? "Ximqet - guyyaa cufaa mana barumsaa" : amharic ? "የጥምቀት በዓል - የትምህርት ዝግ ቀን" : "Timket - School closed day",
     },
     {
       month: 6,
       day: 23,
-      title: amharic ? "የአድዋ ድል ቀን" : "Adwa Victory Day",
-      notes: amharic ? "የአድዋ ድል ቀን - የትምህርት ዝግ ቀን" : "Adwa Victory Day - School closed day",
+      title: oromo ? "Guyyaa Injifannoo Adwaa" : amharic ? "የአድዋ ድል ቀን" : "Adwa Victory Day",
+      notes: oromo ? "Guyyaa Injifannoo Adwaa - guyyaa cufaa mana barumsaa" : amharic ? "የአድዋ ድል ቀን - የትምህርት ዝግ ቀን" : "Adwa Victory Day - School closed day",
     },
     {
       month: 8,
       day: 23,
-      title: amharic ? "የሠራተኞች ቀን" : "Labour Day",
-      notes: amharic ? "የሠራተኞች ቀን - የትምህርት ዝግ ቀን" : "Labour Day - School closed day",
+      title: oromo ? "Guyyaa Hojjettootaa" : amharic ? "የሠራተኞች ቀን" : "Labour Day",
+      notes: oromo ? "Guyyaa Hojjettootaa - guyyaa cufaa mana barumsaa" : amharic ? "የሠራተኞች ቀን - የትምህርት ዝግ ቀን" : "Labour Day - School closed day",
     },
     {
       month: 9,
       day: 27,
-      title: amharic ? "የአርበኞች ቀን" : "Patriots' Victory Day",
-      notes: amharic ? "የአርበኞች ቀን - የትምህርት ዝግ ቀን" : "Patriots' Victory Day - School closed day",
+      title: oromo ? "Guyyaa Injifannoo Arboonotaa" : amharic ? "የአርበኞች ቀን" : "Patriots' Victory Day",
+      notes: oromo ? "Guyyaa Arboonotaa - guyyaa cufaa mana barumsaa" : amharic ? "የአርበኞች ቀን - የትምህርት ዝግ ቀን" : "Patriots' Victory Day - School closed day",
     },
     {
       month: 9,
       day: 20,
-      title: amharic ? "የደርግ ውድቀት ቀን" : "Downfall of the Derg",
-      notes: amharic ? "የመታሰቢያ ቀን - የትምህርት ዝግ ቀን" : "Commemoration Day - School closed day",
+      title: oromo ? "Guyyaa Kufaa Dargii" : amharic ? "የደርግ ውድቀት ቀን" : "Downfall of the Derg",
+      notes: oromo ? "Guyyaa yaadannoo - guyyaa cufaa mana barumsaa" : amharic ? "የመታሰቢያ ቀን - የትምህርት ዝግ ቀን" : "Commemoration Day - School closed day",
     },
   ];
 }
@@ -528,7 +575,7 @@ function buildMovableClosureEvents(yearStart, yearEnd, amharic = false) {
 }
 
 export default function CalendarTab() {
-  const { colors: themeColors, isDark } = useParentTheme();
+  const { colors: themeColors, isDark, amharic, oromo, tigrinya, toggleLanguage } = useParentTheme();
   const colors = useMemo(() => makeCalendarColors(themeColors, isDark), [themeColors, isDark]);
   const catColors = useMemo(
     () => ({
@@ -550,17 +597,16 @@ export default function CalendarTab() {
   const [ethMonth, setEthMonth] = useState(todayEth.month);
   const [selectedEthDay, setSelectedEthDay] = useState(todayEth.day);
   const [todayOnly, setTodayOnly] = useState(false);
-  const [amharic, setAmharic] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [pickerMonth, setPickerMonth] = useState(todayEth.month);
   const [pickerYear, setPickerYear] = useState(todayEth.year);
 
-  const labels = getLabelMap(amharic, schoolName);
+  const labels = getLabelMap(amharic, oromo, schoolName);
   const scrollRef = useRef(null);
   const detailsYRef = useRef(0);
 
-  const resolveSchoolKeyForCalendar = async () => {
+  const resolveSchoolKeyForCalendar = useCallback(async () => {
     const schoolNodeExists = async (key) => {
       if (!key) return false;
       const [rootSnap, platformSnap] = await Promise.all([
@@ -711,10 +757,34 @@ export default function CalendarTab() {
     };
 
     return pickFromSchoolsSnap(schoolsRootSnap) || pickFromSchoolsSnap(schoolsPlatformSnap) || null;
-  };
+  }, []);
 
-  const fetchCalendarEvents = async () => {
+  const fetchCalendarEvents = useCallback(async (forceNetwork = false) => {
     try {
+      const cachedCalendarRecord = await readCachedJsonRecord("cache:calendar:events");
+      const cachedCalendar = cachedCalendarRecord?.value || null;
+      const cacheIsFresh = cachedCalendarRecord
+        ? Date.now() - cachedCalendarRecord.savedAt <= CALENDAR_CACHE_TTL_MS
+        : false;
+
+      if (!forceNetwork && cachedCalendar && Array.isArray(cachedCalendar.events) && cacheIsFresh) {
+        return {
+          events: cachedCalendar.events,
+          schoolName: cachedCalendar.schoolName || "",
+        };
+      }
+
+      const onlineNow = await isInternetReachableNow();
+      if (!onlineNow) {
+        if (cachedCalendar && Array.isArray(cachedCalendar.events)) {
+          return {
+            events: cachedCalendar.events,
+            schoolName: cachedCalendar.schoolName || "",
+          };
+        }
+        return { events: [], schoolName: "" };
+      }
+
       const schoolKey = await resolveSchoolKeyForCalendar();
       let resolvedSchoolName = "";
 
@@ -836,12 +906,17 @@ export default function CalendarTab() {
       ));
 
       filteredEvents.sort((left, right) => new Date(left.gregorianDate || 0) - new Date(right.gregorianDate || 0));
+      writeCachedJson("cache:calendar:events", {
+        events: filteredEvents,
+        schoolName: resolvedSchoolName,
+      }).catch(() => {});
+
       return { events: filteredEvents, schoolName: resolvedSchoolName };
     } catch (error) {
       console.warn("Calendar events load error:", error);
       return { events: [], schoolName: "" };
     }
-  };
+  }, [resolveSchoolKeyForCalendar]);
 
   useEffect(() => {
     let mounted = true;
@@ -858,11 +933,11 @@ export default function CalendarTab() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [fetchCalendarEvents]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    const result = await fetchCalendarEvents();
+    const result = await fetchCalendarEvents(true);
     setEvents(result.events || []);
     if (result.schoolName) setSchoolName(result.schoolName);
     setRefreshing(false);
@@ -986,7 +1061,7 @@ export default function CalendarTab() {
     });
   };
 
-  const monthTitle = `${getEthMonthName(ethMonth, amharic)} ${ethYear}`;
+  const monthTitle = `${getEthMonthName(ethMonth, amharic, oromo, tigrinya)} ${ethYear}`;
   const selectedEthDateObj = todayOnly
     ? todayEth
     : { year: ethYear, month: ethMonth, day: selectedEthDay };
@@ -1014,7 +1089,7 @@ export default function CalendarTab() {
     return (
       <SafeAreaView style={styles.loadingWrap} edges={["left", "right"]}>
         <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>Loading calendar...</Text>
+        <Text style={styles.loadingText}>{oromo ? "Kaaleendarii fe'aa jira..." : amharic ? "የቀን መቁጠሪያ በመጫን ላይ..." : "Loading calendar..."}</Text>
       </SafeAreaView>
     );
   }
@@ -1036,16 +1111,16 @@ export default function CalendarTab() {
 
           <View style={styles.pickerSheet}>
             <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>{amharic ? "ወር እና ዓመት" : "Month & Year"}</Text>
+              <Text style={styles.pickerTitle}>{oromo ? "Ji'aa fi Waggaa" : amharic ? "ወር እና ዓመት" : "Month & Year"}</Text>
               <TouchableOpacity onPress={() => setPickerVisible(false)} activeOpacity={0.86}>
                 <Ionicons name="close" size={20} color={colors.text} />
               </TouchableOpacity>
             </View>
 
             <View style={styles.pickerPreviewCard}>
-              <Text style={styles.pickerPreviewLabel}>{amharic ? "የተመረጠው" : "Selected"}</Text>
+              <Text style={styles.pickerPreviewLabel}>{oromo ? "Filatame" : amharic ? "የተመረጠው" : "Selected"}</Text>
               <Text style={styles.pickerPreviewValue}>
-                {getEthMonthName(pickerMonth, amharic)} {pickerYear}
+                {getEthMonthName(pickerMonth, amharic, oromo, tigrinya)} {pickerYear}
               </Text>
             </View>
 
@@ -1067,7 +1142,7 @@ export default function CalendarTab() {
                         activeOpacity={0.86}
                       >
                         <Text style={[styles.pickerChipText, active && styles.pickerChipTextActive]}>
-                          {getEthMonthName(month, amharic)}
+                          {getEthMonthName(month, amharic, oromo, tigrinya)}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -1106,7 +1181,7 @@ export default function CalendarTab() {
               onPress={applyMonthYearPicker}
               activeOpacity={0.88}
             >
-              <Text style={styles.pickerApplyText}>{amharic ? "አሳይ" : "Apply"}</Text>
+              <Text style={styles.pickerApplyText}>{oromo ? "Fayyadami" : amharic ? "አሳይ" : "Apply"}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1121,16 +1196,16 @@ export default function CalendarTab() {
         <Pressable style={styles.modalBackdrop} onPress={() => setSettingsVisible(false)} />
         <View style={styles.bottomSheet}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>{amharic ? "የቀን መቁጠሪያ ቅንብሮች" : "Calendar Settings"}</Text>
+          <Text style={styles.sheetTitle}>{oromo ? "Qindaa'ina Kaaleendarii" : amharic ? "የቀን መቁጠሪያ ቅንብሮች" : "Calendar Settings"}</Text>
           <Text style={styles.sheetSubtitle}>
-            {amharic ? "የቀን መቁጠሪያውን እይታ እና እንቅስቃሴ ያስተካክሉ" : "Adjust calendar view and quick actions"}
+            {oromo ? "Mul'ataa fi hojii saffisaa kaaleendarii qindeessi" : amharic ? "የቀን መቁጠሪያውን እይታ እና እንቅስቃሴ ያስተካክሉ" : "Adjust calendar view and quick actions"}
           </Text>
 
           <TouchableOpacity
             style={styles.settingRowCard}
             activeOpacity={0.86}
             onPress={() => {
-              setAmharic((value) => !value);
+              toggleLanguage();
               setSettingsVisible(false);
             }}
           >
@@ -1139,8 +1214,8 @@ export default function CalendarTab() {
                 <Ionicons name="language-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.settingRowTextWrap}>
-                <Text style={styles.settingRowTitle}>{amharic ? "ቋንቋ" : "Language"}</Text>
-                <Text style={styles.settingRowSubtitle}>{amharic ? "አማርኛ / English መቀየር" : "Switch Amharic / English"}</Text>
+                <Text style={styles.settingRowTitle}>{oromo ? "Afaan" : amharic ? "ቋንቋ" : "Language"}</Text>
+                <Text style={styles.settingRowSubtitle}>{oromo ? "English / Afaan Oromoo / አማርኛ jijjiiri" : amharic ? "አማርኛ / English መቀየር" : "Switch language"}</Text>
               </View>
             </View>
             <Text style={styles.settingValuePill}>{labels.lang}</Text>
@@ -1162,8 +1237,8 @@ export default function CalendarTab() {
                 <Ionicons name="today-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.settingRowTextWrap}>
-                <Text style={styles.settingRowTitle}>{amharic ? "ወደ ዛሬ" : "Go to Today"}</Text>
-                <Text style={styles.settingRowSubtitle}>{amharic ? "የዛሬን ቀን በፍጥነት ክፈት" : "Jump back to the current date"}</Text>
+                <Text style={styles.settingRowTitle}>{oromo ? "Gara Har'aatti deebi'i" : amharic ? "ወደ ዛሬ" : "Go to Today"}</Text>
+                <Text style={styles.settingRowSubtitle}>{oromo ? "Guyyaa har'aa saffisaan banuu" : amharic ? "የዛሬን ቀን በፍጥነት ክፈት" : "Jump back to the current date"}</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.muted} />
@@ -1182,8 +1257,8 @@ export default function CalendarTab() {
                 <Ionicons name="calendar-outline" size={18} color={colors.primary} />
               </View>
               <View style={styles.settingRowTextWrap}>
-                <Text style={styles.settingRowTitle}>{amharic ? "ወር እና ዓመት ምረጥ" : "Choose Month & Year"}</Text>
-                <Text style={styles.settingRowSubtitle}>{amharic ? "ወደ ተፈለገው ጊዜ በፍጥነት ይሂዱ" : "Open the month and year picker"}</Text>
+                <Text style={styles.settingRowTitle}>{oromo ? "Ji'aa fi Waggaa filadhu" : amharic ? "ወር እና ዓመት ምረጥ" : "Choose Month & Year"}</Text>
+                <Text style={styles.settingRowSubtitle}>{oromo ? "Filannoo ji'aa fi waggaa bani" : amharic ? "ወደ ተፈለገው ጊዜ በፍጥነት ይሂዱ" : "Open the month and year picker"}</Text>
               </View>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.muted} />
@@ -1202,7 +1277,7 @@ export default function CalendarTab() {
               <TouchableOpacity
                 style={styles.heroModePill}
                 activeOpacity={0.86}
-                onPress={() => setAmharic((value) => !value)}
+                onPress={toggleLanguage}
               >
                 <Ionicons name="sparkles-outline" size={13} color={colors.primary} />
                 <Text style={styles.heroModeText}>{labels.lang}</Text>
@@ -1216,7 +1291,7 @@ export default function CalendarTab() {
           <View style={styles.heroMetaRow}>
             <View style={styles.heroMetaChip}>
               <Text style={styles.heroMetaLabel}>{labels.month}</Text>
-              <Text style={styles.heroMetaValue}>{getEthMonthName(ethMonth, amharic)}</Text>
+              <Text style={styles.heroMetaValue}>{getEthMonthName(ethMonth, amharic, oromo, tigrinya)}</Text>
             </View>
             <View style={styles.heroMetaChip}>
               <Text style={styles.heroMetaLabel}>{labels.year}</Text>
@@ -1286,7 +1361,7 @@ export default function CalendarTab() {
           </View>
 
           <View style={styles.weekRow}>
-            {(amharic ? DAYS_AM : DAYS_EN).map((dayLabel) => (
+            {(oromo ? DAYS_OM : amharic ? DAYS_AM : DAYS_EN).map((dayLabel) => (
               <View key={dayLabel} style={styles.weekCell}>
                 <Text style={styles.weekText}>{dayLabel}</Text>
               </View>
@@ -1374,7 +1449,7 @@ export default function CalendarTab() {
             <View style={styles.selectedDatePill}>
               <Text style={styles.selectedDatePillLabel}>{labels.ethiopian}</Text>
               <Text style={styles.selectedDatePillValue}>
-                {formatEthDate(selectedEthDateObj, amharic)}
+                {formatEthDate(selectedEthDateObj, amharic, oromo, tigrinya)}
               </Text>
             </View>
 
@@ -1382,7 +1457,7 @@ export default function CalendarTab() {
               <Text style={styles.selectedDatePillLabel}>{labels.gregorian}</Text>
               <Text style={styles.selectedDatePillValue}>
                 {selectedGregorianDate
-                  ? new Date(selectedGregorianDate).toLocaleDateString(amharic ? "am-ET" : undefined)
+                  ? new Date(selectedGregorianDate).toLocaleDateString(amharic ? "am-ET" : oromo ? "om-ET" : undefined)
                   : "N/A"}
               </Text>
             </View>
@@ -1442,13 +1517,13 @@ export default function CalendarTab() {
                 <View key={event.id} style={[styles.upcomingRow, { borderColor: `${color}55` }]}>
                   <View style={styles.upcomingContent}>
                     <Text style={styles.upcomingDate}>
-                      {formatEthDate(event.ethiopianDate, amharic)}
+                      {formatEthDate(event.ethiopianDate, amharic, oromo, tigrinya)}
                     </Text>
                     <Text style={styles.upcomingTitle}>{event.title || "Event"}</Text>
                     <Text style={styles.upcomingSub}>
                       {labels.gregorian}:{" "}
                       {event.gregorianDate
-                        ? new Date(event.gregorianDate).toLocaleDateString(amharic ? "am-ET" : undefined)
+                        ? new Date(event.gregorianDate).toLocaleDateString(amharic ? "am-ET" : oromo ? "om-ET" : undefined)
                         : "N/A"}
                     </Text>
                   </View>
