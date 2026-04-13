@@ -2,18 +2,20 @@
   "expo": {
     "name": "Gojo parent",
     "slug": "gojo-parent-app",
+    "owner": "eramota3",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/Logo_Icon.png",
+    "icon": "./assets/images/app-icon-parent.png",
     "scheme": "gojoparentapp",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE"
+        "foregroundImage": "./assets/images/app-icon-parent-foreground.png",
+        "backgroundColor": "#F4F8FF"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -28,19 +30,23 @@
       "package": "com.eramota.gojoparentapp"
     },
     "web": {
-      "output": "static"
+      "output": "static",
+      "favicon": "./assets/images/app-icon-parent.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 200,
+          "backgroundColor": "#EAF5FF",
+          "image": "./assets/images/freepik__talk__16046-removebg-preview.png",
+          "imageWidth": 240,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#08111F",
+            "image": "./assets/images/freepik__talk__16046-removebg-preview.png",
+            "imageWidth": 240,
+            "resizeMode": "contain"
           }
         }
       ],
@@ -59,7 +65,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "daaef93f-fc55-4697-9bee-84247c35700a"
+        "projectId": "de8d6b69-29d8-4d0a-9d59-51ef853f5a1f"
       }
     }
   }

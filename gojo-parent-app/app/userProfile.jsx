@@ -1,12 +1,12 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Linking,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   Share,
   StatusBar,
@@ -21,6 +21,7 @@ import { child, get, push, ref, set } from "firebase/database";
 import { database } from "../constants/firebaseConfig";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AppImage from "../components/ui/AppImage";
+import { UserProfileScreenSkeleton } from "../components/ui/AppSkeletons";
 import { useParentTheme } from "../hooks/use-parent-theme";
 import { readCachedJsonRecord, writeCachedJson } from "./lib/dataCache";
 import { isInternetReachableNow } from "./lib/networkGuard";
@@ -411,6 +412,9 @@ export default function UserProfile() {
 
   const [schoolKey, setSchoolKey] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  const refreshRequestedRef = useRef(false);
 
   const [user, setUser] = useState(null);
   const [roleName, setRoleName] = useState(paramRoleName ?? null);
@@ -479,6 +483,7 @@ export default function UserProfile() {
     let mounted = true;
 
     const load = async () => {
+      const shouldForceNetwork = refreshRequestedRef.current;
       const cacheKey = getUserProfileCacheKey(schoolKey, paramRecordId, paramUserId);
       const cachedProfileRecord = await readCachedJsonRecord(cacheKey);
       const cachedProfile = cachedProfileRecord?.value || null;
@@ -490,7 +495,9 @@ export default function UserProfile() {
         applyCachedProfile(cachedProfile);
         setLoading(false);
 
-        if (cacheFresh) {
+        if (cacheFresh && !shouldForceNetwork) {
+          setRefreshing(false);
+          refreshRequestedRef.current = false;
           return;
         }
       } else {
@@ -499,7 +506,11 @@ export default function UserProfile() {
 
       const onlineNow = await isInternetReachableNow();
       if (!onlineNow) {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+        refreshRequestedRef.current = false;
         return;
       }
 
@@ -812,7 +823,11 @@ export default function UserProfile() {
       } catch (e) {
         console.warn("userProfile load error:", e);
       } finally {
-        if (mounted) setLoading(false);
+        refreshRequestedRef.current = false;
+        if (mounted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     };
 
@@ -820,7 +835,17 @@ export default function UserProfile() {
     return () => {
       mounted = false;
     };
-  }, [applyCachedProfile, paramRecordId, paramRoleName, paramUserId, schoolKey, schoolAwarePath]);
+  }, [applyCachedProfile, paramRecordId, paramRoleName, paramUserId, reloadTick, schoolKey, schoolAwarePath]);
+
+  const handleRefresh = useCallback(() => {
+    if (loading || refreshing) {
+      return;
+    }
+
+    refreshRequestedRef.current = true;
+    setRefreshing(true);
+    setReloadTick((current) => current + 1);
+  }, [loading, refreshing]);
 
   const isSelfProfile =
     !!parentUserId && !!resolvedUserId && String(parentUserId) === String(resolvedUserId);
@@ -1157,12 +1182,7 @@ export default function UserProfile() {
   );
 
   if (loading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PALETTE.accent} />
-        <Text style={styles.loadingText}>{labels.loadingProfile}</Text>
-      </View>
-    );
+    return <UserProfileScreenSkeleton />;
   }
 
   if (!user) {
@@ -1309,6 +1329,15 @@ export default function UserProfile() {
             styles.sectionScrollContent,
             { paddingBottom: Math.max(88, insets.bottom + 64) },
           ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[PALETTE.accent]}
+              tintColor={PALETTE.accent}
+              progressViewOffset={8}
+            />
+          }
           showsVerticalScrollIndicator={false}
         >
           {profileSectionTab === "main" ? renderMainSection() : renderInfoSection()}

@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  ActivityIndicator,
   ScrollView,
   RefreshControl,
   TouchableOpacity,
@@ -13,6 +12,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { ref, get } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
+import { PaymentHistoryScreenSkeleton } from "../../components/ui/AppSkeletons";
 import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
 import { getLinkedChildrenForParent } from "../lib/parentChildren";
 import { isInternetReachableNow } from "../lib/networkGuard";
@@ -442,12 +442,7 @@ export default function HistoryTab() {
   }, [effectiveSelectedChildId, groupedByStudent]);
 
   if (loading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={palette.primary} />
-        <Text style={styles.loadingText}>{labels.loading}</Text>
-      </View>
-    );
+    return <PaymentHistoryScreenSkeleton />;
   }
 
   return (

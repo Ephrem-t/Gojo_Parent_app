@@ -20,6 +20,7 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { readCachedJsonRecord, writeCachedJson } from "./lib/dataCache";
 import { isInternetReachableNow } from "./lib/networkGuard";
+import { EditProfileScreenSkeleton } from "../components/ui/AppSkeletons";
 import { useParentTheme } from "../hooks/use-parent-theme";
 
 const HEADER_MAX_HEIGHT = 210;
@@ -424,12 +425,7 @@ export default function EditMyInfo() {
   });
 
   if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={palette.primary} />
-        <Text style={styles.loadingText}>{labels.loadingProfile}</Text>
-      </View>
-    );
+    return <EditProfileScreenSkeleton />;
   }
 
   return (

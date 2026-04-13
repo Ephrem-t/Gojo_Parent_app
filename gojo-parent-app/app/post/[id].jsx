@@ -1,11 +1,12 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useState, useCallback, useMemo } from "react";
-import { View, Text, ActivityIndicator, StyleSheet, Dimensions, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Ionicons } from "@expo/vector-icons";
 import { child, get, ref } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
 import AppImage from "../../components/ui/AppImage";
+import { PostDetailScreenSkeleton } from "../../components/ui/AppSkeletons";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 import { resolvePostAuthor } from "../lib/userHelpers";
 
@@ -170,12 +171,7 @@ export default function PostScreen() {
   const handleBack = useSafeBack(router);
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={palette.primary} />
-        <Text style={styles.subtle}>{STRINGS.loading}</Text>
-      </View>
-    );
+    return <PostDetailScreenSkeleton />;
   }
 
   if (!post) {
@@ -211,9 +207,7 @@ export default function PostScreen() {
           </View>
         </View>
         {post.message ? <Text style={styles.message}>{post.message}</Text> : null}
-        {post.postUrl ? (
-          <AppImage uri={post.postUrl} style={styles.postImage} />
-        ) : null}
+        {post.postUrl ? <AppImage uri={post.postUrl} style={styles.postImage} /> : null}
         <Text style={styles.likes}>{post.likeCount} likes</Text>
       </View>
     </View>

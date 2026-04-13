@@ -24,6 +24,7 @@ export default function AppImage({
   uri,
   source,
   fallbackSource,
+  fallbackContent,
   onError,
   contentFit,
   resizeMode,
@@ -111,11 +112,18 @@ export default function AppImage({
     if (typeof onError === "function") onError(event);
   };
 
+  if (useFallback && fallbackContent) {
+    return fallbackContent;
+  }
+
   if (useFallback && fallbackSource) {
     return <ExpoImage source={fallbackSource} contentFit={resolvedContentFit} transition={transition} {...props} />;
   }
 
   if (!resolvedSource) {
+    if (fallbackContent) {
+      return fallbackContent;
+    }
     if (fallbackSource) {
       return <ExpoImage source={fallbackSource} contentFit={resolvedContentFit} transition={transition} {...props} />;
     }

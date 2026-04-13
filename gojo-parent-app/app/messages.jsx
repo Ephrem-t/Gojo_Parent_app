@@ -5,8 +5,6 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
-  Image,
   StatusBar,
   RefreshControl,
   TextInput,
@@ -22,6 +20,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { getUserVal } from "./lib/userHelpers";
 import { readCachedJson, writeCachedJson } from "./lib/dataCache";
 import AppImage from "../components/ui/AppImage";
+import { MessagesListSkeleton } from "../components/ui/AppSkeletons";
 import { useParentTheme } from "../hooks/use-parent-theme";
 
 const AVATAR_PLACEHOLDER = require("../assets/images/avatar_placeholder.png");
@@ -697,9 +696,7 @@ export default function MessagesScreen() {
         </View>
 
         {loadingInitial && contacts.length === 0 ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color={palette.primary} />
-          </View>
+          <MessagesListSkeleton />
         ) : filteredContacts.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyTitle}>{labels.noContacts}</Text>

@@ -11,7 +11,7 @@ import {
   TextInput,
   Modal,
   Linking,
-  ActivityIndicator,
+  RefreshControl,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -26,6 +26,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage
 import { getLinkedChildrenForParent } from "./lib/parentChildren";
 import { readCachedJsonRecord, writeCachedJson } from "./lib/dataCache";
 import AppImage from "../components/ui/AppImage";
+import { ProfileScreenSkeleton } from "../components/ui/AppSkeletons";
 import { useParentTheme } from "../hooks/use-parent-theme";
 
 function getProfileCacheKey(schoolKey, parentNodeId) {
@@ -370,6 +371,7 @@ export default function ParentProfile() {
   const [showMenu, setShowMenu] = useState(false);
   const [online, setOnline] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [profileSectionTab, setProfileSectionTab] = useState("main");
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -406,80 +408,87 @@ export default function ParentProfile() {
     })();
   }, []);
 
-  useEffect(() => {
-    if (!bootstrapped) return;
+  const loadParentData = useCallback(async ({ showLoading = true } = {}) => {
     if (!parentNodeId) {
+      setParentUser(null);
+      setChildren([]);
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
-    const loadParentData = async () => {
+    try {
       const cacheKey = getProfileCacheKey(schoolKey, parentNodeId);
-      const cachedProfileRecord = await readCachedJsonRecord(cacheKey);
-      const cachedProfile = cachedProfileRecord?.value || null;
+      if (showLoading) {
+        const cachedProfileRecord = await readCachedJsonRecord(cacheKey);
+        const cachedProfile = cachedProfileRecord?.value || null;
 
-      if (cachedProfile && typeof cachedProfile === "object") {
-        setParentUser(cachedProfile.parentUser || null);
-        setChildren(Array.isArray(cachedProfile.children) ? cachedProfile.children : []);
-        setLoading(false);
-      } else {
-        setLoading(true);
+        if (cachedProfile && typeof cachedProfile === "object") {
+          setParentUser(cachedProfile.parentUser || null);
+          setChildren(Array.isArray(cachedProfile.children) ? cachedProfile.children : []);
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
       }
 
       const networkState = await getNetworkStateAsync();
       const onlineNow = Boolean(networkState.isConnected && networkState.isInternetReachable !== false);
+      setOnline(onlineNow);
+
       if (!onlineNow) {
-        setLoading(false);
         return;
       }
 
-      try {
-        const prefix = schoolKey ? `Platform1/Schools/${schoolKey}/` : "";
-        const parentSnap = await get(ref(database, `${prefix}Parents/${parentNodeId}`));
-        if (!parentSnap.exists()) {
-          setParentUser(null);
-          setChildren([]);
-          return;
-        }
-
-        const parentNode = parentSnap.val() || {};
-
-        const [userSnap, linkedChildren] = await Promise.all([
-          parentNode.userId
-            ? get(ref(database, `${prefix}Users/${parentNode.userId}`))
-            : Promise.resolve(null),
-          getLinkedChildrenForParent(prefix, parentNodeId, { forceNetwork: true }),
-        ]);
-
-        const userData = userSnap?.exists() ? userSnap.val() || {} : {};
-        const nextParentUser = {
-          ...userData,
-          userId: parentNode.userId,
-          status: parentNode.status,
-          createdAt: parentNode.createdAt,
-        };
-
-        const nextChildren = (linkedChildren || []).map((child) => ({
-            ...child,
-            profileImage: child.profileImage || defaultProfile,
-          }));
-
-        setParentUser(nextParentUser);
-        setChildren(nextChildren);
-        writeCachedJson(cacheKey, {
-          parentUser: nextParentUser,
-          children: nextChildren,
-          fetchedAt: Date.now(),
-        }).catch(() => {});
-      } catch (error) {
-        console.log("Error fetching parent profile:", error);
-      } finally {
-        setLoading(false);
+      const prefix = schoolKey ? `Platform1/Schools/${schoolKey}/` : "";
+      const parentSnap = await get(ref(database, `${prefix}Parents/${parentNodeId}`));
+      if (!parentSnap.exists()) {
+        setParentUser(null);
+        setChildren([]);
+        return;
       }
-    };
 
-    loadParentData();
-  }, [bootstrapped, defaultProfile, parentNodeId, schoolKey]);
+      const parentNode = parentSnap.val() || {};
+
+      const [userSnap, linkedChildren] = await Promise.all([
+        parentNode.userId
+          ? get(ref(database, `${prefix}Users/${parentNode.userId}`))
+          : Promise.resolve(null),
+        getLinkedChildrenForParent(prefix, parentNodeId, { forceNetwork: true }),
+      ]);
+
+      const userData = userSnap?.exists() ? userSnap.val() || {} : {};
+      const nextParentUser = {
+        ...userData,
+        userId: parentNode.userId,
+        status: parentNode.status,
+        createdAt: parentNode.createdAt,
+      };
+
+      const nextChildren = (linkedChildren || []).map((child) => ({
+        ...child,
+        profileImage: child.profileImage || defaultProfile,
+      }));
+
+      setParentUser(nextParentUser);
+      setChildren(nextChildren);
+      writeCachedJson(cacheKey, {
+        parentUser: nextParentUser,
+        children: nextChildren,
+        fetchedAt: Date.now(),
+      }).catch(() => {});
+    } catch (error) {
+      console.log("Error fetching parent profile:", error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [defaultProfile, parentNodeId, schoolKey]);
+
+  useEffect(() => {
+    if (!bootstrapped) return;
+    void loadParentData();
+  }, [bootstrapped, loadParentData]);
 
   useEffect(() => {
     let listener;
@@ -502,6 +511,15 @@ export default function ParentProfile() {
     }
     router.replace("/dashboard/home");
   }, [router]);
+
+  const handleRefresh = useCallback(async () => {
+    if (!bootstrapped || loading || refreshing) {
+      return;
+    }
+
+    setRefreshing(true);
+    await loadParentData({ showLoading: false });
+  }, [bootstrapped, loadParentData, loading, refreshing]);
 
   const handleChildPress = (child) => {
     const params = { roleName: "Student" };
@@ -769,12 +787,7 @@ export default function ParentProfile() {
   });
 
   if (loading) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PALETTE.accent} />
-        <Text style={styles.loadingText}>{labels.loadingProfile}</Text>
-      </View>
-    );
+    return <ProfileScreenSkeleton />;
   }
 
   if (!parentUser) {
@@ -960,6 +973,15 @@ export default function ParentProfile() {
             styles.sectionScrollContent,
             { paddingBottom: Math.max(88, insets.bottom + 64) },
           ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[PALETTE.accent]}
+              tintColor={PALETTE.accent}
+              progressViewOffset={8}
+            />
+          }
           onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
             useNativeDriver: false,
           })}

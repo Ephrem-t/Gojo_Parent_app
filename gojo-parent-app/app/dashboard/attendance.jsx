@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Easing,
   ScrollView,
@@ -24,6 +23,7 @@ import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
 import { isInternetReachableNow } from "../lib/networkGuard";
 import { queryUserByChildInSchool } from "../lib/userHelpers";
 import AppImage from "../../components/ui/AppImage";
+import { AttendanceScreenSkeleton } from "../../components/ui/AppSkeletons";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const makePalette = (colors, isDark) => ({
@@ -736,12 +736,7 @@ export default function Attendance() {
   }, [attendanceByCourse]);
 
   if (loading && !childUser && !children.length) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PALETTE.accent} />
-        <Text style={styles.loadingText}>{labels.loading}</Text>
-      </View>
-    );
+    return <AttendanceScreenSkeleton />;
   }
 
   if (!children.length) {

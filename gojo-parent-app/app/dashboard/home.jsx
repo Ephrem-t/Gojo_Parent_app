@@ -29,6 +29,7 @@ import {
   update,
 } from "firebase/database";
 import { database } from "../../constants/firebaseConfig";
+import { HomeFeedSkeleton } from "../../components/ui/AppSkeletons";
 import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
 import { isInternetReachableNow } from "../lib/networkGuard";
 import {
@@ -257,7 +258,6 @@ const FeedPostCard = React.memo(function FeedPostCard({
         <Pressable onPress={() => onOpenViewer(imageUri)}>
           <AppImage
             uri={imageUri}
-            fallbackSource={require("../../assets/images/logo.png")}
             style={styles.postImage}
             resizeMode="cover"
           />
@@ -1076,11 +1076,7 @@ export default function HomeScreen() {
   );
 
   if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color={palette.primary} />
-      </View>
-    );
+    return <HomeFeedSkeleton />;
   }
 
   if (!combinedPosts?.length) {
@@ -1157,7 +1153,6 @@ export default function HomeScreen() {
             {viewerImage ? (
               <AppImage
                 uri={viewerImage}
-                fallbackSource={require("../../assets/images/logo.png")}
                 style={styles.viewerImage}
                 resizeMode="contain"
               />

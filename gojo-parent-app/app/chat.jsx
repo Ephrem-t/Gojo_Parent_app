@@ -5,13 +5,12 @@ import {
   StyleSheet,
   FlatList,
   TouchableOpacity,
-  ActivityIndicator,
   Image,
   StatusBar,
   TextInput,
   Platform,
   Alert,
-  Keyboard,
+  KeyboardAvoidingView,
   Modal,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -24,6 +23,7 @@ import { database } from "../constants/firebaseConfig";
 import { getOpenedChat, clearOpenedChat } from "./lib/chatStore";
 import { useSafeAreaInsets, SafeAreaView } from "react-native-safe-area-context";
 import { getUserVal } from "./lib/userHelpers";
+import { ChatThreadSkeleton } from "../components/ui/AppSkeletons";
 import { useParentTheme } from "../hooks/use-parent-theme";
 
 const AVATAR_PLACEHOLDER = require("../assets/images/avatar_placeholder.png");
@@ -295,9 +295,6 @@ export default function ChatScreen() {
   const [text, setText] = useState("");
   const [lastMessageMeta, setLastMessageMeta] = useState(null);
 
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerImageUri, setViewerImageUri] = useState(null);
 
@@ -442,29 +439,6 @@ export default function ChatScreen() {
     routeContactName,
     routeContactImage,
   ]);
-
-  useEffect(() => {
-    const onShow = (e) => {
-      setKeyboardVisible(true);
-      setKeyboardHeight(e?.endCoordinates?.height || 300);
-    };
-
-    const onHide = () => {
-      setKeyboardVisible(false);
-      setKeyboardHeight(0);
-    };
-
-    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
-    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
-
-    const subShow = Keyboard.addListener(showEvent, onShow);
-    const subHide = Keyboard.addListener(hideEvent, onHide);
-
-    return () => {
-      subShow.remove();
-      subHide.remove();
-    };
-  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -1128,9 +1102,9 @@ export default function ChatScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.safe, { paddingTop: insets.top }]} edges={["bottom"]}>
+    <SafeAreaView style={styles.safe} edges={["top"]}>
       <StatusBar barStyle={statusBarStyle} backgroundColor={palette.background} translucent={false} />
-      <View style={[styles.container, { paddingBottom: insets.bottom }]}>
+      <View style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.back} onPress={() => router.back()}>
             <Ionicons name="chevron-back" size={22} color={palette.text} />
@@ -1148,56 +1122,65 @@ export default function ChatScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.messagesWrap}>
-          {loading ? (
-            <ActivityIndicator size="small" color={palette.primary} style={{ marginTop: 24 }} />
-          ) : (
-            <FlatList
-              ref={flatListRef}
-              data={displayItems}
-              renderItem={renderMessage}
-              keyExtractor={(it, idx) => (it.type === "date" ? it.id : it.messageId || `${it.timeStamp}-${idx}`)}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={{
-                paddingVertical: 12,
-                paddingBottom: 12 + (keyboardVisible ? keyboardHeight : 0),
-              }}
-              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            />
-          )}
-        </View>
-
-        <View
-          style={[
-            styles.inputRow,
-            {
-              paddingBottom: Math.max(insets.bottom, 8),
-              marginBottom: keyboardVisible ? keyboardHeight : 0,
-            },
-          ]}
+        <KeyboardAvoidingView
+          style={styles.chatBody}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          enabled={Platform.OS === "ios"}
         >
-          <TouchableOpacity onPress={pickImageAndSend} style={styles.attachmentBtn}>
-            <Ionicons name="image-outline" size={22} color={palette.muted} />
-          </TouchableOpacity>
+          <View style={styles.messagesWrap}>
+            {loading ? (
+              <ChatThreadSkeleton />
+            ) : (
+              <FlatList
+                ref={flatListRef}
+                data={displayItems}
+                renderItem={renderMessage}
+                keyExtractor={(it, idx) => (it.type === "date" ? it.id : it.messageId || `${it.timeStamp}-${idx}`)}
+                showsVerticalScrollIndicator={false}
+                keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{
+                  paddingTop: 12,
+                  paddingBottom: 14,
+                }}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              />
+            )}
+          </View>
 
-          <TextInput
-            placeholder={labels.messagePlaceholder}
-            placeholderTextColor={palette.placeholder}
-            value={text}
-            onChangeText={setText}
-            style={styles.input}
-            multiline
-            returnKeyType="send"
-            onSubmitEditing={sendMessage}
-          />
-          <TouchableOpacity
-            style={[styles.sendBtn, text.trim() ? styles.sendBtnActive : styles.sendBtnDisabled]}
-            onPress={sendMessage}
-            disabled={!text.trim() || sending}
+          <View
+            style={[
+              styles.inputRow,
+              {
+                paddingBottom: Math.max(insets.bottom, 6),
+              },
+            ]}
           >
-            <Ionicons name="send" size={20} color={text.trim() ? palette.white : palette.sendDisabledIcon} />
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity onPress={pickImageAndSend} style={styles.attachmentBtn}>
+              <Ionicons name="image-outline" size={22} color={palette.muted} />
+            </TouchableOpacity>
+
+            <TextInput
+              placeholder={labels.messagePlaceholder}
+              placeholderTextColor={palette.placeholder}
+              value={text}
+              onChangeText={setText}
+              style={styles.input}
+              multiline
+              returnKeyType="send"
+              blurOnSubmit={false}
+              textAlignVertical="center"
+              onSubmitEditing={sendMessage}
+            />
+            <TouchableOpacity
+              style={[styles.sendBtn, text.trim() ? styles.sendBtnActive : styles.sendBtnDisabled]}
+              onPress={sendMessage}
+              disabled={!text.trim() || sending}
+            >
+              <Ionicons name="send" size={20} color={text.trim() ? palette.white : palette.sendDisabledIcon} />
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
 
         <Modal visible={actionSheetVisible} transparent animationType="fade" onRequestClose={closeMessageActions}>
           <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={closeMessageActions}>
@@ -1273,6 +1256,7 @@ export default function ChatScreen() {
 const createStyles = (palette) => StyleSheet.create({
   safe: { flex: 1, backgroundColor: palette.background },
   container: { flex: 1, backgroundColor: palette.background },
+  chatBody: { flex: 1 },
 
   header: {
     height: 62,
@@ -1414,7 +1398,8 @@ const createStyles = (palette) => StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
     borderTopColor: palette.line,
     borderTopWidth: 1,
     backgroundColor: palette.background,

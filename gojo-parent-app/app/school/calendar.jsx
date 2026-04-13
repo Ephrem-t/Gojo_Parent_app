@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Modal,
   Pressable,
   RefreshControl,
@@ -17,6 +16,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as EthiopianDate from "ethiopian-date";
 
 import { database } from "../../constants/firebaseConfig";
+import { CalendarScreenSkeleton } from "../../components/ui/AppSkeletons";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
 import { isInternetReachableNow } from "../lib/networkGuard";
@@ -1086,12 +1086,7 @@ export default function CalendarTab() {
   };
 
   if (loading) {
-    return (
-      <SafeAreaView style={styles.loadingWrap} edges={["left", "right"]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={styles.loadingText}>{oromo ? "Kaaleendarii fe'aa jira..." : amharic ? "የቀን መቁጠሪያ በመጫን ላይ..." : "Loading calendar..."}</Text>
-      </SafeAreaView>
-    );
+    return <CalendarScreenSkeleton />;
   }
 
   return (

@@ -8,10 +8,11 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { Appearance } from "react-native";
 
 const THEME_STORAGE_KEY = "parent_app_theme_mode";
+const THEME_PREFERENCE_STORAGE_KEY = "parent_app_theme_mode_explicit";
 const LANGUAGE_STORAGE_KEY = "parent_app_language";
+const DEFAULT_THEME_MODE: ThemeMode = "light";
 
 type ThemeMode = "light" | "dark";
 type LanguageCode = "en" | "am" | "om" | "ti";
@@ -184,9 +185,8 @@ const ParentThemeContext = createContext<ParentThemeContextValue>({
 });
 
 export function ParentThemeProvider({ children }: { children: React.ReactNode }) {
-  const [mode, setMode] = useState<ThemeMode>(() =>
-    Appearance.getColorScheme() === "dark" ? "dark" : "light"
-  );
+  const [mode, setMode] = useState<ThemeMode>(DEFAULT_THEME_MODE);
+  const [hasExplicitThemePreference, setHasExplicitThemePreference] = useState(false);
   const [languageCode, setLanguageCodeState] = useState<LanguageCode>("en");
   const [loaded, setLoaded] = useState(false);
 
@@ -195,14 +195,22 @@ export function ParentThemeProvider({ children }: { children: React.ReactNode })
 
     (async () => {
       try {
-        const [savedMode, savedLanguageCode] = await Promise.all([
+        const [savedMode, savedThemePreference, savedLanguageCode] = await Promise.all([
           AsyncStorage.getItem(THEME_STORAGE_KEY),
+          AsyncStorage.getItem(THEME_PREFERENCE_STORAGE_KEY),
           AsyncStorage.getItem(LANGUAGE_STORAGE_KEY),
         ]);
         if (!mounted) return;
-        if (savedMode === "light" || savedMode === "dark") {
+
+        const hasSavedThemePreference = savedThemePreference === "1";
+        setHasExplicitThemePreference(hasSavedThemePreference);
+
+        if (hasSavedThemePreference && (savedMode === "light" || savedMode === "dark")) {
           setMode(savedMode);
+        } else {
+          setMode(DEFAULT_THEME_MODE);
         }
+
         if (savedLanguageCode === "en" || savedLanguageCode === "am" || savedLanguageCode === "om" || savedLanguageCode === "ti") {
           setLanguageCodeState(savedLanguageCode);
         }
@@ -223,18 +231,21 @@ export function ParentThemeProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     AsyncStorage.multiSet([
       [THEME_STORAGE_KEY, mode],
+      [THEME_PREFERENCE_STORAGE_KEY, hasExplicitThemePreference ? "1" : "0"],
       [LANGUAGE_STORAGE_KEY, languageCode],
     ]).catch(() => {});
     SystemUI.setBackgroundColorAsync(theme.colors.background).catch(() => {});
-  }, [languageCode, mode, theme.colors.background]);
+  }, [hasExplicitThemePreference, languageCode, mode, theme.colors.background]);
 
   const setThemeMode = useCallback((nextMode: ThemeMode) => {
     if (nextMode === "dark" || nextMode === "light") {
+      setHasExplicitThemePreference(true);
       setMode(nextMode);
     }
   }, []);
 
   const toggleTheme = useCallback(() => {
+    setHasExplicitThemePreference(true);
     setMode((current) => (current === "dark" ? "light" : "dark"));
   }, []);
 

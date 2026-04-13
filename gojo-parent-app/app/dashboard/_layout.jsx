@@ -4,7 +4,7 @@ import { Tabs, useRouter } from "expo-router";
 import * as NavigationBar from "expo-navigation-bar";
 import { ref, onValue, off, get } from "firebase/database";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import { Image, Text, TouchableOpacity, View, StyleSheet, Animated, Platform } from "react-native";
+import { Text, TouchableOpacity, View, StyleSheet, Animated, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { database } from "../../constants/firebaseConfig";
@@ -16,26 +16,28 @@ const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 export default function DashboardLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { colors, expoStatusBarStyle, navigationBarButtonStyle, amharic, oromo } = useParentTheme();
+  const { colors, expoStatusBarStyle, navigationBarButtonStyle, isDark, amharic, oromo } = useParentTheme();
 
   const tabColors = useMemo(
     () => ({
       text: colors.textStrong,
       background: colors.backgroundAlt,
       border: colors.border,
+      borderSoft: colors.borderSoft,
       muted: colors.mutedAlt,
       primary: colors.primary,
       soft: colors.primarySoft,
       tabBar: colors.tabBar,
       tabInactive: colors.tabInactive,
       danger: colors.danger,
-      tabGlass: colors.tabBarSurface,
-      tabGlassBorder: colors.tabBarBorder,
-      tabGlassHighlight: colors.tabBarHighlight,
-      tabGlassActive: colors.tabBarActive,
+      tabGlass: colors.tabBar,
+      tabGlassBorder: colors.border,
+      tabGlassHighlight: colors.borderSoft,
+      tabGlassActive: colors.primarySoft,
+      systemNavBar: isDark ? "#1A4E778F" : "#C6E7FF8F",
       white: colors.white,
     }),
-    [colors]
+    [colors, isDark]
   );
   const styles = useMemo(() => createStyles(tabColors), [tabColors]);
   const labels = useMemo(
@@ -70,7 +72,7 @@ export default function DashboardLayout() {
     (async () => {
       try {
         await NavigationBar.setPositionAsync("absolute");
-        await NavigationBar.setBackgroundColorAsync("#00000000");
+        await NavigationBar.setBackgroundColorAsync(tabColors.systemNavBar);
         await NavigationBar.setBorderColorAsync("#00000000");
         await NavigationBar.setButtonStyleAsync(navigationBarButtonStyle);
       } catch (error) {
@@ -88,7 +90,7 @@ export default function DashboardLayout() {
         } catch {}
       })();
     };
-  }, [navigationBarButtonStyle, tabColors.border, tabColors.tabBar]);
+  }, [navigationBarButtonStyle, tabColors.border, tabColors.systemNavBar, tabColors.tabBar]);
 
   const schoolAwarePath = useCallback(
     (subPath, key = schoolKey) => {
@@ -311,7 +313,7 @@ export default function DashboardLayout() {
   const HomeHeaderTitle = () => (
     <View style={styles.titleRow}>
       <Text style={styles.titleText}>Gojo</Text>
-      <Text style={styles.titleAccent}>Study</Text>
+      <Text style={styles.titleAccent}>Parent</Text>
     </View>
   );
 
@@ -576,7 +578,7 @@ const createStyles = (tabColors) => StyleSheet.create({
     borderColor: tabColors.tabGlassBorder,
     shadowColor: "#0F172A",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.045,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
     elevation: 2,
   },

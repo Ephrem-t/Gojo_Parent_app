@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Easing,
   ScrollView,
@@ -23,6 +22,7 @@ import { readCachedJsonRecord, writeCachedJson } from "../lib/dataCache";
 import { isInternetReachableNow } from "../lib/networkGuard";
 import { queryUserByChildInSchool } from "../lib/userHelpers";
 import AppImage from "../../components/ui/AppImage";
+import { ClassMarkScreenSkeleton } from "../../components/ui/AppSkeletons";
 import { useParentTheme } from "../../hooks/use-parent-theme";
 
 const makePalette = (colors, isDark) => ({
@@ -843,11 +843,7 @@ export default function ClassMark() {
   }, [courses, marksByCourse, selectedSemester, effectiveQuarter]);
 
   if (loading && !childUser) {
-    return (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={PALETTE.accent} />
-      </View>
-    );
+    return <ClassMarkScreenSkeleton />;
   }
 
   if (!children.length) {
